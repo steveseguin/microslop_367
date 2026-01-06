@@ -1,0 +1,29 @@
+{
+  "name": "officeninja",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "chart.js": "^4.5.1",
+    "docx": "^9.5.1",
+    "express": "^5.2.1",
+    "file-saver": "^2.0.5",
+    "fs-extra": "^11.3.3",
+    "handsontable": "^16.2.0",
+    "html2canvas": "^1.4.1",
+    "https": "^1.0.0",
+    "jspdf": "^4.0.0",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.11.0",
+    "pptxgenjs": "^4.0.1",
+    "quill": "^2.0.3",
+    "xlsx": "^0.18.5"
+  }
+}
