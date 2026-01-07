@@ -13820,19 +13820,8 @@ Unique Words: ${document.getElementById('statUniqueWords').textContent}`;
       showToast('Tour completed! Press Ctrl+Shift+P anytime for Command Palette.', 'success');
     }
 
-    // Show tour on first visit
-    document.addEventListener('DOMContentLoaded', function() {
-      const tourCompleted = localStorage.getItem('ninjaword_tour_completed');
-      if (!tourCompleted) {
-        setTimeout(() => {
-          if (confirm('Welcome to NinjaWord! Would you like a quick tour of the features?')) {
-            startTour();
-          } else {
-            localStorage.setItem('ninjaword_tour_completed', 'true');
-          }
-        }, 1000);
-      }
-    });
+    // Tour is now started from the welcome modal "Get Started" button
+    // No confirm dialog needed
 
     // ==================== MINI TOOLBAR ====================
     let miniToolbarEnabled = true;

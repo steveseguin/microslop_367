@@ -1,0 +1,15 @@
+# YOUR FEATURE LIST GOES HERE
+# ================================
+# The paste is not working in chat.
+# Please edit this file directly with your features.
+#
+# Run: nano /home/ubuntu/code/officeninja/features.txt
+#
+# Example format:
+# - Dark mode toggle
+# - Export to PDF
+# - Auto-save feature
+#
+# Add your features below this line:
+# --------------------------------
+

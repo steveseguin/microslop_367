@@ -11626,7 +11626,8 @@ for (let i = 1; i <= 10; i++) {
         steps.push('Error: ' + e.message);
       }
 
-      alert('Formula Evaluation:\n\n' + steps.join('\n'));
+      showToast('Formula evaluated - check console for steps', 'info');
+      console.log('Formula Evaluation Steps:', steps);
     }
 
     function checkErrors() {
@@ -11645,11 +11646,8 @@ for (let i = 1; i <= 10; i++) {
       if (errors.length === 0) {
         showToast('No formula errors found', 'success');
       } else {
-        let msg = 'Found ' + errors.length + ' error(s):\n\n';
-        errors.forEach(e => {
-          msg += e.cell + ': ' + e.formula + ' → ' + e.error + '\n';
-        });
-        alert(msg);
+        showToast('Found ' + errors.length + ' formula error(s). Check console for details.', 'warning');
+        console.log('Formula errors:', errors);
       }
     }
 
@@ -12051,7 +12049,8 @@ for (let i = 1; i <= 10; i++) {
         }
       });
 
-      alert('Preview:\n\n' + preview);
+      showToast('Cascade preview ready - check console', 'info');
+      console.log('Cascade Preview:', preview);
     }
 
     function applyCascadingDropdowns() {

@@ -7516,7 +7516,7 @@ Expenses: 80, 90, 85, 110</textarea>
     function distributeElements(direction) {
       const slide = slides[currentSlideIndex];
       if (!slide || slide.elements.length < 3) {
-        alert('Need at least 3 elements to distribute');
+        showToast('Need at least 3 elements to distribute', 'warning');
         return;
       }
 
