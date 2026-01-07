@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
   <meta name="theme-color" content="#217346">
   <meta name="description" content="NinjaCalc - Powerful spreadsheets with formulas, charts, pivot tables and data analysis">
-  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>NinjaCalc - Spreadsheet</title>
   <link rel="manifest" href="manifest.json">
@@ -4072,11 +4072,11 @@ for (let i = 1; i <= 10; i++) {
       <div class="modal-body">
         <div class="form-group">
           <label>Find:</label>
-          <input type="text" class="form-control" id="findInput" placeholder="Text to find..." onkeyup="if(event.key==='Enter')findInCells()">
+          <input type="text" class="form-control" id="modalFindInput" placeholder="Text to find..." onkeyup="if(event.key==='Enter')findFromModal()">
         </div>
         <div class="form-group">
           <label>Replace with:</label>
-          <input type="text" class="form-control" id="replaceInput" placeholder="Replace with...">
+          <input type="text" class="form-control" id="modalReplaceInput" placeholder="Replace with...">
         </div>
         <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
           <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
@@ -14221,9 +14221,16 @@ for (let i = 1; i <= 10; i++) {
     }
 
     function findInCells() {
-      const searchText = document.getElementById('findInput').value;
+      // Check both find bar and modal inputs
+      const modalInput = document.getElementById('modalFindInput');
+      const barInput = document.getElementById('findInput');
+      const searchText = (modalInput && modalInput.value) ? modalInput.value : (barInput ? barInput.value : '');
+
       if (!searchText) {
-        document.getElementById('findResults').innerHTML = '<span style="color: #666;">Enter text to search</span>';
+        const findResults = document.getElementById('findResults');
+        const findCount = document.getElementById('findCount');
+        if (findResults) findResults.innerHTML = '<span style="color: #666;">Enter text to search</span>';
+        if (findCount) findCount.textContent = '0 found';
         document.getElementById('findMatchList').style.display = 'none';
         return;
       }
@@ -14389,10 +14396,14 @@ for (let i = 1; i <= 10; i++) {
         return;
       }
 
-      const searchText = document.getElementById('findInput').value;
-      const replaceText = document.getElementById('replaceInput').value;
-      const matchCase = document.getElementById('findMatchCase').checked;
-      const wholeCell = document.getElementById('findWholeCell').checked;
+      const modalFindInput = document.getElementById('modalFindInput');
+      const barFindInput = document.getElementById('findInput');
+      const searchText = (modalFindInput && modalFindInput.value) ? modalFindInput.value : (barFindInput ? barFindInput.value : '');
+      const modalReplaceInput = document.getElementById('modalReplaceInput');
+      const barReplaceInput = document.getElementById('replaceInput');
+      const replaceText = (modalReplaceInput && modalReplaceInput.value) ? modalReplaceInput.value : (barReplaceInput ? barReplaceInput.value : '');
+      const matchCase = document.getElementById('findMatchCase')?.checked || false;
+      const wholeCell = document.getElementById('findWholeCell')?.checked || false;
 
       const match = findMatches[currentFindIndex];
       const cellId = match.cellId;
@@ -14439,10 +14450,14 @@ for (let i = 1; i <= 10; i++) {
         if (findMatches.length === 0) return;
       }
 
-      const searchText = document.getElementById('findInput').value;
-      const replaceText = document.getElementById('replaceInput').value;
-      const matchCase = document.getElementById('findMatchCase').checked;
-      const wholeCell = document.getElementById('findWholeCell').checked;
+      const modalFindInput = document.getElementById('modalFindInput');
+      const barFindInput = document.getElementById('findInput');
+      const searchText = (modalFindInput && modalFindInput.value) ? modalFindInput.value : (barFindInput ? barFindInput.value : '');
+      const modalReplaceInput = document.getElementById('modalReplaceInput');
+      const barReplaceInput = document.getElementById('replaceInput');
+      const replaceText = (modalReplaceInput && modalReplaceInput.value) ? modalReplaceInput.value : (barReplaceInput ? barReplaceInput.value : '');
+      const matchCase = document.getElementById('findMatchCase')?.checked || false;
+      const wholeCell = document.getElementById('findWholeCell')?.checked || false;
 
       let count = 0;
       const processedCells = new Set();
