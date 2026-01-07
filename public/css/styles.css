@@ -9,10 +9,89 @@
   --dark: #1e293b;
   --light: #f8fafc;
   --border: #e2e8f0;
+  --bg: #ffffff;
+  --bg-secondary: #f8fafc;
+  --text: #1e293b;
+  --text-secondary: #64748b;
   --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
   --radius: 8px;
   --transition: all 0.2s ease;
+}
+
+/* Dark Mode */
+[data-theme="dark"] {
+  --primary: #3b82f6;
+  --primary-dark: #2563eb;
+  --secondary: #94a3b8;
+  --dark: #f1f5f9;
+  --light: #1e293b;
+  --border: #334155;
+  --bg: #0f172a;
+  --bg-secondary: #1e293b;
+  --text: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+[data-theme="dark"] .app-card,
+[data-theme="dark"] .toolbar,
+[data-theme="dark"] .app-header,
+[data-theme="dark"] .sidebar,
+[data-theme="dark"] .modal,
+[data-theme="dark"] .dropdown-menu {
+  background: var(--bg-secondary);
+  color: var(--text);
+}
+
+[data-theme="dark"] .document,
+[data-theme="dark"] .slide-canvas,
+[data-theme="dark"] .spreadsheet-area {
+  background: var(--bg-secondary);
+  color: var(--text);
+}
+
+[data-theme="dark"] .form-control,
+[data-theme="dark"] .toolbar-select,
+[data-theme="dark"] .formula-input {
+  background: var(--bg);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+[data-theme="dark"] .btn-secondary {
+  background: var(--bg);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+[data-theme="dark"] .template-item,
+[data-theme="dark"] .animation-item {
+  background: var(--bg);
+}
+
+/* Theme Toggle Button */
+.theme-toggle {
+  background: transparent;
+  border: none;
+  padding: 0.5rem;
+  cursor: pointer;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  transition: var(--transition);
+}
+
+.theme-toggle:hover {
+  background: var(--light);
 }
 
 * {
@@ -802,9 +881,36 @@ body {
 }
 
 /* Responsive */
+@media (max-width: 1024px) {
+  .sidebar,
+  .ppt-sidebar {
+    width: 220px;
+  }
+
+  .slide-canvas {
+    width: 100%;
+    max-width: 720px;
+    height: auto;
+    aspect-ratio: 16/9;
+  }
+}
+
 @media (max-width: 768px) {
   .app-grid {
     grid-template-columns: 1fr;
+    padding: 1rem;
+    gap: 1rem;
+  }
+
+  .dashboard-header {
+    padding: 1.5rem 1rem;
+  }
+
+  .dashboard-header h1 {
+    font-size: 1.75rem;
+  }
+
+  .app-card {
     padding: 1.5rem;
   }
 
@@ -814,14 +920,191 @@ body {
     padding: 1rem;
   }
 
+  .document-area {
+    padding: 1rem;
+  }
+
   .sidebar,
   .slide-panel,
   .ppt-sidebar {
-    display: none;
+    position: fixed;
+    top: 0;
+    right: -100%;
+    height: 100vh;
+    z-index: 1000;
+    transition: right 0.3s ease;
+    width: 280px;
+  }
+
+  .sidebar.mobile-open,
+  .slide-panel.mobile-open,
+  .ppt-sidebar.mobile-open {
+    right: 0;
+  }
+
+  .slide-panel {
+    left: -100%;
+    right: auto;
+  }
+
+  .slide-panel.mobile-open {
+    left: 0;
+    right: auto;
   }
 
   .toolbar {
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0.5rem;
+    gap: 0.25rem;
+  }
+
+  .toolbar-group {
+    flex-shrink: 0;
+    padding: 0 0.25rem;
+  }
+
+  .toolbar-btn {
+    min-width: 36px;
+    height: 36px;
+    padding: 0.5rem;
+  }
+
+  .app-header {
+    flex-wrap: wrap;
+    padding: 0.5rem;
+    gap: 0.5rem;
+  }
+
+  .header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .header-actions .btn {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8rem;
+  }
+
+  .file-name {
+    width: 100%;
+    max-width: none;
+  }
+
+  .modal {
+    width: 95%;
+    max-height: 85vh;
+  }
+
+  .slide-editor {
+    padding: 0.5rem;
+  }
+
+  .slide-canvas {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16/9;
+    max-height: 50vh;
+  }
+
+  .formula-bar {
+    flex-wrap: wrap;
+  }
+
+  .formula-input {
+    width: 100%;
+    margin-top: 0.5rem;
+  }
+
+  .status-bar {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    font-size: 0.7rem;
+  }
+
+  .tab {
+    padding: 0.5rem 1rem;
+    font-size: 0.8rem;
+  }
+
+  /* Mobile Menu Toggle */
+  .mobile-menu-btn {
+    display: flex;
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1.25rem;
+  }
+
+  .mobile-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 999;
+    display: none;
+  }
+
+  .mobile-overlay.active {
+    display: block;
+  }
+}
+
+@media (max-width: 480px) {
+  .dashboard-header h1 {
+    font-size: 1.5rem;
+  }
+
+  .app-icon {
+    width: 60px;
+    height: 60px;
+    font-size: 2rem;
+  }
+
+  .feature-list {
+    display: none;
+  }
+
+  .toolbar-group {
+    border-right: none;
+  }
+
+  .presenter-view {
+    grid-template-columns: 1fr;
+  }
+
+  .toast-container {
+    left: 1rem;
+    right: 1rem;
+    bottom: 0.5rem;
+  }
+
+  .toast {
+    font-size: 0.85rem;
+    padding: 0.75rem 1rem;
+  }
+}
+
+/* Touch-friendly improvements */
+@media (hover: none) and (pointer: coarse) {
+  .toolbar-btn,
+  .btn,
+  .template-item,
+  .dropdown-item {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .dropdown-item {
+    padding: 0.75rem 1rem;
+  }
+
+  .slide-element {
+    min-width: 60px;
+    min-height: 44px;
   }
 }
 
