@@ -8,17 +8,10 @@
   const THEME_KEY = 'officeninja_theme';
 
   function initTheme() {
+    // Default to light mode - user must manually enable dark mode
     const savedTheme = localStorage.getItem(THEME_KEY);
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const theme = savedTheme || (prefersDark ? 'dark' : 'light');
+    const theme = savedTheme || 'light';
     setTheme(theme);
-
-    // Listen for system theme changes
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-      if (!localStorage.getItem(THEME_KEY)) {
-        setTheme(e.matches ? 'dark' : 'light');
-      }
-    });
   }
 
   function setTheme(theme) {

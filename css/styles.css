@@ -76,6 +76,49 @@
   background: var(--bg);
 }
 
+/* Dark Mode Toolbar Text */
+[data-theme="dark"] .toolbar-btn {
+  color: var(--text);
+}
+
+[data-theme="dark"] .toolbar-btn:hover {
+  background: var(--bg);
+}
+
+[data-theme="dark"] .toolbar-btn b,
+[data-theme="dark"] .toolbar-btn i,
+[data-theme="dark"] .toolbar-btn u,
+[data-theme="dark"] .toolbar-btn s,
+[data-theme="dark"] .toolbar-btn sub,
+[data-theme="dark"] .toolbar-btn sup,
+[data-theme="dark"] .toolbar-btn span {
+  color: inherit;
+}
+
+[data-theme="dark"] .style-btn {
+  color: var(--text);
+  background: var(--bg);
+  border-color: var(--border);
+}
+
+[data-theme="dark"] .style-btn:hover {
+  background: var(--bg-secondary);
+}
+
+[data-theme="dark"] .tab {
+  color: var(--text-secondary);
+}
+
+[data-theme="dark"] .tab:hover {
+  color: var(--text);
+  background: var(--bg-secondary);
+}
+
+[data-theme="dark"] .tab.active {
+  color: var(--primary);
+  background: var(--bg-secondary);
+}
+
 /* Theme Toggle Button */
 .theme-toggle {
   background: transparent;
