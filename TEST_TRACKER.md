@@ -1,8 +1,8 @@
 # OfficeNinja Test Tracker
 
 ## Test Progress
-- **Successful Tests:** 37
-- **Failed Tests:** 7
+- **Successful Tests:** 47
+- **Failed Tests:** 8
 - **Target:** 1000 consecutive successful tests
 
 ## Test Categories
@@ -62,6 +62,17 @@
 ### NinjaSlides Tests
 | # | Test | Status | Notes |
 |---|------|--------|-------|
+| 45 | Page loads | ✅ | Presentation loads with slide panel, canvas, properties |
+| 46 | Title element selection | ✅ | Blue border, position/size shown in properties |
+| 47 | Title placeholder text entry | ❌ | **BUG: Typing in title placeholder doesn't update text** |
+| 48 | Text tool | ✅ | Creates editable text box on slide |
+| 49 | Text entry in text box | ✅ | Text inserted at cursor position |
+| 50 | Add new slide | ✅ | New blank slide added, counter updates |
+| 51 | View tab | ✅ | Extensive view options available |
+| 52 | Dark mode toggle | ✅ | Theme switches, good UI contrast |
+| 53 | Dark mode readability | ✅ | Light text on dark UI, white canvas |
+| 54 | Presenter view | ✅ | Timer, next slide preview, speaker notes, navigation |
+| 55 | Presenter view exit | ✅ | Exit button works |
 
 ### General/PWA Tests
 | # | Test | Status | Notes |
