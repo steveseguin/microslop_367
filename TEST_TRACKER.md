@@ -1,8 +1,8 @@
 # OfficeNinja Test Tracker
 
 ## Test Progress
-- **Successful Tests:** 47
-- **Failed Tests:** 8
+- **Successful Tests:** 48
+- **Failed Tests:** 11
 - **Target:** 1000 consecutive successful tests
 
 ## Test Categories
@@ -36,7 +36,7 @@
 | 24 | Revision history | ✅ | Shows saved versions |
 | 25 | View tab | ✅ | Extensive view options |
 | 26 | Focus mode | ✅ | Dims UI, shows exit button |
-| 27 | Light mode readability | ✅ | Good contrast throughout |
+| 27 | Light mode readability | ❌ | **BUG: Gray text on white paper - should be black text** |
 | 28 | Dark mode readability | ❌ | **BUG: Light gray text on white paper - very hard to read** |
 | 29 | Long content handling | ✅ | Page extends vertically, no pagination (design choice) |
 | 30 | Dark mode button alignment | ✅ | Properly centered horizontally/vertically in toolbar |
@@ -77,6 +77,10 @@
 ### General/PWA Tests
 | # | Test | Status | Notes |
 |---|------|--------|-------|
+| 56 | NinjaWord light mode text color | ❌ | **BUG: Gray text on white - should be black** |
+| 57 | Inline spell check highlighting | ✅ | Misspelled words underlined in red |
+| 58 | Right-click context menu | ✅ | Cut, Copy, Paste, formatting options |
+| 59 | Header button heights | ❌ | **BUG: File button shorter than other header buttons**
 
 ---
 ## Detailed Test Log

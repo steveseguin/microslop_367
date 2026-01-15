@@ -421,6 +421,10 @@ body {
   color: white;
 }
 
+.mobile-menu-btn {
+  display: none;
+}
+
 /* Word Specific */
 .word-container {
   flex: 1;
@@ -435,6 +439,7 @@ body {
   overflow: auto;
   display: flex;
   justify-content: center;
+  align-items: flex-start;
 }
 
 .document {
@@ -939,6 +944,26 @@ body {
 }
 
 @media (max-width: 768px) {
+  .quick-access-toolbar,
+  .tab-container,
+  .toolbar,
+  .header-actions {
+    display: none;
+  }
+
+  .app-container.mobile-open .quick-access-toolbar,
+  .app-container.mobile-open .tab-container,
+  .app-container.mobile-open .toolbar,
+  .app-container.mobile-open .header-actions {
+    display: flex;
+  }
+
+  .quick-access-toolbar {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
   .app-grid {
     grid-template-columns: 1fr;
     padding: 1rem;
@@ -1017,12 +1042,23 @@ body {
     flex-wrap: wrap;
     padding: 0.5rem;
     gap: 0.5rem;
+    align-items: center;
+  }
+
+  .app-logo {
+    order: 1;
+  }
+
+  .mobile-menu-btn {
+    order: 2;
+    margin-left: auto;
   }
 
   .header-actions {
     width: 100%;
     flex-wrap: wrap;
     justify-content: flex-start;
+    order: 4;
   }
 
   .header-actions .btn {
@@ -1033,6 +1069,7 @@ body {
   .file-name {
     width: 100%;
     max-width: none;
+    order: 3;
   }
 
   .modal {

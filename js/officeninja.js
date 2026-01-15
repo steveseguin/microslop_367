@@ -367,7 +367,7 @@
   }
 
   function closeMobileMenus() {
-    document.querySelectorAll('.sidebar, .slide-panel, .ppt-sidebar').forEach(el => {
+    document.querySelectorAll('.sidebar, .slide-panel, .ppt-sidebar, .app-container').forEach(el => {
       el.classList.remove('mobile-open');
     });
     document.querySelector('.mobile-overlay')?.classList.remove('active');
