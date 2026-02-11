@@ -185,6 +185,17 @@ body {
   width: 100%;
 }
 
+.dashboard-footer {
+  text-align: center;
+  padding: 2rem;
+  color: var(--secondary);
+}
+
+.dashboard-footer .footer-sub {
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
 .app-card {
   background: white;
   border-radius: var(--radius);
