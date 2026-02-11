@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
   <meta name="theme-color" content="#2563eb">
-  <meta name="description" content="OfficeNinja - A free, modern, browser-based office suite with Word, Excel, and PowerPoint alternatives">
+  <meta name="description" content="OfficeNinja - Free browser office suite. No account. No telemetry. No cloud. Your documents stay on your machine.">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>OfficeNinja - Modern Office Suite</title>
+  <title>OfficeNinja - Office suite. No strings attached.</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="css/styles.css?v=11">
@@ -29,7 +29,7 @@
       gap: 0.5rem;
     }
     .feature-list li::before {
-      content: '✓';
+      content: '\2713';
       color: var(--success);
       font-weight: bold;
     }
@@ -41,6 +41,27 @@
       margin-top: 1rem;
       display: inline-block;
     }
+    .why-list {
+      text-align: left;
+      margin: 1.5rem auto 0;
+      padding: 0;
+      max-width: 420px;
+      list-style: none;
+    }
+    .why-list li {
+      margin-bottom: 0.6rem;
+      font-size: 0.95rem;
+      opacity: 0.9;
+      padding-left: 1.5rem;
+      position: relative;
+    }
+    .why-list li::before {
+      content: '\2717';
+      position: absolute;
+      left: 0;
+      color: #ef4444;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
@@ -48,15 +69,21 @@
     <header class="dashboard-header">
       <div class="ninja-logo">🥷</div>
       <h1>OfficeNinja</h1>
-      <p>A modern, browser-based office suite with all the features you need</p>
-      <span class="badge">Free & Open Source</span>
+      <p>Office suite. No strings attached.</p>
+      <ul class="why-list">
+        <li>No account required. Ever.</li>
+        <li>No telemetry. We don't know you exist.</li>
+        <li>No cloud sync. Your files stay on your machine.</li>
+        <li>No subscription. It's free. The whole thing.</li>
+      </ul>
+      <span class="badge">Works in your browser. That's it.</span>
     </header>
 
     <div class="app-grid">
       <a href="word.html" class="app-card">
         <div class="app-icon word">W</div>
         <h2>NinjaWord</h2>
-        <p>Create beautiful documents with ease</p>
+        <p>Write documents without a corporate surveillance apparatus</p>
         <ul class="feature-list">
           <li>Rich text formatting</li>
           <li>Spell & grammar check</li>
@@ -75,7 +102,7 @@
       <a href="excel.html" class="app-card">
         <div class="app-icon excel">X</div>
         <h2>NinjaCalc</h2>
-        <p>Powerful spreadsheets and data analysis</p>
+        <p>Spreadsheets that don't phone home</p>
         <ul class="feature-list">
           <li>Formulas & functions (SUM, VLOOKUP, IF...)</li>
           <li>Pivot tables</li>
@@ -94,7 +121,7 @@
       <a href="powerpoint.html" class="app-card">
         <div class="app-icon powerpoint">P</div>
         <h2>NinjaSlides</h2>
-        <p>Create stunning presentations</p>
+        <p>Presentations. No AI "suggestions." No upsell.</p>
         <ul class="feature-list">
           <li>Slide creation & templates</li>
           <li>Animations & transitions</li>
@@ -112,8 +139,8 @@
     </div>
 
     <footer class="dashboard-footer">
-      <p>Built with modern web technologies. Works in any browser.</p>
-      <p class="footer-sub">Secure HTTPS connection</p>
+      <p>Runs entirely in your browser. Nothing to install. Nothing uploaded. Nothing tracked.</p>
+      <p class="footer-sub">HTTPS &middot; Open source &middot; Your data is your data</p>
     </footer>
   </div>
 </body>
