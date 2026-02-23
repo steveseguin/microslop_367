@@ -138,8 +138,8 @@ test.describe('OfficeNinja Suite E2E', () => {
     await expect(page.locator('text=Exit Presenter View')).toBeVisible();
     
     // Type a note
-    await page.locator('textarea').fill('My speaker notes');
-    await expect(page.locator('textarea')).toHaveValue('My speaker notes');
+    await page.locator('textarea[placeholder="Click to add speaker notes..."]').fill('My speaker notes');
+    await expect(page.locator('textarea[placeholder="Click to add speaker notes..."]')).toHaveValue('My speaker notes');
     
     // Exit presenter view
     await page.click('button:has-text("Exit Presenter View")');

@@ -22,7 +22,7 @@ interface Slide {
 
 export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps) {
   const [searchParams] = useSearchParams();
-  const docId = searchParams.get('id') || `powerpoint-${Date.now()}`;
+  const [docId] = useState(() => searchParams.get('id') || `powerpoint-${Date.now()}`);
 
   const [fileName, setFileName] = useState('Untitled Presentation');
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -90,21 +90,23 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     let timeout: any;
     const saveState = () => {
        const currentData = fabricCanvas.toJSON();
-       const updatedSlides = slides.map(s => s.id === currentSlideId ? { ...s, data: currentData } : s);
        
-       // Update slides state without triggering re-render of canvas loading loop
-       // In a real app we'd decouple the canvas update from the state update more cleanly
-       
-       setSaveStatus('Saving...');
-       clearTimeout(timeout);
-       timeout = setTimeout(() => {
-          saveDocument(docId, fileName, 'powerpoint', { slides: updatedSlides })
-            .then(() => setSaveStatus('Saved'))
-            .catch(err => {
-              console.error("Failed to save", err);
-              setSaveStatus('Error saving');
-            });
-       }, 1000);
+       setSlides(prev => {
+         const updatedSlides = prev.map(s => s.id === currentSlideId ? { ...s, data: currentData } : s);
+         
+         setSaveStatus('Saving...');
+         clearTimeout(timeout);
+         timeout = setTimeout(() => {
+            saveDocument(docId, fileName, 'powerpoint', { slides: updatedSlides })
+              .then(() => setSaveStatus('Saved'))
+              .catch(err => {
+                console.error("Failed to save", err);
+                setSaveStatus('Error saving');
+              });
+         }, 1000);
+
+         return updatedSlides;
+       });
     };
 
     fabricCanvas.on('object:modified', saveState);
@@ -117,7 +119,19 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
        fabricCanvas.off('object:removed', saveState);
        clearTimeout(timeout);
     };
-  }, [fabricCanvas, isLoaded, currentSlideId, slides, fileName, docId]);
+  }, [fabricCanvas, isLoaded, currentSlideId, fileName, docId]);
+
+  // General auto-save for when slides array changes (e.g. new slide, notes updated)
+  useEffect(() => {
+    if (!isLoaded) return;
+    const timeout = setTimeout(() => {
+      setSaveStatus('Saving...');
+      saveDocument(docId, fileName, 'powerpoint', { slides })
+        .then(() => setSaveStatus('Saved'))
+        .catch(console.error);
+    }, 1500);
+    return () => clearTimeout(timeout);
+  }, [slides, fileName, docId, isLoaded]);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -468,41 +482,18 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         </ToolbarGroup>
       </Toolbar>
 
-      <div className="workspace">
-        {isPresenterView ? (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#111', color: '#fff', padding: '1rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333', paddingBottom: '1rem', marginBottom: '1rem' }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{formatTime(elapsedTime)}</div>
-              <button className="btn btn-secondary" style={{ background: '#333', color: '#fff', border: 'none' }} onClick={togglePresenterView}>Exit Presenter View</button>
-            </div>
-            <div style={{ display: 'flex', flex: 1, gap: '1rem', overflow: 'hidden' }}>
-              <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div style={{ background: '#222', padding: '1rem', borderRadius: '8px' }}>
-                  <h3 style={{ margin: '0 0 0.5rem 0', color: '#aaa', fontSize: '0.9rem' }}>Current Slide</h3>
-                  <div className="canvas-wrapper" style={{ transformOrigin: 'top left', transform: 'scale(0.8)' }}>
-                    <canvas ref={canvasRef} />
-                  </div>
-                </div>
-              </div>
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div style={{ background: '#222', padding: '1rem', borderRadius: '8px', flex: 1, display: 'flex', flexDirection: 'column' }}>
-                  <h3 style={{ margin: '0 0 0.5rem 0', color: '#aaa', fontSize: '0.9rem' }}>Speaker Notes</h3>
-                  <textarea 
-                    value={slides.find(s => s.id === currentSlideId)?.notes || ''}
-                    onChange={(e) => updateNotes(e.target.value)}
-                    style={{ flex: 1, background: '#111', color: '#fff', border: '1px solid #333', borderRadius: '4px', padding: '1rem', fontSize: '1.1rem', resize: 'none' }}
-                    placeholder="Click to add speaker notes..."
-                  />
-                </div>
-                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', padding: '1rem', background: '#222', borderRadius: '8px' }}>
-                  <button className="btn btn-primary" onClick={() => switchSlide(slides[Math.max(0, slides.findIndex(s => s.id === currentSlideId) - 1)].id)}>Previous</button>
-                  <button className="btn btn-primary" onClick={() => switchSlide(slides[Math.min(slides.length - 1, slides.findIndex(s => s.id === currentSlideId) + 1)].id)}>Next Slide</button>
-                </div>
-              </div>
-            </div>
+      <div className="workspace" style={isPresenterView ? { background: '#111', color: '#fff', flexDirection: 'column' } : {}}>
+        
+        {isPresenterView && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333', padding: '1rem', flexShrink: 0 }}>
+            <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{formatTime(elapsedTime)}</div>
+            <button className="btn btn-secondary" style={{ background: '#333', color: '#fff', border: 'none' }} onClick={togglePresenterView}>Exit Presenter View</button>
           </div>
-        ) : (
-          <>
+        )}
+
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+          
+          {!isPresenterView && (
             <div className="slide-panel" style={{ width: '200px', background: 'var(--bg)', borderRight: '1px solid var(--border)', padding: '1rem', overflowY: 'auto' }}>
               {slides.map((slide, index) => (
                 <div 
@@ -529,15 +520,43 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
                 </div>
               ))}
             </div>
-            <div className="presentation-container" style={isFullscreen ? {
+          )}
+
+          <div className="presentation-container" style={{
+            flex: isPresenterView ? 2 : 1,
+            ...(isFullscreen ? {
               position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999, background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center'
-            } : {}}>
-              <div className="canvas-wrapper" style={isFullscreen ? { transform: 'scale(1.5)', transition: 'transform 0.3s' } : {}}>
-                <canvas ref={canvasRef} />
+            } : isPresenterView ? {
+              background: '#222', margin: '1rem', borderRadius: '8px', padding: '1rem', display: 'flex', flexDirection: 'column'
+            } : {})
+          }}>
+            {isPresenterView && <h3 style={{ margin: '0 0 0.5rem 0', color: '#aaa', fontSize: '0.9rem' }}>Current Slide</h3>}
+            <div className="canvas-wrapper" style={{
+              ...(isFullscreen ? { transform: 'scale(1.5)', transition: 'transform 0.3s' } : isPresenterView ? { transformOrigin: 'top left', transform: 'scale(0.8)' } : {})
+            }}>
+              <canvas ref={canvasRef} />
+            </div>
+          </div>
+
+          {isPresenterView && (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1rem', paddingLeft: 0 }}>
+              <div style={{ background: '#222', padding: '1rem', borderRadius: '8px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <h3 style={{ margin: '0 0 0.5rem 0', color: '#aaa', fontSize: '0.9rem' }}>Speaker Notes</h3>
+                <textarea 
+                  value={slides.find(s => s.id === currentSlideId)?.notes || ''}
+                  onChange={(e) => updateNotes(e.target.value)}
+                  style={{ flex: 1, background: '#111', color: '#fff', border: '1px solid #333', borderRadius: '4px', padding: '1rem', fontSize: '1.1rem', resize: 'none', outline: 'none' }}
+                  placeholder="Click to add speaker notes..."
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', padding: '1rem', background: '#222', borderRadius: '8px' }}>
+                <button className="btn btn-primary" onClick={() => switchSlide(slides[Math.max(0, slides.findIndex(s => s.id === currentSlideId) - 1)].id)}>Previous</button>
+                <button className="btn btn-primary" onClick={() => switchSlide(slides[Math.min(slides.length - 1, slides.findIndex(s => s.id === currentSlideId) + 1)].id)}>Next Slide</button>
               </div>
             </div>
-          </>
-        )}
+          )}
+
+        </div>
       </div>
       
       <StatusBar 

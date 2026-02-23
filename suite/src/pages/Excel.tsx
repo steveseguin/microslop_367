@@ -34,7 +34,7 @@ interface ExcelProps {
 
 export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
   const [searchParams] = useSearchParams();
-  const docId = searchParams.get('id') || `excel-${Date.now()}`;
+  const [docId] = useState(() => searchParams.get('id') || `excel-${Date.now()}`);
 
   const [fileName, setFileName] = useState('Untitled Spreadsheet');
   const [data, setData] = useState<any[]>([{ 

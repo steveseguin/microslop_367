@@ -29,7 +29,7 @@ interface WordProps {
 
 export default function Word({ toggleTheme, isDarkMode }: WordProps) {
   const [searchParams] = useSearchParams();
-  const docId = searchParams.get('id') || `word-${Date.now()}`;
+  const [docId] = useState(() => searchParams.get('id') || `word-${Date.now()}`);
   
   const [fileName, setFileName] = useState('Untitled Document');
   const [isDictating, setIsDictating] = useState(false);
