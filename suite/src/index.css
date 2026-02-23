@@ -297,6 +297,18 @@ body {
   outline: none;
   min-height: 100%;
 }
+.ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 1rem 0;
+  border: 2px solid transparent;
+  transition: border-color 0.2s;
+  cursor: pointer;
+}
+.ProseMirror img.ProseMirror-selectednode {
+  outline: 3px solid var(--primary);
+}
 .ProseMirror > * + * {
   margin-top: 0.75em;
 }
@@ -342,6 +354,10 @@ body {
 .canvas-wrapper {
   background: white;
   box-shadow: var(--shadow-lg);
+}
+
+.slide-thumbnail:hover .delete-slide-btn {
+  opacity: 1 !important;
 }
 
 /* Mobile Responsiveness for Toolbar */

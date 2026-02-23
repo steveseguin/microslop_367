@@ -12,8 +12,9 @@ import {
   Bold, Italic, Strikethrough, List, ListOrdered, 
   AlignLeft, AlignCenter, AlignRight, AlignJustify,
   Heading1, Heading2, Image as ImageIcon, Table as TableIcon,
-  Undo, Redo, Download, Upload, Mic, Volume2, Square
+  Undo, Redo, Download, Upload, Mic, Volume2, Square, Maximize
 } from 'lucide-react';
+import ImageResize from 'tiptap-extension-resize-image';
 import * as docx from 'docx';
 import * as mammoth from 'mammoth';
 import { saveAs } from 'file-saver';
@@ -51,7 +52,7 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
       TableRow,
       TableHeader,
       TableCell,
-      Image,
+      ImageResize,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
     ],
     content: '<h2>Welcome to NinjaWord</h2><p>Start typing your document here...</p>',
@@ -208,7 +209,14 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
       return;
     }
 
-    const textToSpeak = editor.getText();
+    const { from, to } = editor.state.selection;
+    let textToSpeak = editor.state.doc.textBetween(from, to, ' ');
+    
+    // If no selection, read everything
+    if (!textToSpeak || textToSpeak.trim().length === 0) {
+      textToSpeak = editor.getText();
+    }
+
     if (!textToSpeak) return;
 
     const utterance = new SpeechSynthesisUtterance(textToSpeak);
@@ -227,6 +235,7 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
         setFileName={setFileName}
         toggleTheme={toggleTheme}
         isDarkMode={isDarkMode}
+        saveStatus={saveStatus}
         actions={
           <>
             <input 

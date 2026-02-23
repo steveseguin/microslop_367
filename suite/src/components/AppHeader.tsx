@@ -9,15 +9,24 @@ interface AppHeaderProps {
   actions?: React.ReactNode;
   toggleTheme?: () => void;
   isDarkMode?: boolean;
+  saveStatus?: string;
 }
 
-export function AppHeader({ appName, fileName, setFileName, actions, toggleTheme, isDarkMode }: AppHeaderProps) {
+export function AppHeader({ appName, fileName, setFileName, actions, toggleTheme, isDarkMode, saveStatus }: AppHeaderProps) {
   const iconLetter = appName === 'NinjaWord' ? 'W' : appName === 'NinjaCalc' ? 'X' : 'P';
   const iconClass = appName === 'NinjaWord' ? 'word' : appName === 'NinjaCalc' ? 'excel' : 'powerpoint';
 
+  const handleHomeClick = (e: React.MouseEvent) => {
+    if (saveStatus === 'Saving...') {
+      if (!window.confirm("Your changes are still saving. Are you sure you want to go back to the dashboard?")) {
+        e.preventDefault();
+      }
+    }
+  };
+
   return (
     <header className="app-header">
-      <Link to="/" className="app-logo">
+      <Link to="/" className="app-logo" onClick={handleHomeClick}>
         <div className={`app-logo-icon ${iconClass}`}>{iconLetter}</div>
         <span className="app-title">{appName}</span>
       </Link>

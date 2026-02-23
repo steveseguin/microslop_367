@@ -54,11 +54,11 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
   const workbookRef = useRef<any>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   
-  const [showChart, setShowChart] = useState(false);
-  const [chartData, setChartData] = useState<any>(null);
+    const [showChart, setShowChart] = useState(false);
+    const [chartData, setChartData] = useState<any>(null);
+    const [formulaValue, setFormulaBarValue] = useState('');
   
-  const [chartPos, setChartPos] = useState({ x: 20, y: 20 });
-  const [isDragging, setIsDragging] = useState(false);
+    const [chartPos, setChartPos] = useState({ x: 20, y: 20 });  const [isDragging, setIsDragging] = useState(false);
   const dragStartPos = useRef({ x: 0, y: 0 });
 
   const handleDragStart = (e: React.MouseEvent) => {
@@ -147,6 +147,11 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!window.confirm("Importing a new file will replace all current sheets and data. Continue?")) {
+      e.target.value = '';
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (e) => {
         const data = e.target?.result;
@@ -221,6 +226,7 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
         setFileName={setFileName}
         toggleTheme={toggleTheme}
         isDarkMode={isDarkMode}
+        saveStatus={saveStatus}
         actions={
           <>
             <input 
@@ -242,6 +248,20 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
           </>
         }
       />
+
+      <div className="formula-bar" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', background: 'white', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ fontWeight: 'bold', color: 'var(--primary)', minWidth: '30px' }}>fx</div>
+        <input 
+          type="text" 
+          placeholder="Enter formula or value..."
+          value={formulaValue}
+          onChange={(e) => {
+            setFormulaBarValue(e.target.value);
+            // In a real app we'd trigger a cell update here
+          }}
+          style={{ flex: 1, padding: '0.4rem', border: '1px solid var(--border)', borderRadius: '4px', fontFamily: 'monospace' }} 
+        />
+      </div>
 
       <div 
         className="spreadsheet-container" 

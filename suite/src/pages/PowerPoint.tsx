@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import * as fabric from 'fabric';
-import { Download, Type, Square, Circle, Trash2, Plus, Play, MonitorPlay, Upload } from 'lucide-react';
+import { Download, Type, Square, Circle, Trash2, Plus, Play, MonitorPlay, Upload, Palette, Eraser } from 'lucide-react';
 import pptxgen from "pptxgenjs";
 import JSZip from 'jszip';
 import { AppHeader } from '../components/AppHeader';
@@ -36,6 +36,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   const [elapsedTime, setElapsedTime] = useState(0);
   const [saveStatus, setSaveStatus] = useState('Saved');
   const [isLoaded, setIsLoaded] = useState(false);
+  const [currentColor, setCurrentColor] = useState('#1a73e8');
 
   useEffect(() => {
     if (!searchParams.get('id')) {
@@ -97,7 +98,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     let timeout: any;
     const saveState = () => {
        const currentData = fabricCanvas.toJSON();
-       const thumbnail = fabricCanvas.toDataURL({ format: 'png', multiplier: 0.1 });
+       const thumbnail = fabricCanvas.toDataURL({ format: 'png', multiplier: 0.3 });
        
        setSlides(prev => {
          const updatedSlides = prev.map(s => s.id === currentSlideId ? { ...s, data: currentData, thumbnail } : s);
@@ -269,6 +270,31 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       fabricCanvas.discardActiveObject();
       fabricCanvas.requestRenderAll();
     }
+  };
+
+  const deleteSlide = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (slides.length <= 1) {
+      alert("A presentation must have at least one slide.");
+      return;
+    }
+    if (window.confirm("Delete this slide?")) {
+      const newSlides = slides.filter(s => s.id !== id);
+      setSlides(newSlides);
+      if (currentSlideId === id) {
+        setCurrentSlideId(newSlides[0].id);
+      }
+    }
+  };
+
+  const applyColor = (color: string) => {
+    setCurrentColor(color);
+    if (!fabricCanvas) return;
+    const activeObjects = fabricCanvas.getActiveObjects();
+    activeObjects.forEach(obj => {
+      obj.set('fill', color);
+    });
+    fabricCanvas.renderAll();
   };
 
   useEffect(() => {
@@ -453,6 +479,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         setFileName={setFileName}
         toggleTheme={toggleTheme}
         isDarkMode={isDarkMode}
+        saveStatus={saveStatus}
         actions={
           <>
             <input 
@@ -482,7 +509,16 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
           <ToolbarButton icon={Circle} onClick={addCircle} title="Add Circle" />
         </ToolbarGroup>
         <ToolbarGroup>
-          <ToolbarButton icon={Trash2} onClick={deleteSelected} isDisabled={!hasSelection} title="Delete Selected" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0 0.5rem' }}>
+            <Palette size={18} color={currentColor} />
+            <input 
+              type="color" 
+              value={currentColor} 
+              onChange={(e) => applyColor(e.target.value)} 
+              style={{ width: '30px', height: '30px', border: 'none', background: 'transparent', cursor: 'pointer' }}
+            />
+          </div>
+          <ToolbarButton icon={Trash2} onClick={deleteSelected} isDisabled={!hasSelection} title="Delete Selected Object" />
         </ToolbarGroup>
         <ToolbarGroup>
           <ToolbarButton icon={Play} onClick={toggleFullscreen} title="Present Fullscreen" />
@@ -525,6 +561,13 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
                   {slide.thumbnail && (
                     <img src={slide.thumbnail} alt={`Slide ${index + 1}`} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                   )}
+                  <button 
+                    onClick={(e) => deleteSlide(slide.id, e)}
+                    style={{ position: 'absolute', top: '4px', right: '4px', background: 'rgba(239, 68, 68, 0.8)', border: 'none', color: 'white', borderRadius: '4px', padding: '2px', cursor: 'pointer', opacity: currentSlideId === slide.id ? 1 : 0 }}
+                    className="delete-slide-btn"
+                  >
+                    <X size={12} />
+                  </button>
                   <div className="slide-number" style={{ position: 'absolute', bottom: '4px', right: '4px', background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: '0.7rem', padding: '2px 6px', borderRadius: '3px' }}>
                     {index + 1}
                   </div>
