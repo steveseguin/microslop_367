@@ -6,13 +6,12 @@ import { Table as TableExtension } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
-import { Image } from '@tiptap/extension-image';
 import { TextAlign } from '@tiptap/extension-text-align';
 import { 
   Bold, Italic, Strikethrough, List, ListOrdered, 
   AlignLeft, AlignCenter, AlignRight, AlignJustify,
   Heading1, Heading2, Image as ImageIcon, Table as TableIcon,
-  Undo, Redo, Download, Upload, Mic, Volume2, Square, Maximize
+  Undo, Redo, Download, Upload, Mic, Volume2, Square, Search, X
 } from 'lucide-react';
 import ImageResize from 'tiptap-extension-resize-image';
 import * as docx from 'docx';
@@ -37,7 +36,40 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [saveStatus, setSaveStatus] = useState('Saved');
   const [isLoaded, setIsLoaded] = useState(false);
+  const [showFindReplace, setShowFindReplace] = useState(false);
+  const [findText, setFindText] = useState('');
+  const [replaceText, setReplaceText] = useState('');
   const recognitionRef = useRef<any>(null);
+
+  const handleFindReplace = () => {
+    if (!editor || !findText) return;
+    const { state, dispatch } = editor.view;
+    let { tr } = state;
+    
+    // Simple naive text replace for all occurrences in document
+    let hasChanges = false;
+    state.doc.descendants((node, pos) => {
+      if (node.isText && node.text) {
+        let index = node.text.indexOf(findText);
+        let offset = 0;
+        while (index !== -1) {
+          const start = pos + Math.max(0, index) + offset;
+          const end = start + findText.length;
+          tr = tr.replaceWith(start, end, state.schema.text(replaceText));
+          hasChanges = true;
+          offset += replaceText.length - findText.length;
+          index = node.text.indexOf(findText, index + findText.length);
+        }
+      }
+    });
+    
+    if (hasChanges) {
+      dispatch(tr);
+      alert(`Replaced all occurrences of "${findText}" with "${replaceText}".`);
+    } else {
+      alert(`"${findText}" not found.`);
+    }
+  };
 
   useEffect(() => {
     if (!searchParams.get('id')) {
@@ -290,13 +322,36 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
         </ToolbarGroup>
 
         <ToolbarGroup>
+          <ToolbarButton icon={Search} onClick={() => setShowFindReplace(!showFindReplace)} isActive={showFindReplace} title="Find and Replace" />
           <ToolbarButton icon={TableIcon} onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} title="Insert Table" />
           <ToolbarButton icon={ImageIcon} onClick={() => {
             const url = window.prompt('URL');
+            // @ts-ignore
             if (url) editor.chain().focus().setImage({ src: url }).run();
           }} title="Insert Image" />
         </ToolbarGroup>
       </Toolbar>
+
+      {showFindReplace && (
+        <div style={{ background: 'var(--light)', padding: '0.5rem 1rem', borderBottom: '1px solid var(--border)', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <input 
+            type="text" 
+            placeholder="Find..." 
+            value={findText} 
+            onChange={e => setFindText(e.target.value)}
+            style={{ padding: '0.4rem', borderRadius: '4px', border: '1px solid var(--border)' }}
+          />
+          <input 
+            type="text" 
+            placeholder="Replace with..." 
+            value={replaceText} 
+            onChange={e => setReplaceText(e.target.value)}
+            style={{ padding: '0.4rem', borderRadius: '4px', border: '1px solid var(--border)' }}
+          />
+          <button className="btn btn-primary" onClick={handleFindReplace}>Replace All</button>
+          <button className="btn btn-secondary" onClick={() => setShowFindReplace(false)} style={{ padding: '0.2rem' }}><X size={18} /></button>
+        </div>
+      )}
 
       <div className="workspace">
         <div className="workspace-center" style={{ background: '#f0f0f0', overflowY: 'auto' }}>

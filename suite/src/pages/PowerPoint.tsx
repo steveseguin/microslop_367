@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import * as fabric from 'fabric';
-import { Download, Type, Square, Circle, Trash2, Plus, Play, MonitorPlay, Upload, Palette, Eraser } from 'lucide-react';
+import { Download, Type, Square, Circle, Trash2, Plus, Play, MonitorPlay, Upload, Palette, X, Image as ImageIcon, BringToFront, SendToBack, Undo, Redo } from 'lucide-react';
 import pptxgen from "pptxgenjs";
 import JSZip from 'jszip';
 import { AppHeader } from '../components/AppHeader';
@@ -37,6 +37,89 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   const [saveStatus, setSaveStatus] = useState('Saved');
   const [isLoaded, setIsLoaded] = useState(false);
   const [currentColor, setCurrentColor] = useState('#1a73e8');
+  
+  const [history, setHistory] = useState<any[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const isHistoryUpdate = useRef(false);
+
+  const saveHistory = () => {
+    if (isHistoryUpdate.current || !fabricCanvas) return;
+    const json = fabricCanvas.toJSON();
+    setHistory(prev => {
+      const newHistory = prev.slice(0, historyIndex + 1);
+      newHistory.push(json);
+      if (newHistory.length > 20) newHistory.shift();
+      return newHistory;
+    });
+    setHistoryIndex(prev => Math.min(prev + 1, 19));
+  };
+
+  const undo = () => {
+    if (historyIndex > 0 && fabricCanvas) {
+      isHistoryUpdate.current = true;
+      const newIndex = historyIndex - 1;
+      setHistoryIndex(newIndex);
+      fabricCanvas.loadFromJSON(history[newIndex], () => {
+        fabricCanvas.renderAll();
+        isHistoryUpdate.current = false;
+        // manually trigger slide thumbnail save but we can't call saveState here directly
+        // because it's defined inside useEffect. So we will rely on the general auto-save
+      });
+    }
+  };
+
+  const redo = () => {
+    if (historyIndex < history.length - 1 && fabricCanvas) {
+      isHistoryUpdate.current = true;
+      const newIndex = historyIndex + 1;
+      setHistoryIndex(newIndex);
+      fabricCanvas.loadFromJSON(history[newIndex], () => {
+        fabricCanvas.renderAll();
+        isHistoryUpdate.current = false;
+        // manually trigger slide thumbnail save but we can't call saveState here directly
+      });
+    }
+  };
+
+  const bringForward = () => {
+    if (!fabricCanvas) return;
+    const activeObj = fabricCanvas.getActiveObject();
+    if (activeObj) {
+      fabricCanvas.bringObjectForward(activeObj);
+      fabricCanvas.discardActiveObject();
+      fabricCanvas.setActiveObject(activeObj);
+    }
+  };
+
+  const sendBackward = () => {
+    if (!fabricCanvas) return;
+    const activeObj = fabricCanvas.getActiveObject();
+    if (activeObj) {
+      fabricCanvas.sendObjectBackwards(activeObj);
+      fabricCanvas.discardActiveObject();
+      fabricCanvas.setActiveObject(activeObj);
+    }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !fabricCanvas) return;
+    const reader = new FileReader();
+    reader.onload = async (f) => {
+      const data = f.target?.result as string;
+      try {
+        const img = await fabric.Image.fromURL(data);
+        img.scaleToWidth(200);
+        img.set({ left: 100, top: 100 });
+        fabricCanvas.add(img);
+        fabricCanvas.setActiveObject(img);
+      } catch (err) {
+        console.error('Image load failed', err);
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
 
   useEffect(() => {
     if (!searchParams.get('id')) {
@@ -97,6 +180,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     
     let timeout: any;
     const saveState = () => {
+       if (isHistoryUpdate.current) return;
        const currentData = fabricCanvas.toJSON();
        const thumbnail = fabricCanvas.toDataURL({ format: 'png', multiplier: 0.3 });
        
@@ -118,14 +202,19 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
        });
     };
 
-    fabricCanvas.on('object:modified', saveState);
-    fabricCanvas.on('object:added', saveState);
-    fabricCanvas.on('object:removed', saveState);
+    const handleModification = () => {
+       saveState();
+       saveHistory();
+    };
+
+    fabricCanvas.on('object:modified', handleModification);
+    fabricCanvas.on('object:added', handleModification);
+    fabricCanvas.on('object:removed', handleModification);
 
     return () => {
-       fabricCanvas.off('object:modified', saveState);
-       fabricCanvas.off('object:added', saveState);
-       fabricCanvas.off('object:removed', saveState);
+       fabricCanvas.off('object:modified', handleModification);
+       fabricCanvas.off('object:added', handleModification);
+       fabricCanvas.off('object:removed', handleModification);
        clearTimeout(timeout);
     };
   }, [fabricCanvas, isLoaded, currentSlideId, fileName, docId]);
@@ -504,9 +593,21 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
           <ToolbarButton icon={Plus} onClick={addNewSlide} title="New Slide" />
         </ToolbarGroup>
         <ToolbarGroup>
+          <ToolbarButton icon={Undo} onClick={undo} isDisabled={historyIndex <= 0} title="Undo" />
+          <ToolbarButton icon={Redo} onClick={redo} isDisabled={historyIndex >= history.length - 1} title="Redo" />
+        </ToolbarGroup>
+        <ToolbarGroup>
           <ToolbarButton icon={Type} onClick={addText} title="Add Text" />
           <ToolbarButton icon={Square} onClick={addRect} title="Add Rectangle" />
           <ToolbarButton icon={Circle} onClick={addCircle} title="Add Circle" />
+          <input 
+            type="file" 
+            id="upload-image" 
+            accept="image/*" 
+            style={{ display: 'none' }} 
+            onChange={handleImageUpload} 
+          />
+          <ToolbarButton icon={ImageIcon} onClick={() => document.getElementById('upload-image')?.click()} title="Add Image" />
         </ToolbarGroup>
         <ToolbarGroup>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0 0.5rem' }}>
@@ -516,8 +617,11 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
               value={currentColor} 
               onChange={(e) => applyColor(e.target.value)} 
               style={{ width: '30px', height: '30px', border: 'none', background: 'transparent', cursor: 'pointer' }}
+              title="Change Color"
             />
           </div>
+          <ToolbarButton icon={BringToFront} onClick={bringForward} isDisabled={!hasSelection} title="Bring Forward" />
+          <ToolbarButton icon={SendToBack} onClick={sendBackward} isDisabled={!hasSelection} title="Send Backward" />
           <ToolbarButton icon={Trash2} onClick={deleteSelected} isDisabled={!hasSelection} title="Delete Selected Object" />
         </ToolbarGroup>
         <ToolbarGroup>
