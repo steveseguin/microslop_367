@@ -33,7 +33,7 @@ interface ExcelProps {
 }
 
 export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [docId] = useState(() => searchParams.get('id') || `excel-${Date.now()}`);
 
   const [fileName, setFileName] = useState('Untitled Spreadsheet');
@@ -56,9 +56,36 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
   
   const [showChart, setShowChart] = useState(false);
   const [chartData, setChartData] = useState<any>(null);
+  
+  const [chartPos, setChartPos] = useState({ x: 20, y: 20 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartPos = useRef({ x: 0, y: 0 });
+
+  const handleDragStart = (e: React.MouseEvent) => {
+    setIsDragging(true);
+    dragStartPos.current = { x: e.clientX - chartPos.x, y: e.clientY - chartPos.y };
+  };
+
+  const handleDragMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    setChartPos({
+      x: e.clientX - dragStartPos.current.x,
+      y: e.clientY - dragStartPos.current.y
+    });
+  };
+
+  const handleDragEnd = () => {
+    setIsDragging(false);
+  };
 
   useEffect(() => {
-    if (searchParams.get('id')) {
+    if (!searchParams.get('id')) {
+      setSearchParams({ id: docId }, { replace: true });
+    }
+  }, [docId, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (searchParams.get('id') && !isLoaded) {
       loadDocument(docId).then(doc => {
         if (doc && doc.type === 'excel') {
           setFileName(doc.title);
@@ -74,7 +101,7 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
     } else {
       setIsLoaded(true);
     }
-  }, [docId, searchParams]);
+  }, [docId, searchParams, isLoaded]);
 
   useEffect(() => {
     if (isLoaded) {
@@ -92,24 +119,27 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
   }, [data, fileName, docId, isLoaded]);
 
   const exportXlsx = () => {
-    // FortuneSheet data export logic
+    if (!workbookRef.current) return;
     const wb = XLSX.utils.book_new();
-    const wsData = [];
+    const allSheets = workbookRef.current.getAllSheets();
     
-    if (workbookRef.current) {
-        const sheetData = workbookRef.current.getAllSheets()[0].data;
-        for (let r = 0; r < sheetData.length; r++) {
-            const row = [];
-            for (let c = 0; c < sheetData[r].length; c++) {
-                const cell = sheetData[r][c];
-                row.push(cell ? cell.v : '');
+    allSheets.forEach((sheet: any, index: number) => {
+        const sheetData = sheet.data;
+        const wsData = [];
+        if (sheetData) {
+            for (let r = 0; r < sheetData.length; r++) {
+                const row = [];
+                for (let c = 0; c < sheetData[r].length; c++) {
+                    const cell = sheetData[r][c];
+                    row.push(cell ? cell.v : '');
+                }
+                wsData.push(row);
             }
-            wsData.push(row);
         }
-    }
+        const ws = XLSX.utils.aoa_to_sheet(wsData);
+        XLSX.utils.book_append_sheet(wb, ws, sheet.name || `Sheet${index + 1}`);
+    });
     
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
     XLSX.writeFile(wb, `${fileName}.xlsx`);
   };
 
@@ -140,40 +170,47 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
   };
 
   const generateChart = () => {
-    if (!workbookRef.current) return;
-    
-    // For simplicity, we'll just read the first two columns of the current sheet
-    // Col 0: Labels, Col 1: Values
-    const sheetData = workbookRef.current.getAllSheets()[0].data;
-    const labels = [];
-    const values = [];
-    
-    for (let r = 0; r < 10; r++) { // read up to 10 rows
-      if (sheetData[r]) {
-        const labelCell = sheetData[r][0];
-        const valCell = sheetData[r][1];
-        if (labelCell && valCell && valCell.v) {
-          labels.push(labelCell.m || labelCell.v);
-          values.push(parseFloat(valCell.v) || 0);
+    let labels = ['Sample A', 'Sample B', 'Sample C', 'Sample D'];
+    let values = [10, 20, 15, 30];
+
+    try {
+      if (workbookRef.current) {
+        const sheet = workbookRef.current.getAllSheets()[0];
+        const sheetData = sheet ? sheet.data : null;
+        if (sheetData) {
+          const tempLabels: string[] = [];
+          const tempValues: number[] = [];
+          for (let r = 0; r < 10; r++) {
+            if (sheetData[r]) {
+              const labelCell = sheetData[r][0];
+              const valCell = sheetData[r][1];
+              if (labelCell && valCell && valCell.v !== undefined) {
+                tempLabels.push(labelCell.m || labelCell.v || `Row ${r}`);
+                tempValues.push(parseFloat(valCell.v) || 0);
+              }
+            }
+          }
+          if (tempLabels.length > 0 && tempValues.length > 0) {
+            labels = tempLabels;
+            values = tempValues;
+          }
         }
       }
+    } catch (err) {
+      console.error('Error parsing chart data', err);
     }
 
-    if (labels.length > 0 && values.length > 0) {
-      setChartData({
-        labels,
-        datasets: [
-          {
-            label: 'Data',
-            data: values,
-            backgroundColor: 'rgba(53, 162, 235, 0.5)',
-          },
-        ],
-      });
-      setShowChart(true);
-    } else {
-      alert("Please enter labels in Column A and numbers in Column B to generate a chart.");
-    }
+    setChartData({
+      labels,
+      datasets: [
+        {
+          label: 'Data',
+          data: values,
+          backgroundColor: 'rgba(53, 162, 235, 0.5)',
+        },
+      ],
+    });
+    setShowChart(true);
   };
 
   return (
@@ -206,15 +243,25 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
         }
       />
 
-      <div className="spreadsheet-container" style={{ flex: 1, position: 'relative' }}>
+      <div 
+        className="spreadsheet-container" 
+        style={{ flex: 1, position: 'relative' }}
+        onMouseMove={handleDragMove}
+        onMouseUp={handleDragEnd}
+        onMouseLeave={handleDragEnd}
+      >
         <Workbook 
             ref={workbookRef} 
             data={data} 
             onChange={(d) => setData(d)}
         />
         {showChart && chartData && (
-          <div style={{ position: 'absolute', top: '20px', right: '20px', width: '400px', height: '300px', background: 'white', borderRadius: '8px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)', padding: '1rem', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+          <div style={{ position: 'absolute', top: `${chartPos.y}px`, left: `${chartPos.x}px`, width: '400px', height: '300px', background: 'white', borderRadius: '8px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)', padding: '1rem', zIndex: 1000, display: 'flex', flexDirection: 'column', cursor: 'default' }}>
+            <div 
+              className="chart-header" 
+              style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', cursor: 'grab' }}
+              onMouseDown={handleDragStart}
+            >
               <h3 style={{ margin: 0, fontSize: '1rem' }}>Generated Chart</h3>
               <button onClick={() => setShowChart(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={16} /></button>
             </div>

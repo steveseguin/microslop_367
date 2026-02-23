@@ -18,10 +18,11 @@ interface Slide {
   id: string;
   data: any;
   notes?: string;
+  thumbnail?: string;
 }
 
 export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps) {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [docId] = useState(() => searchParams.get('id') || `powerpoint-${Date.now()}`);
 
   const [fileName, setFileName] = useState('Untitled Presentation');
@@ -37,7 +38,13 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    if (searchParams.get('id')) {
+    if (!searchParams.get('id')) {
+      setSearchParams({ id: docId }, { replace: true });
+    }
+  }, [docId, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (searchParams.get('id') && !isLoaded) {
       loadDocument(docId).then(doc => {
         if (doc && doc.type === 'powerpoint') {
           setFileName(doc.title);
@@ -54,7 +61,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     } else {
       setIsLoaded(true);
     }
-  }, [docId, searchParams]);
+  }, [docId, searchParams, isLoaded]);
 
   // Render current slide onto canvas when switching or after load
   useEffect(() => {
@@ -90,9 +97,10 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     let timeout: any;
     const saveState = () => {
        const currentData = fabricCanvas.toJSON();
+       const thumbnail = fabricCanvas.toDataURL({ format: 'png', multiplier: 0.1 });
        
        setSlides(prev => {
-         const updatedSlides = prev.map(s => s.id === currentSlideId ? { ...s, data: currentData } : s);
+         const updatedSlides = prev.map(s => s.id === currentSlideId ? { ...s, data: currentData, thumbnail } : s);
          
          setSaveStatus('Saving...');
          clearTimeout(timeout);
@@ -514,6 +522,9 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
                     color: '#ccc'
                   }}
                 >
+                  {slide.thumbnail && (
+                    <img src={slide.thumbnail} alt={`Slide ${index + 1}`} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                  )}
                   <div className="slide-number" style={{ position: 'absolute', bottom: '4px', right: '4px', background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: '0.7rem', padding: '2px 6px', borderRadius: '3px' }}>
                     {index + 1}
                   </div>

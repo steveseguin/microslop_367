@@ -28,14 +28,21 @@ interface WordProps {
 }
 
 export default function Word({ toggleTheme, isDarkMode }: WordProps) {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [docId] = useState(() => searchParams.get('id') || `word-${Date.now()}`);
   
   const [fileName, setFileName] = useState('Untitled Document');
   const [isDictating, setIsDictating] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [saveStatus, setSaveStatus] = useState('Saved');
+  const [isLoaded, setIsLoaded] = useState(false);
   const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (!searchParams.get('id')) {
+      setSearchParams({ id: docId }, { replace: true });
+    }
+  }, [docId, searchParams, setSearchParams]);
 
   const editor = useEditor({
     extensions: [
@@ -48,56 +55,86 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
     ],
     content: '<h2>Welcome to NinjaWord</h2><p>Start typing your document here...</p>',
-    onUpdate: ({ editor }) => {
-      setSaveStatus('Saving...');
-      const html = editor.getHTML();
-      saveDocument(docId, fileName, 'word', html)
-        .then(() => setSaveStatus('Saved'))
-        .catch(err => {
-          console.error("Failed to auto-save", err);
-          setSaveStatus('Error saving');
-        });
-    },
   });
 
   useEffect(() => {
-    if (editor && searchParams.get('id')) {
-      loadDocument(docId).then(doc => {
-        if (doc && doc.type === 'word') {
-          setFileName(doc.title);
-          editor.commands.setContent(doc.data);
-        }
-      });
+    if (editor && !isLoaded) {
+      if (searchParams.get('id')) {
+        loadDocument(docId).then(doc => {
+          if (doc && doc.type === 'word') {
+            setFileName(doc.title);
+            editor.commands.setContent(doc.data);
+          }
+          setIsLoaded(true);
+        }).catch(err => {
+          console.error("Failed to load document", err);
+          setIsLoaded(true);
+        });
+      } else {
+        setIsLoaded(true);
+      }
     }
-  }, [editor, searchParams, docId]);
+  }, [editor, searchParams, docId, isLoaded]);
+
+  useEffect(() => {
+    if (editor && isLoaded) {
+      const handleUpdate = () => {
+        setSaveStatus('Saving...');
+        saveDocument(docId, fileName, 'word', editor.getHTML())
+          .then(() => setSaveStatus('Saved'))
+          .catch(err => {
+            console.error("Failed to auto-save", err);
+            setSaveStatus('Error saving');
+          });
+      };
+      
+      editor.on('update', handleUpdate);
+      return () => {
+        editor.off('update', handleUpdate);
+      };
+    }
+  }, [editor, isLoaded, docId, fileName]);
 
   useEffect(() => {
     // Save when filename changes
-    if (editor) {
+    if (editor && isLoaded) {
       saveDocument(docId, fileName, 'word', editor.getHTML()).catch(console.error);
     }
-  }, [fileName, docId, editor]);
+  }, [fileName, docId, editor, isLoaded]);
 
   if (!editor) return null;
 
   const exportDocx = () => {
-    // Basic export (full HTML to DOCX mapping would be complex, doing basic for now)
-    const doc = new docx.Document({
-        sections: [{
-            properties: {},
-            children: [
-                new docx.Paragraph({
-                    children: [
-                        new docx.TextRun(editor.getText()),
-                    ],
-                }),
-            ],
-        }]
+    const json = editor.getJSON();
+    const children: any[] = [];
+    
+    json.content?.forEach((node: any) => {
+      if (node.type === 'paragraph' || node.type === 'heading') {
+        const textRuns: docx.TextRun[] = [];
+        node.content?.forEach((n: any) => {
+          if (n.type === 'text') {
+            textRuns.push(new docx.TextRun({ 
+              text: n.text, 
+              bold: n.marks?.some((m: any) => m.type === 'bold'), 
+              italics: n.marks?.some((m: any) => m.type === 'italic'),
+              strike: n.marks?.some((m: any) => m.type === 'strike')
+            }));
+          }
+        });
+        
+        children.push(new docx.Paragraph({ 
+          children: textRuns.length > 0 ? textRuns : [new docx.TextRun("")], 
+          heading: node.type === 'heading' ? docx.HeadingLevel[`HEADING_${node.attrs.level}` as keyof typeof docx.HeadingLevel] : undefined,
+          alignment: node.attrs?.textAlign ? docx.AlignmentType[node.attrs.textAlign.toUpperCase() as keyof typeof docx.AlignmentType] : undefined
+        }));
+      }
     });
 
-    docx.Packer.toBlob(doc).then(blob => {
-        saveAs(blob, `${fileName}.docx`);
+    const doc = new docx.Document({
+        sections: [{ properties: {}, children: children.length > 0 ? children : [new docx.Paragraph("")] }]
     });
+
+    docx.Packer.toBlob(doc).then(blob => saveAs(blob, `${fileName}.docx`));
   };
 
   const wordCount = editor.getText().trim().split(/\s+/).filter(word => word.length > 0).length;
