@@ -25,5 +25,18 @@
     "pptxgenjs": "^4.0.1",
     "quill": "^2.0.3",
     "xlsx": "^0.18.5"
-  }
+  },
+  "directories": {
+    "doc": "docs"
+  },
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/steveseguin/microslop_367.git"
+  },
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/steveseguin/microslop_367/issues"
+  },
+  "homepage": "https://github.com/steveseguin/microslop_367#readme"
 }

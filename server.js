@@ -14,27 +14,15 @@ const options = {
 
 // Middleware
 app.use(express.json({ limit: '50mb' }));
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'suite', 'dist')));
 
-// Routes
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-app.get('/word', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'word.html'));
-});
-
-app.get('/excel', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'excel.html'));
-});
-
-app.get('/powerpoint', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'powerpoint.html'));
+// SPA Fallback Route
+app.use((req, res) => {
+  res.sendFile(path.join(__dirname, 'suite', 'dist', 'index.html'));
 });
 
 // Start HTTPS server
 https.createServer(options, app).listen(PORT, () => {
-  console.log(`OfficeNinja running at https://localhost:${PORT}`);
+  console.log(`OfficeNinja Modern running at https://localhost:${PORT}`);
   console.log('Note: Accept the self-signed certificate warning in your browser');
 });

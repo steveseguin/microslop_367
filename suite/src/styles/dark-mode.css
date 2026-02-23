@@ -1,0 +1,45 @@
+body.dark-mode {
+  background: var(--bg);
+  color: var(--text);
+}
+
+body.dark-mode .app-card,
+body.dark-mode .toolbar,
+body.dark-mode .app-header,
+body.dark-mode .sidebar,
+body.dark-mode .modal,
+body.dark-mode .dropdown-menu {
+  background: var(--bg-secondary);
+  color: var(--text);
+}
+
+body.dark-mode .workspace-center {
+  background: #1e1e1e !important;
+}
+
+body.dark-mode .document-page,
+body.dark-mode .spreadsheet-container,
+body.dark-mode .canvas-wrapper {
+  background: #2d2d2d !important;
+  color: #e0e0e0;
+}
+
+body.dark-mode .toolbar-btn {
+  color: var(--text);
+}
+
+body.dark-mode .toolbar-btn:hover {
+  background: var(--bg);
+}
+
+body.dark-mode .btn-secondary {
+  background: var(--bg);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+body.dark-mode .status-bar {
+  background: var(--bg-secondary) !important;
+  border-color: var(--border) !important;
+  color: var(--text-secondary) !important;
+}
