@@ -119,23 +119,24 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   }, [fabricCanvas, isLoaded, currentSlideId, slides, fileName, docId]);
 
   useEffect(() => {
-    if (canvasRef.current && !fabricCanvas) {
-      const canvas = new fabric.Canvas(canvasRef.current, {
-        width: 960,
-        height: 540,
-        backgroundColor: '#ffffff',
-      });
-      setFabricCanvas(canvas);
+    if (!canvasRef.current) return;
+    
+    const canvas = new fabric.Canvas(canvasRef.current, {
+      width: 960,
+      height: 540,
+      backgroundColor: '#ffffff',
+    });
+    setFabricCanvas(canvas);
 
-      canvas.on('selection:created', () => setHasSelection(true));
-      canvas.on('selection:updated', () => setHasSelection(true));
-      canvas.on('selection:cleared', () => setHasSelection(false));
+    canvas.on('selection:created', () => setHasSelection(true));
+    canvas.on('selection:updated', () => setHasSelection(true));
+    canvas.on('selection:cleared', () => setHasSelection(false));
 
-      return () => {
-        canvas.dispose();
-      };
-    }
-  }, [canvasRef, fabricCanvas]);
+    return () => {
+      canvas.dispose();
+      setFabricCanvas(null);
+    };
+  }, []);
 
   const switchSlide = (id: string) => {
     if (!fabricCanvas || id === currentSlideId) return;

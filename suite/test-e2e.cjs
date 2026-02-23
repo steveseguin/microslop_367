@@ -21,7 +21,7 @@ const puppeteer = require('puppeteer');
 
     // 2. Test Navigation to NinjaWord
     console.log('--> Testing Navigation to NinjaWord...');
-    await page.goto('https://localhost:3443/word?id=test-doc-123', { waitUntil: 'networkidle0' });
+    await page.goto('https://localhost:3443/#/word?id=test-doc-123', { waitUntil: 'networkidle0' });
     await page.waitForSelector('.document-page', { timeout: 5000 });
     
     const wordTitle = await page.$eval('.app-title', el => el.textContent);
