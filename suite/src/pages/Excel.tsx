@@ -37,7 +37,19 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
   const docId = searchParams.get('id') || `excel-${Date.now()}`;
 
   const [fileName, setFileName] = useState('Untitled Spreadsheet');
-  const [data, setData] = useState<any[]>([{ name: 'Sheet1', id: '1', status: 1, celldata: [] }]);
+  const [data, setData] = useState<any[]>([{ 
+    name: 'Sheet1', 
+    id: '1', 
+    status: 1, 
+    celldata: [
+      { r: 0, c: 0, v: { v: 'Item A', m: 'Item A' } },
+      { r: 0, c: 1, v: { v: '15', m: '15' } },
+      { r: 1, c: 0, v: { v: 'Item B', m: 'Item B' } },
+      { r: 1, c: 1, v: { v: '25', m: '25' } },
+      { r: 2, c: 0, v: { v: 'Item C', m: 'Item C' } },
+      { r: 2, c: 1, v: { v: '30', m: '30' } }
+    ] 
+  }]);
   const [saveStatus, setSaveStatus] = useState('Saved');
   const workbookRef = useRef<any>(null);
   const [isLoaded, setIsLoaded] = useState(false);
