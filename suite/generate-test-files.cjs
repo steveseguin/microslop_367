@@ -1,6 +1,7 @@
 const fs = require('fs');
 const docx = require('docx');
 const XLSX = require('xlsx');
+const PptxGenJS = require('pptxgenjs');
 
 async function generate() {
   // Generate DOCX
@@ -22,6 +23,12 @@ async function generate() {
   const ws = XLSX.utils.aoa_to_sheet([["Label", "Value"], ["A", 10], ["B", 20]]);
   XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
   XLSX.writeFile(wb, 'test.xlsx');
+
+  // Generate PPTX
+  const pres = new PptxGenJS();
+  const slide = pres.addSlide();
+  slide.addText("Hello PowerPoint from Node", { x: 1, y: 1, w: '80%', h: 1, fontSize: 24, color: '363636' });
+  await pres.writeFile({ fileName: 'test.pptx' });
 
   // Generate Image
   const imgData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";

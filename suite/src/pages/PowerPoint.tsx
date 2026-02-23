@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import * as fabric from 'fabric';
-import { Download, Type, Square, Circle, Trash2, Plus, Play, MonitorPlay } from 'lucide-react';
+import { Download, Type, Square, Circle, Trash2, Plus, Play, MonitorPlay, Upload } from 'lucide-react';
 import pptxgen from "pptxgenjs";
+import JSZip from 'jszip';
 import { AppHeader } from '../components/AppHeader';
 import { Toolbar, ToolbarGroup, ToolbarButton } from '../components/Toolbar';
 import { StatusBar } from '../components/StatusBar';
@@ -260,6 +261,131 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [fabricCanvas]);
 
+  const handlePptxImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setFileName(file.name.replace(/\.[^/.]+$/, ""));
+    setSaveStatus('Importing...');
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const zip = await JSZip.loadAsync(arrayBuffer);
+
+      // Read presentation XML
+      const presentationXml = await zip.file('ppt/presentation.xml')?.async('string');
+      if (!presentationXml) throw new Error('Invalid PPTX file');
+
+      // Parse slide relationships
+      const relsXml = await zip.file('ppt/_rels/presentation.xml.rels')?.async('string');
+      const slideRefs: string[] = [];
+
+      if (relsXml) {
+        const relsParser = new DOMParser();
+        const relsDoc = relsParser.parseFromString(relsXml, 'text/xml');
+        const relationships = relsDoc.querySelectorAll('Relationship');
+
+        relationships.forEach(rel => {
+          const type = rel.getAttribute('Type');
+          const target = rel.getAttribute('Target');
+          if (type && type.includes('slide') && target && target.includes('slide')) {
+            slideRefs.push(target.replace(/^\/ppt\//, '').replace(/^\.\.\//, ''));
+          }
+        });
+      }
+
+      slideRefs.sort((a, b) => {
+        const numA = parseInt(a.match(/\d+/)?.[0] || '0');
+        const numB = parseInt(b.match(/\d+/)?.[0] || '0');
+        return numA - numB;
+      });
+
+      const newSlides: Slide[] = [];
+
+      for (const slideRef of slideRefs) {
+        const slideXml = await zip.file('ppt/slides/' + slideRef)?.async('string');
+        if (!slideXml) continue;
+
+        const parser = new DOMParser();
+        const slideDoc = parser.parseFromString(slideXml, 'text/xml');
+
+        // Create a temporary, off-screen fabric canvas just to generate JSON
+        const tempEl = document.createElement('canvas');
+        tempEl.width = 960;
+        tempEl.height = 540;
+        const tempCanvas = new fabric.Canvas(tempEl, { width: 960, height: 540 });
+
+        const textElements = slideDoc.querySelectorAll('p\\:sp, sp');
+        textElements.forEach(sp => {
+          const txBody = sp.querySelector('p\\:txBody, txBody');
+          if (txBody) {
+            const textContent: string[] = [];
+            const paragraphs = txBody.querySelectorAll('a\\:p, p');
+            paragraphs.forEach(p => {
+              const runs = p.querySelectorAll('a\\:r, r');
+              runs.forEach(r => {
+                const t = r.querySelector('a\\:t, t');
+                if (t) textContent.push(t.textContent || '');
+              });
+            });
+
+            if (textContent.length > 0) {
+              const xfrm = sp.querySelector('p\\:spPr a\\:xfrm, spPr xfrm');
+              let x = 100, y = 100;
+
+              if (xfrm) {
+                const off = xfrm.querySelector('a\\:off, off');
+                if (off) {
+                  x = parseInt(off.getAttribute('x') || '0') / 914400 * 96;
+                  y = parseInt(off.getAttribute('y') || '0') / 914400 * 96;
+                }
+              }
+
+              const text = new fabric.IText(textContent.join(' '), {
+                left: Math.max(0, x),
+                top: Math.max(0, y),
+                fontFamily: 'Segoe UI',
+                fontSize: 24,
+                fill: '#000000',
+              });
+              // @ts-ignore - overriding internal width if needed, but standard IText handles it mostly
+              tempCanvas.add(text);
+            }
+          }
+        });
+
+        if (tempCanvas.getObjects().length === 0) {
+           const text = new fabric.IText('Imported slide', {
+              left: 280, top: 240, fontFamily: 'Segoe UI', fontSize: 40, fill: '#666666'
+           });
+           tempCanvas.add(text);
+        }
+
+        newSlides.push({
+          id: `slide-${Date.now()}-${Math.random()}`,
+          data: tempCanvas.toJSON(),
+          notes: ''
+        });
+        
+        tempCanvas.dispose();
+      }
+
+      if (newSlides.length > 0) {
+        setSlides(newSlides);
+        setCurrentSlideId(newSlides[0].id);
+        setSaveStatus('Saved');
+      } else {
+        setSaveStatus('Import failed');
+      }
+
+    } catch (err: any) {
+      console.error('PPTX import error:', err);
+      setSaveStatus('Import Error');
+    }
+
+    e.target.value = '';
+  };
+
   const exportPptx = async () => {
     if (!fabricCanvas) return;
     let pptx = new pptxgen();
@@ -306,9 +432,21 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         toggleTheme={toggleTheme}
         isDarkMode={isDarkMode}
         actions={
-          <button className="btn btn-secondary" onClick={exportPptx}>
-            <Download size={16} /> Export PPTX
-          </button>
+          <>
+            <input 
+              type="file" 
+              id="upload-pptx" 
+              accept=".pptx" 
+              style={{ display: 'none' }} 
+              onChange={handlePptxImport} 
+            />
+            <button className="btn btn-secondary" onClick={() => document.getElementById('upload-pptx')?.click()}>
+              <Upload size={16} /> Import PPTX
+            </button>
+            <button className="btn btn-secondary" onClick={exportPptx}>
+              <Download size={16} /> Export PPTX
+            </button>
+          </>
         }
       />
 

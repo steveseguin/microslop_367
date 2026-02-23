@@ -125,6 +125,14 @@ test.describe('OfficeNinja Suite E2E', () => {
     ]);
     expect(download.suggestedFilename()).toContain('.pptx');
 
+    // Import PPTX
+    const [pptxFileChooser] = await Promise.all([
+      page.waitForEvent('filechooser'),
+      page.click('button:has-text("Import PPTX")')
+    ]);
+    await pptxFileChooser.setFiles(path.join(__dirname, '../test.pptx'));
+    await page.waitForTimeout(2000); // Wait for import to process
+
     // Presenter View
     await page.click('button[title="Presenter View"]');
     await expect(page.locator('text=Exit Presenter View')).toBeVisible();
