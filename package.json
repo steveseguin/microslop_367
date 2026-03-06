@@ -19,7 +19,7 @@
     "handsontable": "^16.2.0",
     "html2canvas": "^1.4.1",
     "https": "^1.0.0",
-    "jspdf": "^4.0.0",
+    "jspdf": "^4.2.0",
     "jszip": "^3.10.1",
     "mammoth": "^1.11.0",
     "pptxgenjs": "^4.0.1",
