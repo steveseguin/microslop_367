@@ -7,17 +7,27 @@ import PowerPoint from './pages/PowerPoint';
 
 function App() {
   const [isDarkMode, setIsDarkMode] = useState(() => {
-    return localStorage.getItem('officeninja_theme') === 'dark';
+    const savedTheme = localStorage.getItem('officeninja_theme');
+    if (savedTheme === 'dark') {
+      return true;
+    }
+    if (savedTheme === 'light') {
+      return false;
+    }
+
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
 
   useEffect(() => {
     if (isDarkMode) {
       document.body.classList.add('dark-mode');
       document.documentElement.setAttribute('data-theme', 'dark');
+      document.documentElement.style.colorScheme = 'dark';
       localStorage.setItem('officeninja_theme', 'dark');
     } else {
       document.body.classList.remove('dark-mode');
       document.documentElement.setAttribute('data-theme', 'light');
+      document.documentElement.style.colorScheme = 'light';
       localStorage.setItem('officeninja_theme', 'light');
     }
   }, [isDarkMode]);

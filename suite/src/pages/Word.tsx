@@ -1,75 +1,78 @@
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useEditor, EditorContent } from '@tiptap/react';
+import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Table as TableExtension } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
 import { TextAlign } from '@tiptap/extension-text-align';
-import { 
-  Bold, Italic, Strikethrough, List, ListOrdered, 
-  AlignLeft, AlignCenter, AlignRight, AlignJustify,
-  Heading1, Heading2, Image as ImageIcon, Table as TableIcon,
-  Undo, Redo, Download, Upload, Mic, Volume2, Square, Search, X
+import {
+  AlignCenter,
+  AlignJustify,
+  AlignLeft,
+  AlignRight,
+  Bold,
+  Download,
+  Heading1,
+  Heading2,
+  Image as ImageIcon,
+  Italic,
+  List,
+  ListOrdered,
+  Mic,
+  Redo,
+  Search,
+  Square,
+  Strikethrough,
+  Table as TableIcon,
+  Undo,
+  Upload,
+  Volume2,
+  X,
 } from 'lucide-react';
 import ImageResize from 'tiptap-extension-resize-image';
 import * as docx from 'docx';
 import * as mammoth from 'mammoth';
 import { saveAs } from 'file-saver';
 import { AppHeader } from '../components/AppHeader';
-import { Toolbar, ToolbarGroup, ToolbarButton } from '../components/Toolbar';
 import { StatusBar } from '../components/StatusBar';
-import { saveDocument, loadDocument } from '../utils/db';
+import { Toolbar, ToolbarButton, ToolbarGroup } from '../components/Toolbar';
+import { loadDocument, saveDocument } from '../utils/db';
 
 interface WordProps {
   toggleTheme: () => void;
   isDarkMode: boolean;
 }
 
+type BannerTone = 'success' | 'warning' | 'error';
+
+interface BannerState {
+  tone: BannerTone;
+  title: string;
+  detail?: string;
+}
+
 export default function Word({ toggleTheme, isDarkMode }: WordProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [docId] = useState(() => searchParams.get('id') || `word-${Date.now()}`);
-  
   const [fileName, setFileName] = useState('Untitled Document');
   const [isDictating, setIsDictating] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [saveStatus, setSaveStatus] = useState('Saved');
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [showFindReplace, setShowFindReplace] = useState(false);
+  const [showImagePanel, setShowImagePanel] = useState(false);
   const [findText, setFindText] = useState('');
   const [replaceText, setReplaceText] = useState('');
-  const recognitionRef = useRef<any>(null);
+  const [imageUrl, setImageUrl] = useState('');
+  const [banner, setBanner] = useState<BannerState | null>(null);
 
-  const handleFindReplace = () => {
-    if (!editor || !findText) return;
-    const { state, dispatch } = editor.view;
-    let { tr } = state;
-    
-    // Simple naive text replace for all occurrences in document
-    let hasChanges = false;
-    state.doc.descendants((node, pos) => {
-      if (node.isText && node.text) {
-        let index = node.text.indexOf(findText);
-        let offset = 0;
-        while (index !== -1) {
-          const start = pos + Math.max(0, index) + offset;
-          const end = start + findText.length;
-          tr = tr.replaceWith(start, end, state.schema.text(replaceText));
-          hasChanges = true;
-          offset += replaceText.length - findText.length;
-          index = node.text.indexOf(findText, index + findText.length);
-        }
-      }
-    });
-    
-    if (hasChanges) {
-      dispatch(tr);
-      alert(`Replaced all occurrences of "${findText}" with "${replaceText}".`);
-    } else {
-      alert(`"${findText}" not found.`);
-    }
-  };
+  const recognitionRef = useRef<any>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const saveTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!searchParams.get('id')) {
@@ -87,121 +90,258 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
       ImageResize,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
     ],
-    content: '<h2>Welcome to NinjaWord</h2><p>Start typing your document here...</p>',
+    content:
+      '<h1>Project Brief</h1><p>Use this space for structured writing, meeting notes, and polished copy.</p><p>Tip: open the ribbon on mobile to access formatting tools without losing space.</p>',
   });
 
   useEffect(() => {
-    if (editor && !isLoaded) {
-      if (searchParams.get('id')) {
-        loadDocument(docId).then(doc => {
-          if (doc && doc.type === 'word') {
-            setFileName(doc.title);
-            editor.commands.setContent(doc.data);
-          }
-          setIsLoaded(true);
-        }).catch(err => {
-          console.error("Failed to load document", err);
-          setIsLoaded(true);
-        });
-      } else {
+    if (!editor || isLoaded) {
+      return;
+    }
+
+    loadDocument<string>(docId)
+      .then((doc) => {
+        if (doc && doc.type === 'word') {
+          setFileName(doc.title);
+          editor.commands.setContent(doc.data);
+          setLastSavedAt(doc.updatedAt);
+        }
         setIsLoaded(true);
+      })
+      .catch((error) => {
+        console.error('Failed to load document', error);
+        setBanner({
+          tone: 'error',
+          title: 'Document failed to load cleanly.',
+          detail: 'The editor opened with a fresh document instead.',
+        });
+        setIsLoaded(true);
+      });
+  }, [docId, editor, isLoaded]);
+
+  useEffect(() => {
+    if (!editor || !isLoaded) {
+      return;
+    }
+
+    const queueSave = () => {
+      setSaveStatus('Saving...');
+      if (saveTimeoutRef.current) {
+        window.clearTimeout(saveTimeoutRef.current);
       }
-    }
-  }, [editor, searchParams, docId, isLoaded]);
 
-  useEffect(() => {
-    if (editor && isLoaded) {
-      const handleUpdate = () => {
-        setSaveStatus('Saving...');
-        saveDocument(docId, fileName, 'word', editor.getHTML())
-          .then(() => setSaveStatus('Saved'))
-          .catch(err => {
-            console.error("Failed to auto-save", err);
-            setSaveStatus('Error saving');
+      saveTimeoutRef.current = window.setTimeout(async () => {
+        try {
+          await saveDocument(docId, fileName, 'word', editor.getHTML());
+          setSaveStatus('Saved');
+          setLastSavedAt(Date.now());
+        } catch (error) {
+          console.error('Failed to auto-save document', error);
+          setSaveStatus('Save error');
+          setBanner({
+            tone: 'error',
+            title: 'Autosave failed.',
+            detail: 'Your latest changes are still in the editor, but they could not be written locally.',
           });
-      };
-      
-      editor.on('update', handleUpdate);
-      return () => {
-        editor.off('update', handleUpdate);
-      };
-    }
-  }, [editor, isLoaded, docId, fileName]);
+        }
+      }, 600);
+    };
+
+    editor.on('update', queueSave);
+    return () => {
+      editor.off('update', queueSave);
+      if (saveTimeoutRef.current) {
+        window.clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [docId, editor, fileName, isLoaded]);
 
   useEffect(() => {
-    // Save when filename changes
-    if (editor && isLoaded) {
-      saveDocument(docId, fileName, 'word', editor.getHTML()).catch(console.error);
+    if (!editor || !isLoaded) {
+      return;
     }
-  }, [fileName, docId, editor, isLoaded]);
 
-  if (!editor) return null;
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        await saveDocument(docId, fileName, 'word', editor.getHTML());
+        setSaveStatus('Saved');
+        setLastSavedAt(Date.now());
+      } catch (error) {
+        console.error('Failed to save renamed document', error);
+        setSaveStatus('Save error');
+      }
+    }, 300);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [docId, editor, fileName, isLoaded]);
+
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      window.speechSynthesis.cancel();
+    };
+  }, []);
+
+  if (!editor) {
+    return null;
+  }
 
   const exportDocx = () => {
     const json = editor.getJSON();
-    const children: any[] = [];
-    
+    const children: docx.Paragraph[] = [];
+
     json.content?.forEach((node: any) => {
-      if (node.type === 'paragraph' || node.type === 'heading') {
-        const textRuns: docx.TextRun[] = [];
-        node.content?.forEach((n: any) => {
-          if (n.type === 'text') {
-            textRuns.push(new docx.TextRun({ 
-              text: n.text, 
-              bold: n.marks?.some((m: any) => m.type === 'bold'), 
-              italics: n.marks?.some((m: any) => m.type === 'italic'),
-              strike: n.marks?.some((m: any) => m.type === 'strike')
-            }));
-          }
+      if (node.type !== 'paragraph' && node.type !== 'heading') {
+        return;
+      }
+
+      const runs: docx.TextRun[] = [];
+      node.content?.forEach((child: any) => {
+        if (child.type !== 'text') {
+          return;
+        }
+
+        runs.push(
+          new docx.TextRun({
+            text: child.text,
+            bold: child.marks?.some((mark: any) => mark.type === 'bold'),
+            italics: child.marks?.some((mark: any) => mark.type === 'italic'),
+            strike: child.marks?.some((mark: any) => mark.type === 'strike'),
+          }),
+        );
+      });
+
+      children.push(
+        new docx.Paragraph({
+          children: runs.length > 0 ? runs : [new docx.TextRun('')],
+          heading:
+            node.type === 'heading'
+              ? docx.HeadingLevel[`HEADING_${node.attrs.level}` as keyof typeof docx.HeadingLevel]
+              : undefined,
+          alignment: node.attrs?.textAlign
+            ? docx.AlignmentType[node.attrs.textAlign.toUpperCase() as keyof typeof docx.AlignmentType]
+            : undefined,
+        }),
+      );
+    });
+
+    const documentFile = new docx.Document({
+      sections: [
+        {
+          properties: {},
+          children: children.length > 0 ? children : [new docx.Paragraph('')],
+        },
+      ],
+    });
+
+    void docx.Packer.toBlob(documentFile).then((blob) => saveAs(blob, `${fileName}.docx`));
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setFileName(file.name.replace(/\.[^/.]+$/, ''));
+
+    const reader = new FileReader();
+    reader.onload = (loadEvent) => {
+      const arrayBuffer = loadEvent.target?.result as ArrayBuffer;
+      mammoth
+        .convertToHtml({ arrayBuffer })
+        .then((result: any) => {
+          editor.commands.setContent(result.value);
+          setBanner({
+            tone: 'success',
+            title: 'DOCX imported.',
+            detail: 'The document content has been loaded into the editor.',
+          });
+        })
+        .catch((error: any) => {
+          console.error(error);
+          setBanner({
+            tone: 'error',
+            title: 'Import failed.',
+            detail: 'This DOCX file could not be converted in the browser.',
+          });
         });
-        
-        children.push(new docx.Paragraph({ 
-          children: textRuns.length > 0 ? textRuns : [new docx.TextRun("")], 
-          heading: node.type === 'heading' ? docx.HeadingLevel[`HEADING_${node.attrs.level}` as keyof typeof docx.HeadingLevel] : undefined,
-          alignment: node.attrs?.textAlign ? docx.AlignmentType[node.attrs.textAlign.toUpperCase() as keyof typeof docx.AlignmentType] : undefined
-        }));
+    };
+
+    reader.readAsArrayBuffer(file);
+    event.target.value = '';
+  };
+
+  const handleFindReplace = () => {
+    if (!findText.trim()) {
+      setBanner({
+        tone: 'warning',
+        title: 'Enter text to find first.',
+        detail: 'Type a word or phrase before running Replace All.',
+      });
+      return;
+    }
+
+    const { state, dispatch } = editor.view;
+    let transaction = state.tr;
+    let replacementCount = 0;
+
+    state.doc.descendants((node, position) => {
+      if (!node.isText || !node.text) {
+        return;
+      }
+
+      let searchIndex = node.text.indexOf(findText);
+      let offset = 0;
+
+      while (searchIndex !== -1) {
+        const start = position + searchIndex + offset;
+        const end = start + findText.length;
+
+        if (replaceText.length === 0) {
+          transaction = transaction.delete(start, end);
+        } else {
+          transaction = transaction.replaceWith(start, end, state.schema.text(replaceText));
+        }
+
+        replacementCount += 1;
+        offset += replaceText.length - findText.length;
+        searchIndex = node.text.indexOf(findText, searchIndex + findText.length);
       }
     });
 
-    const doc = new docx.Document({
-        sections: [{ properties: {}, children: children.length > 0 ? children : [new docx.Paragraph("")] }]
+    if (replacementCount === 0) {
+      setBanner({
+        tone: 'warning',
+        title: `No matches found for "${findText}".`,
+      });
+      return;
+    }
+
+    dispatch(transaction);
+    setBanner({
+      tone: 'success',
+      title: `${replacementCount} replacement${replacementCount === 1 ? '' : 's'} applied.`,
+      detail: replaceText ? `Updated "${findText}" to "${replaceText}".` : `Removed "${findText}" from the document.`,
     });
-
-    docx.Packer.toBlob(doc).then(blob => saveAs(blob, `${fileName}.docx`));
-  };
-
-  const wordCount = editor.getText().trim().split(/\s+/).filter(word => word.length > 0).length;
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setFileName(file.name.replace(/\.[^/.]+$/, ""));
-
-    const reader = new FileReader();
-    reader.onload = function(loadEvent) {
-      const arrayBuffer = loadEvent.target?.result as ArrayBuffer;
-      mammoth.convertToHtml({ arrayBuffer: arrayBuffer })
-        .then((result: any) => {
-          editor.commands.setContent(result.value);
-        })
-        .catch((err: any) => console.error(err));
-    };
-    reader.readAsArrayBuffer(file);
   };
 
   const toggleDictation = () => {
     if (isDictating) {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
+      recognitionRef.current?.stop();
       setIsDictating(false);
       return;
     }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert("Speech recognition is not supported in this browser.");
+      setBanner({
+        tone: 'warning',
+        title: 'Speech recognition is unavailable.',
+        detail: 'Try Chrome or Edge on desktop if you want live dictation.',
+      });
       return;
     }
 
@@ -211,26 +351,20 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
     recognition.interimResults = true;
 
     recognition.onstart = () => setIsDictating(true);
-    
     recognition.onresult = (event: any) => {
-      let finalTranscript = '';
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript + ' ';
+      let transcript = '';
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        if (event.results[index].isFinal) {
+          transcript += `${event.results[index][0].transcript} `;
         }
       }
-      if (finalTranscript) {
-        editor.commands.insertContent(finalTranscript);
+
+      if (transcript) {
+        editor.commands.insertContent(transcript);
       }
     };
-
-    recognition.onerror = (event: any) => {
-      console.error(event.error);
-      setIsDictating(false);
-    };
-    
+    recognition.onerror = () => setIsDictating(false);
     recognition.onend = () => setIsDictating(false);
-
     recognition.start();
   };
 
@@ -243,128 +377,303 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
 
     const { from, to } = editor.state.selection;
     let textToSpeak = editor.state.doc.textBetween(from, to, ' ');
-    
-    // If no selection, read everything
-    if (!textToSpeak || textToSpeak.trim().length === 0) {
+
+    if (!textToSpeak.trim()) {
       textToSpeak = editor.getText();
     }
 
-    if (!textToSpeak) return;
+    if (!textToSpeak.trim()) {
+      return;
+    }
 
     const utterance = new SpeechSynthesisUtterance(textToSpeak);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
-    
+
     window.speechSynthesis.speak(utterance);
     setIsSpeaking(true);
   };
 
+  const insertImageFromUrl = () => {
+    if (!imageUrl.trim()) {
+      setBanner({
+        tone: 'warning',
+        title: 'Paste an image URL first.',
+      });
+      return;
+    }
+
+    // @ts-expect-error TipTap extension augments the editor commands at runtime.
+    editor.chain().focus().setImage({ src: imageUrl.trim() }).run();
+    setImageUrl('');
+    setShowImagePanel(false);
+  };
+
+  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      // @ts-expect-error TipTap extension augments the editor commands at runtime.
+      editor.chain().focus().setImage({ src: reader.result as string }).run();
+      setBanner({
+        tone: 'success',
+        title: 'Image inserted.',
+        detail: 'The selected file was embedded directly into this document.',
+      });
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
+    setShowImagePanel(false);
+  };
+
+  const textContent = editor.getText().trim();
+  const wordCount = textContent ? textContent.split(/\s+/).filter(Boolean).length : 0;
+  const characterCount = textContent.replace(/\s/g, '').length;
+  const paragraphCount = editor
+    .getJSON()
+    .content?.filter((node: any) => node.type === 'paragraph' || node.type === 'heading').length ?? 0;
+  const readingMinutes = Math.max(1, Math.ceil(wordCount / 200));
+
+  const saveSummary =
+    saveStatus === 'Saved' && lastSavedAt
+      ? `Saved ${new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(lastSavedAt)}`
+      : saveStatus;
+
   return (
     <div className="app-container">
-      <AppHeader 
-        appName="NinjaWord" 
-        fileName={fileName} 
+      <AppHeader
+        appName="NinjaWord"
+        fileName={fileName}
         setFileName={setFileName}
         toggleTheme={toggleTheme}
         isDarkMode={isDarkMode}
         saveStatus={saveStatus}
         actions={
           <>
-            <input 
-              type="file" 
-              id="upload-word" 
-              accept=".docx" 
-              style={{ display: 'none' }} 
-              onChange={handleFileUpload} 
-            />
-            <button className="btn btn-secondary" onClick={() => document.getElementById('upload-word')?.click()}>
-              <Upload size={16} /> Import DOCX
+            <input ref={importInputRef} type="file" accept=".docx" hidden onChange={handleFileUpload} />
+            <input ref={imageInputRef} type="file" accept="image/*" hidden onChange={handleImageUpload} />
+            <button className="btn btn-secondary" onClick={() => importInputRef.current?.click()} type="button">
+              <Upload size={16} />
+              Import DOCX
             </button>
-            <button className="btn btn-secondary" onClick={exportDocx}>
-              <Download size={16} /> Export DOCX
+            <button className="btn btn-secondary" onClick={exportDocx} type="button">
+              <Download size={16} />
+              Export DOCX
             </button>
           </>
         }
       />
 
       <Toolbar>
-        <ToolbarGroup>
+        <ToolbarGroup label="History">
           <ToolbarButton icon={Undo} onClick={() => editor.chain().focus().undo().run()} isDisabled={!editor.can().undo()} title="Undo" />
           <ToolbarButton icon={Redo} onClick={() => editor.chain().focus().redo().run()} isDisabled={!editor.can().redo()} title="Redo" />
         </ToolbarGroup>
-        
-        <ToolbarGroup>
-          <ToolbarButton icon={Heading1} onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} isActive={editor.isActive('heading', { level: 1 })} title="Heading 1" />
-          <ToolbarButton icon={Heading2} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} isActive={editor.isActive('heading', { level: 2 })} title="Heading 2" />
-        </ToolbarGroup>
 
-        <ToolbarGroup>
+        <ToolbarGroup label="Styles">
+          <ToolbarButton
+            icon={Heading1}
+            onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+            isActive={editor.isActive('heading', { level: 1 })}
+            title="Heading 1"
+          />
+          <ToolbarButton
+            icon={Heading2}
+            onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+            isActive={editor.isActive('heading', { level: 2 })}
+            title="Heading 2"
+          />
           <ToolbarButton icon={Bold} onClick={() => editor.chain().focus().toggleBold().run()} isActive={editor.isActive('bold')} title="Bold" />
-          <ToolbarButton icon={Italic} onClick={() => editor.chain().focus().toggleItalic().run()} isActive={editor.isActive('italic')} title="Italic" />
-          <ToolbarButton icon={Strikethrough} onClick={() => editor.chain().focus().toggleStrike().run()} isActive={editor.isActive('strike')} title="Strikethrough" />
+          <ToolbarButton
+            icon={Italic}
+            onClick={() => editor.chain().focus().toggleItalic().run()}
+            isActive={editor.isActive('italic')}
+            title="Italic"
+          />
+          <ToolbarButton
+            icon={Strikethrough}
+            onClick={() => editor.chain().focus().toggleStrike().run()}
+            isActive={editor.isActive('strike')}
+            title="Strikethrough"
+          />
         </ToolbarGroup>
 
-        <ToolbarGroup>
-          <ToolbarButton icon={AlignLeft} onClick={() => editor.chain().focus().setTextAlign('left').run()} isActive={editor.isActive({ textAlign: 'left' })} title="Align Left" />
-          <ToolbarButton icon={AlignCenter} onClick={() => editor.chain().focus().setTextAlign('center').run()} isActive={editor.isActive({ textAlign: 'center' })} title="Align Center" />
-          <ToolbarButton icon={AlignRight} onClick={() => editor.chain().focus().setTextAlign('right').run()} isActive={editor.isActive({ textAlign: 'right' })} title="Align Right" />
-          <ToolbarButton icon={AlignJustify} onClick={() => editor.chain().focus().setTextAlign('justify').run()} isActive={editor.isActive({ textAlign: 'justify' })} title="Justify" />
+        <ToolbarGroup label="Alignment">
+          <ToolbarButton
+            icon={AlignLeft}
+            onClick={() => editor.chain().focus().setTextAlign('left').run()}
+            isActive={editor.isActive({ textAlign: 'left' })}
+            title="Align left"
+          />
+          <ToolbarButton
+            icon={AlignCenter}
+            onClick={() => editor.chain().focus().setTextAlign('center').run()}
+            isActive={editor.isActive({ textAlign: 'center' })}
+            title="Align center"
+          />
+          <ToolbarButton
+            icon={AlignRight}
+            onClick={() => editor.chain().focus().setTextAlign('right').run()}
+            isActive={editor.isActive({ textAlign: 'right' })}
+            title="Align right"
+          />
+          <ToolbarButton
+            icon={AlignJustify}
+            onClick={() => editor.chain().focus().setTextAlign('justify').run()}
+            isActive={editor.isActive({ textAlign: 'justify' })}
+            title="Justify"
+          />
         </ToolbarGroup>
 
-        <ToolbarGroup>
-          <ToolbarButton icon={List} onClick={() => editor.chain().focus().toggleBulletList().run()} isActive={editor.isActive('bulletList')} title="Bullet List" />
-          <ToolbarButton icon={ListOrdered} onClick={() => editor.chain().focus().toggleOrderedList().run()} isActive={editor.isActive('orderedList')} title="Numbered List" />
+        <ToolbarGroup label="Lists">
+          <ToolbarButton
+            icon={List}
+            onClick={() => editor.chain().focus().toggleBulletList().run()}
+            isActive={editor.isActive('bulletList')}
+            title="Bulleted list"
+          />
+          <ToolbarButton
+            icon={ListOrdered}
+            onClick={() => editor.chain().focus().toggleOrderedList().run()}
+            isActive={editor.isActive('orderedList')}
+            title="Numbered list"
+          />
         </ToolbarGroup>
 
-        <ToolbarGroup>
-          <ToolbarButton icon={Mic} onClick={toggleDictation} isActive={isDictating} title={isDictating ? "Stop Dictation" : "Start Dictation"} />
-          <ToolbarButton icon={isSpeaking ? Square : Volume2} onClick={toggleSpeech} isActive={isSpeaking} title={isSpeaking ? "Stop Reading" : "Read Aloud"} />
+        <ToolbarGroup label="Insert">
+          <ToolbarButton icon={Search} onClick={() => setShowFindReplace((value) => !value)} isActive={showFindReplace} title="Find and replace" />
+          <ToolbarButton
+            icon={TableIcon}
+            onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
+            title="Insert table"
+          />
+          <ToolbarButton icon={ImageIcon} onClick={() => setShowImagePanel((value) => !value)} isActive={showImagePanel} title="Insert image" />
         </ToolbarGroup>
 
-        <ToolbarGroup>
-          <ToolbarButton icon={Search} onClick={() => setShowFindReplace(!showFindReplace)} isActive={showFindReplace} title="Find and Replace" />
-          <ToolbarButton icon={TableIcon} onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} title="Insert Table" />
-          <ToolbarButton icon={ImageIcon} onClick={() => {
-            const url = window.prompt('URL');
-            // @ts-ignore
-            if (url) editor.chain().focus().setImage({ src: url }).run();
-          }} title="Insert Image" />
+        <ToolbarGroup label="Review">
+          <ToolbarButton icon={Mic} onClick={toggleDictation} isActive={isDictating} title={isDictating ? 'Stop dictation' : 'Start dictation'} />
+          <ToolbarButton
+            icon={isSpeaking ? Square : Volume2}
+            onClick={toggleSpeech}
+            isActive={isSpeaking}
+            title={isSpeaking ? 'Stop read aloud' : 'Read aloud'}
+          />
         </ToolbarGroup>
       </Toolbar>
 
+      {banner && (
+        <div className={`editor-banner editor-banner--${banner.tone}`}>
+          <div>
+            <div className="editor-banner__text">{banner.title}</div>
+            {banner.detail && <div className="editor-banner__hint">{banner.detail}</div>}
+          </div>
+          <button className="btn btn-secondary btn-icon" onClick={() => setBanner(null)} type="button">
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       {showFindReplace && (
-        <div style={{ background: 'var(--light)', padding: '0.5rem 1rem', borderBottom: '1px solid var(--border)', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <input 
-            type="text" 
-            placeholder="Find..." 
-            value={findText} 
-            onChange={e => setFindText(e.target.value)}
-            style={{ padding: '0.4rem', borderRadius: '4px', border: '1px solid var(--border)' }}
+        <div className="find-replace-bar">
+          <input
+            className="form-control form-inline-field"
+            placeholder="Find text"
+            value={findText}
+            onChange={(event) => setFindText(event.target.value)}
           />
-          <input 
-            type="text" 
-            placeholder="Replace with..." 
-            value={replaceText} 
-            onChange={e => setReplaceText(e.target.value)}
-            style={{ padding: '0.4rem', borderRadius: '4px', border: '1px solid var(--border)' }}
+          <input
+            className="form-control form-inline-field"
+            placeholder="Replace with"
+            value={replaceText}
+            onChange={(event) => setReplaceText(event.target.value)}
           />
-          <button className="btn btn-primary" onClick={handleFindReplace}>Replace All</button>
-          <button className="btn btn-secondary" onClick={() => setShowFindReplace(false)} style={{ padding: '0.2rem' }}><X size={18} /></button>
+          <button className="btn btn-primary" onClick={handleFindReplace} type="button">
+            Replace all
+          </button>
+          <button className="btn btn-secondary btn-icon" onClick={() => setShowFindReplace(false)} type="button">
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {showImagePanel && (
+        <div className="insert-image-panel">
+          <input
+            className="form-control form-inline-field form-inline-field--wide"
+            placeholder="Paste an image URL"
+            value={imageUrl}
+            onChange={(event) => setImageUrl(event.target.value)}
+          />
+          <button className="btn btn-primary" onClick={insertImageFromUrl} type="button">
+            Insert URL
+          </button>
+          <button className="btn btn-secondary" onClick={() => imageInputRef.current?.click()} type="button">
+            Upload file
+          </button>
+          <button className="btn btn-secondary btn-icon" onClick={() => setShowImagePanel(false)} type="button">
+            <X size={16} />
+          </button>
         </div>
       )}
 
       <div className="workspace">
-        <div className="workspace-center" style={{ background: '#f0f0f0', overflowY: 'auto' }}>
-          <div className="document-page" style={{ margin: '2rem auto', background: 'white', padding: '1in', minHeight: '11in', width: '8.5in', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-            <EditorContent editor={editor} />
+        <div className="workspace-center">
+          <div className="word-stage">
+            <div className="document-stage">
+              <div className="document-shell">
+                <div className="document-page">
+                  <EditorContent editor={editor} />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
+
+        <aside className="workspace-sidebar">
+          <div className="panel-stack">
+            <div className="panel-card">
+              <div className="panel-section">
+                <h3>Document insights</h3>
+                <div className="metric-grid">
+                  <div className="metric-card">
+                    <span className="metric-label">Words</span>
+                    <span className="metric-value">{wordCount}</span>
+                  </div>
+                  <div className="metric-card">
+                    <span className="metric-label">Characters</span>
+                    <span className="metric-value">{characterCount}</span>
+                  </div>
+                  <div className="metric-card">
+                    <span className="metric-label">Paragraphs</span>
+                    <span className="metric-value">{paragraphCount}</span>
+                  </div>
+                  <div className="metric-card">
+                    <span className="metric-label">Read time</span>
+                    <span className="metric-value">{readingMinutes} min</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="panel-card">
+              <div className="panel-section">
+                <h3>Working session</h3>
+                <ul className="panel-list">
+                  <li>Autosave status: {saveSummary}</li>
+                  <li>Import DOCX when you need to start from an existing file.</li>
+                  <li>Use the ribbon button on mobile to keep the page focused while editing.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </aside>
       </div>
-      
-      <StatusBar 
-        leftContent={<span>Page 1 of 1 &bull; {wordCount} words &bull; {saveStatus}</span>}
-        rightContent={<span>100%</span>}
-      />
+
+      <StatusBar leftContent={<span>Page 1 of 1 | {wordCount} words | {saveSummary}</span>} rightContent={<span>Rich text mode</span>} />
     </div>
   );
 }

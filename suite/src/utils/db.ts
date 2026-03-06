@@ -8,7 +8,7 @@ interface OfficeNinjaDB extends DBSchema {
       id: string;
       title: string;
       type: 'word' | 'excel' | 'powerpoint';
-      data: any;
+      data: unknown;
       updatedAt: number;
     };
     indexes: { 'by-date': number };
@@ -30,7 +30,7 @@ async function getDB(): Promise<IDBPDatabase<OfficeNinjaDB>> {
   });
 }
 
-export async function saveDocument(id: string, title: string, type: 'word' | 'excel' | 'powerpoint', data: any) {
+export async function saveDocument(id: string, title: string, type: 'word' | 'excel' | 'powerpoint', data: unknown) {
   const db = await getDB();
   await db.put(STORE_NAME, {
     id,
@@ -41,9 +41,18 @@ export async function saveDocument(id: string, title: string, type: 'word' | 'ex
   });
 }
 
-export async function loadDocument(id: string) {
+export async function loadDocument<T = unknown>(id: string) {
   const db = await getDB();
-  return db.get(STORE_NAME, id);
+  return db.get(STORE_NAME, id) as Promise<
+    | {
+        id: string;
+        title: string;
+        type: 'word' | 'excel' | 'powerpoint';
+        data: T;
+        updatedAt: number;
+      }
+    | undefined
+  >;
 }
 
 export async function listDocuments() {

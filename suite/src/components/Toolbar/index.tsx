@@ -1,6 +1,6 @@
 import type { LucideProps } from 'lucide-react';
 import React, { useState } from 'react';
-import { Settings, X } from 'lucide-react';
+import { Settings2, X } from 'lucide-react';
 
 interface ToolbarButtonProps {
   icon: React.ComponentType<LucideProps>;
@@ -10,6 +10,11 @@ interface ToolbarButtonProps {
   title?: string;
 }
 
+interface ToolbarGroupProps {
+  children: React.ReactNode;
+  label?: string;
+}
+
 export function ToolbarButton({ icon: Icon, onClick, isActive, isDisabled, title }: ToolbarButtonProps) {
   return (
     <button
@@ -17,14 +22,21 @@ export function ToolbarButton({ icon: Icon, onClick, isActive, isDisabled, title
       onClick={onClick}
       disabled={isDisabled}
       title={title}
+      type="button"
+      aria-pressed={isActive}
     >
       <Icon size={18} />
     </button>
   );
 }
 
-export function ToolbarGroup({ children }: { children: React.ReactNode }) {
-  return <div className="toolbar-group">{children}</div>;
+export function ToolbarGroup({ children, label }: ToolbarGroupProps) {
+  return (
+    <section className="toolbar-group">
+      {label && <span className="toolbar-group-label">{label}</span>}
+      <div className="toolbar-group-controls">{children}</div>
+    </section>
+  );
 }
 
 export function Toolbar({ children }: { children: React.ReactNode }) {
@@ -32,25 +44,33 @@ export function Toolbar({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <div className="toolbar">{children}</div>
-      
-      {/* Mobile Toggle Button */}
-      <div style={{ padding: '0.5rem', background: 'var(--light)', borderBottom: '1px solid var(--border)' }} className="mobile-only-header">
-        <button className="mobile-toolbar-toggle" onClick={() => setIsMobileOpen(true)}>
-          <Settings size={18} /> Tools & Settings
+      <div className="toolbar-shell">
+        <div className="toolbar">{children}</div>
+      </div>
+
+      <div className="mobile-toolbar-launcher">
+        <button className="mobile-toolbar-toggle" onClick={() => setIsMobileOpen(true)} type="button">
+          <Settings2 size={18} />
+          <span>Ribbon</span>
         </button>
       </div>
 
-      {/* Mobile Modal */}
-      <div className={`mobile-toolbar-modal ${isMobileOpen ? 'open' : ''}`} onClick={() => setIsMobileOpen(false)}>
-        <div className="mobile-toolbar-content" onClick={e => e.stopPropagation()}>
+      <div
+        className={`mobile-toolbar-modal ${isMobileOpen ? 'open' : ''}`}
+        onClick={() => setIsMobileOpen(false)}
+        aria-hidden={!isMobileOpen}
+      >
+        <div className="mobile-toolbar-sheet" onClick={(event) => event.stopPropagation()}>
           <div className="mobile-toolbar-header">
-            <span>Tools & Settings</span>
-            <button className="mobile-toolbar-close" onClick={() => setIsMobileOpen(false)}>
-              <X size={24} />
+            <div>
+              <span className="mobile-toolbar-title">Quick Tools</span>
+              <span className="mobile-toolbar-subtitle">Editing tools optimized for smaller screens.</span>
+            </div>
+            <button className="mobile-toolbar-close" onClick={() => setIsMobileOpen(false)} type="button">
+              <X size={20} />
             </button>
           </div>
-          {children}
+          <div className="mobile-toolbar-body">{children}</div>
         </div>
       </div>
     </>
