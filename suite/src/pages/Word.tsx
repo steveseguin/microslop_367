@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { EditorContent, useEditor } from '@tiptap/react';
 import type { JSONContent } from '@tiptap/core';
@@ -73,6 +73,9 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
   const [isDropTargetActive, setIsDropTargetActive] = useState(false);
   const [isImagePanelDropTargetActive, setIsImagePanelDropTargetActive] = useState(false);
   const [mobileWorkspaceView, setMobileWorkspaceView] = useState<'editor' | 'insights'>('editor');
+  const mobileSectionId = useId();
+  const editorSectionId = `${mobileSectionId}-editor`;
+  const insightsSectionId = `${mobileSectionId}-insights`;
 
   const recognitionRef = useRef<any>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -1104,7 +1107,12 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
           <button className="btn btn-primary" onClick={handleFindReplace} type="button">
             Replace all
           </button>
-          <button className="btn btn-secondary btn-icon" onClick={() => setShowFindReplace(false)} type="button">
+          <button
+            className="btn btn-secondary btn-icon"
+            onClick={() => setShowFindReplace(false)}
+            type="button"
+            aria-label="Close find and replace"
+          >
             <X size={16} />
           </button>
         </div>
@@ -1145,7 +1153,12 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
           <button className="btn btn-secondary" onClick={() => imageInputRef.current?.click()} type="button">
             Choose from device
           </button>
-          <button className="btn btn-secondary btn-icon" onClick={() => setShowImagePanel(false)} type="button">
+          <button
+            className="btn btn-secondary btn-icon"
+            onClick={() => setShowImagePanel(false)}
+            type="button"
+            aria-label="Close image import"
+          >
             <X size={16} />
           </button>
         </div>
@@ -1156,7 +1169,8 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
           className={`workspace-switcher-tab ${mobileWorkspaceView === 'editor' ? 'active' : ''}`}
           onClick={() => setMobileWorkspaceView('editor')}
           type="button"
-          aria-pressed={mobileWorkspaceView === 'editor'}
+          aria-controls={editorSectionId}
+          aria-expanded={mobileWorkspaceView === 'editor'}
         >
           Editor
         </button>
@@ -1164,7 +1178,8 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
           className={`workspace-switcher-tab ${mobileWorkspaceView === 'insights' ? 'active' : ''}`}
           onClick={() => setMobileWorkspaceView('insights')}
           type="button"
-          aria-pressed={mobileWorkspaceView === 'insights'}
+          aria-controls={insightsSectionId}
+          aria-expanded={mobileWorkspaceView === 'insights'}
         >
           Insights
         </button>
@@ -1172,8 +1187,11 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
 
       <div className="workspace">
         <div
+          id={editorSectionId}
           className={`workspace-center ${mobileWorkspaceView === 'insights' ? 'workspace-pane--hidden-mobile' : ''}`}
           onClick={() => setMobileWorkspaceView('editor')}
+          role="region"
+          aria-label="Word editor workspace"
         >
           <div className="word-stage">
             <div className="document-stage">
@@ -1195,7 +1213,12 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
           </div>
         </div>
 
-        <aside className={`workspace-sidebar ${mobileWorkspaceView === 'editor' ? 'workspace-pane--hidden-mobile' : ''}`}>
+        <aside
+          id={insightsSectionId}
+          className={`workspace-sidebar ${mobileWorkspaceView === 'editor' ? 'workspace-pane--hidden-mobile' : ''}`}
+          role="region"
+          aria-label="Word insights"
+        >
           <div className="panel-stack">
             <div className="panel-card">
               <div className="panel-section">

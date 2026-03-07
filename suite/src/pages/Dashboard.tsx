@@ -129,7 +129,12 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
                 <span className="dashboard-brand__title">OfficeNinja Suite</span>
               </div>
             </div>
-            <button className="btn btn-secondary btn-icon dashboard-theme-toggle" onClick={toggleTheme} type="button">
+            <button
+              className="btn btn-secondary btn-icon dashboard-theme-toggle"
+              onClick={toggleTheme}
+              type="button"
+              aria-label={isDarkMode ? 'Switch to light theme' : 'Switch to dark theme'}
+            >
               {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
             </button>
           </div>
@@ -280,6 +285,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
                       className="recent-delete-btn"
                       onClick={(event) => handleDeleteClick(event, doc)}
                       title={`Delete ${doc.title}`}
+                      aria-label={`Delete ${doc.title}`}
                       type="button"
                     >
                       <Trash2 size={14} />

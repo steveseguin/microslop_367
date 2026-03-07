@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { BarChart3, Download, Plus, Redo, Snowflake, Undo, Upload, X } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
@@ -329,6 +329,9 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
   const [banner, setBanner] = useState<BannerState | null>(null);
   const [importCandidate, setImportCandidate] = useState<File | null>(null);
   const [mobileWorkspaceView, setMobileWorkspaceView] = useState<'sheet' | 'insights'>('sheet');
+  const mobileSectionId = useId();
+  const sheetSectionId = `${mobileSectionId}-sheet`;
+  const insightsSectionId = `${mobileSectionId}-insights`;
 
   const workbookRef = useRef<WorkbookInstance | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -969,7 +972,8 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
           className={`workspace-switcher-tab ${mobileWorkspaceView === 'sheet' ? 'active' : ''}`}
           onClick={() => setMobileWorkspaceView('sheet')}
           type="button"
-          aria-pressed={mobileWorkspaceView === 'sheet'}
+          aria-controls={sheetSectionId}
+          aria-expanded={mobileWorkspaceView === 'sheet'}
         >
           Sheet
         </button>
@@ -977,7 +981,8 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
           className={`workspace-switcher-tab ${mobileWorkspaceView === 'insights' ? 'active' : ''}`}
           onClick={() => setMobileWorkspaceView('insights')}
           type="button"
-          aria-pressed={mobileWorkspaceView === 'insights'}
+          aria-controls={insightsSectionId}
+          aria-expanded={mobileWorkspaceView === 'insights'}
         >
           Insights
         </button>
@@ -1013,8 +1018,11 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
 
       <div className="workspace">
         <div
+          id={sheetSectionId}
           className={`spreadsheet-shell ${mobileWorkspaceView === 'insights' ? 'workspace-pane--hidden-mobile' : ''}`}
           onClick={() => setMobileWorkspaceView('sheet')}
+          role="region"
+          aria-label="Spreadsheet workspace"
         >
           <div className="spreadsheet-container" role="region" aria-label="Spreadsheet grid">
             <Suspense fallback={<div className="surface-loading" role="status">Loading spreadsheet engine...</div>}>
@@ -1030,8 +1038,11 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
         </div>
 
         <aside
+          id={insightsSectionId}
           className={`workspace-sidebar ${mobileWorkspaceView === 'sheet' ? 'workspace-pane--hidden-mobile' : ''}`}
           onClick={() => setMobileWorkspaceView('insights')}
+          role="region"
+          aria-label="Spreadsheet insights"
         >
           <div className="panel-stack">
             <div className="panel-card">

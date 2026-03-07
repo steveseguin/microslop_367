@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import * as fabric from 'fabric';
 import {
@@ -219,6 +219,10 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   const [importCandidate, setImportCandidate] = useState<File | null>(null);
   const [mobileWorkspaceView, setMobileWorkspaceView] = useState<'slides' | 'canvas' | 'notes'>('canvas');
   const [isDropTargetActive, setIsDropTargetActive] = useState(false);
+  const mobileSectionId = useId();
+  const slidesSectionId = `${mobileSectionId}-slides`;
+  const canvasSectionId = `${mobileSectionId}-canvas`;
+  const notesSectionId = `${mobileSectionId}-notes`;
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -1315,7 +1319,8 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
             className={`workspace-switcher-tab ${mobileWorkspaceView === 'slides' ? 'active' : ''}`}
             onClick={() => setMobileWorkspaceView('slides')}
             type="button"
-            aria-pressed={mobileWorkspaceView === 'slides'}
+            aria-controls={slidesSectionId}
+            aria-expanded={mobileWorkspaceView === 'slides'}
           >
             Slides
           </button>
@@ -1323,7 +1328,8 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
             className={`workspace-switcher-tab ${mobileWorkspaceView === 'canvas' ? 'active' : ''}`}
             onClick={() => setMobileWorkspaceView('canvas')}
             type="button"
-            aria-pressed={mobileWorkspaceView === 'canvas'}
+            aria-controls={canvasSectionId}
+            aria-expanded={mobileWorkspaceView === 'canvas'}
           >
             Canvas
           </button>
@@ -1331,7 +1337,8 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
             className={`workspace-switcher-tab ${mobileWorkspaceView === 'notes' ? 'active' : ''}`}
             onClick={() => setMobileWorkspaceView('notes')}
             type="button"
-            aria-pressed={mobileWorkspaceView === 'notes'}
+            aria-controls={notesSectionId}
+            aria-expanded={mobileWorkspaceView === 'notes'}
           >
             Notes
           </button>
@@ -1340,7 +1347,12 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
       <div className={isPresenterView ? 'presenter-shell' : 'workspace'}>
         {!isPresenterView && (
-          <aside className={`slide-sidebar ${mobileWorkspaceView !== 'slides' ? 'workspace-pane--hidden-mobile' : ''}`} aria-label="Slide thumbnails">
+          <aside
+            id={slidesSectionId}
+            className={`slide-sidebar ${mobileWorkspaceView !== 'slides' ? 'workspace-pane--hidden-mobile' : ''}`}
+            aria-label="Slide thumbnails"
+            role="region"
+          >
             <div className="slide-sidebar__header">
               <div>
                 <h3 style={{ margin: 0 }}>Slides</h3>
@@ -1348,7 +1360,12 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
                   Tap a thumbnail to move through the deck.
                 </p>
               </div>
-              <button className="btn btn-secondary btn-icon" onClick={() => addSlide('content')} type="button">
+              <button
+                className="btn btn-secondary btn-icon"
+                onClick={() => addSlide('content')}
+                type="button"
+                aria-label="Add slide"
+              >
                 <Plus size={16} />
               </button>
             </div>
@@ -1395,12 +1412,15 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         )}
 
         <div
+          id={canvasSectionId}
           className={`${isPresenterView ? 'presenter-stage' : 'presentation-stage'} ${!isPresenterView && mobileWorkspaceView !== 'canvas' ? 'workspace-pane--hidden-mobile' : ''}`}
           onClick={() => {
             if (!isPresenterView) {
               setMobileWorkspaceView('canvas');
             }
           }}
+          role={isPresenterView ? undefined : 'region'}
+          aria-label={isPresenterView ? undefined : 'Slide canvas workspace'}
         >
           {isPresenterView && (
             <div className="presenter-toolbar">
@@ -1428,6 +1448,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         </div>
 
         <aside
+          id={notesSectionId}
           className={`${isPresenterView ? 'presenter-sidebar' : 'notes-sidebar'} ${!isPresenterView && mobileWorkspaceView !== 'notes' ? 'workspace-pane--hidden-mobile' : ''}`}
           aria-label={isPresenterView ? 'Presenter notes' : 'Slide notes'}
           onClick={() => {
@@ -1435,6 +1456,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
               setMobileWorkspaceView('notes');
             }
           }}
+          role="region"
         >
           {notesPanel}
           {isPresenterView && (

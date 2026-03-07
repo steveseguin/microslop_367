@@ -124,6 +124,31 @@ a {
   min-height: 100vh;
 }
 
+.app-main {
+  min-height: 100vh;
+}
+
+.skip-link {
+  position: fixed;
+  left: 1rem;
+  top: -4rem;
+  z-index: 1200;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.75rem 1rem;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.24);
+  transition: top 0.2s ease, transform 0.2s ease;
+}
+
+.skip-link:focus-visible {
+  top: 1rem;
+  transform: translateY(0);
+}
+
 .app-loading {
   min-height: 100vh;
   display: grid;

@@ -8,7 +8,7 @@ const PowerPoint = lazy(() => import('./pages/PowerPoint'));
 
 function AppLoading() {
   return (
-    <div className="app-loading">
+    <div className="app-loading" role="status" aria-live="polite">
       <div className="app-loading__card">
         <div className="app-loading__spinner" aria-hidden="true" />
         <div>
@@ -48,17 +48,27 @@ function App() {
   }, [isDarkMode]);
 
   const toggleDarkMode = () => setIsDarkMode(!isDarkMode);
+  const focusMainContent = () => {
+    const mainContent = document.getElementById('app-main');
+    mainContent?.focus();
+    mainContent?.scrollIntoView({ block: 'start' });
+  };
 
   return (
     <div className="app">
-      <Suspense fallback={<AppLoading />}>
-        <Routes>
-          <Route path="/" element={<Dashboard toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
-          <Route path="/word" element={<Word toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
-          <Route path="/excel" element={<Excel toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
-          <Route path="/powerpoint" element={<PowerPoint toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
-        </Routes>
-      </Suspense>
+      <button className="skip-link" onClick={focusMainContent} type="button">
+        Skip to main content
+      </button>
+      <main id="app-main" className="app-main" tabIndex={-1}>
+        <Suspense fallback={<AppLoading />}>
+          <Routes>
+            <Route path="/" element={<Dashboard toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+            <Route path="/word" element={<Word toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+            <Route path="/excel" element={<Excel toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+            <Route path="/powerpoint" element={<PowerPoint toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+          </Routes>
+        </Suspense>
+      </main>
     </div>
   );
 }
