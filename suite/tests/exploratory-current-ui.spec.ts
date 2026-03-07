@@ -58,10 +58,10 @@ test.describe('Current UI exploratory coverage', () => {
     await expect(page.locator('.ProseMirror table')).toBeVisible();
 
     await desktopRibbon.getByTitle('Insert image').click();
-    await page.getByPlaceholder('Paste an image URL').fill(
+    await page.getByPlaceholder('Paste an image URL to embed locally').fill(
       'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
     );
-    await page.getByRole('button', { name: 'Insert URL' }).click();
+    await page.getByRole('button', { name: 'Embed URL' }).click();
     await expect(page.locator('.ProseMirror img')).toBeVisible();
 
     await page.mouse.wheel(0, 1800);

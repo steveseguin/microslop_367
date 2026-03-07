@@ -36,8 +36,8 @@ test.describe('Suite edge cases', () => {
 
     const ribbon = page.locator('.toolbar-shell');
     await ribbon.getByTitle('Insert image').click();
-    await page.getByPlaceholder('Paste an image URL').fill('https://example.com/');
-    await page.getByRole('button', { name: 'Insert URL' }).click();
+    await page.getByPlaceholder('Paste an image URL to embed locally').fill('https://example.com/');
+    await page.getByRole('button', { name: 'Embed URL' }).click();
     await expect(page.locator('.editor-banner')).toContainText('Image could not be loaded.');
 
     const fileName = page.getByLabel('File name');

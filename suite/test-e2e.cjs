@@ -1,30 +1,29 @@
-const puppeteer = require('puppeteer');
+const { chromium } = require('@playwright/test');
 
 (async () => {
   console.log('Starting E2E Tests for OfficeNinja Suite...');
   
-  // Launch headless browser, allowing self-signed certificates
-  const browser = await puppeteer.launch({ 
+  const browser = await chromium.launch({
     args: ['--ignore-certificate-errors', '--no-sandbox']
   });
-  
-  const page = await browser.newPage();
+  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const page = await context.newPage();
   
   try {
     // 1. Test Dashboard
     console.log('--> Testing Dashboard load...');
-    await page.goto('https://localhost:3443/', { waitUntil: 'networkidle0' });
+    await page.goto('https://localhost:3443/', { waitUntil: 'networkidle' });
     
-    const dashboardTitle = await page.$eval('h1', el => el.textContent);
+    const dashboardTitle = await page.textContent('h1');
     if (!dashboardTitle.includes('OfficeNinja')) throw new Error('Dashboard failed to load correctly.');
     console.log('    [PASS] Dashboard loaded successfully.');
 
     // 2. Test Navigation to NinjaWord
     console.log('--> Testing Navigation to NinjaWord...');
-    await page.goto('https://localhost:3443/#/word?id=test-doc-123', { waitUntil: 'networkidle0' });
-    await page.waitForSelector('.document-page', { timeout: 5000 });
+    await page.goto('https://localhost:3443/#/word?id=test-doc-123', { waitUntil: 'networkidle' });
+    await page.locator('.document-page').waitFor({ timeout: 5000 });
     
-    const wordTitle = await page.$eval('.app-title', el => el.textContent);
+    const wordTitle = await page.textContent('.app-title');
     if (!wordTitle.includes('NinjaWord')) throw new Error('Failed to navigate to NinjaWord.');
     console.log('    [PASS] NinjaWord loaded successfully.');
 
@@ -48,12 +47,12 @@ const puppeteer = require('puppeteer');
 
     // 4. Test Persistence (Refresh Page)
     console.log('--> Testing Local Persistence (IndexedDB)...');
-    await page.reload({ waitUntil: 'networkidle0' });
+    await page.reload({ waitUntil: 'networkidle' });
     
     // Wait for editor to populate
-    await page.waitForSelector('.ProseMirror p');
+    await page.locator('.ProseMirror p').waitFor();
     
-    const editorContent = await page.$eval('.ProseMirror', el => el.textContent);
+    const editorContent = await page.textContent('.ProseMirror');
     if (!editorContent.includes(testString)) {
         throw new Error(`Content mismatch after reload. Expected "${testString}", got "${editorContent}"`);
     }
@@ -63,6 +62,7 @@ const puppeteer = require('puppeteer');
   } catch (err) {
     console.error('--> Test Failed: ', err.message);
   } finally {
+    await context.close();
     await browser.close();
   }
 })();

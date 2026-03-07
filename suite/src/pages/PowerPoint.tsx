@@ -195,6 +195,7 @@ function extractTransformMetrics(node: ParentNode | null) {
 }
 
 export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps) {
+  const maxImportFileBytes = 30 * 1024 * 1024;
   const [searchParams, setSearchParams] = useSearchParams();
   const defaultFileName = 'Untitled Presentation';
   const [docId] = useState(() => searchParams.get('id') || `powerpoint-${Date.now()}`);
@@ -895,6 +896,15 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   }, [fabricCanvas, isPresenterView]);
 
   const importPptxFile = async (file: File) => {
+    if (file.size > maxImportFileBytes) {
+      setBanner({
+        tone: 'error',
+        title: 'Presentation is too large to import safely.',
+        detail: 'Choose a smaller deck before converting it in the browser.',
+      });
+      return;
+    }
+
     setSaveStatus('Importing...');
     setFileName(file.name.replace(/\.[^/.]+$/, ''));
 

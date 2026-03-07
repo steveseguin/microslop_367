@@ -1,20 +1,20 @@
-const puppeteer = require('puppeteer');
+const { chromium } = require('@playwright/test');
 
 (async () => {
   console.log('Starting PowerPoint E2E Test...');
   
-  const browser = await puppeteer.launch({ 
+  const browser = await chromium.launch({
     args: ['--ignore-certificate-errors', '--no-sandbox']
   });
-  
-  const page = await browser.newPage();
+  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const page = await context.newPage();
   
   // Catch page errors
-  page.on('pageerror', err => {
+  page.on('pageerror', (err) => {
     console.error('PAGE ERROR:', err.toString());
   });
   
-  page.on('console', msg => {
+  page.on('console', (msg) => {
     if (msg.type() === 'error') {
       console.error('CONSOLE ERROR:', msg.text());
     }
@@ -22,18 +22,18 @@ const puppeteer = require('puppeteer');
 
   try {
     console.log('--> Navigating to NinjaSlides...');
-    await page.goto('https://localhost:3443/#/powerpoint', { waitUntil: 'networkidle0' });
+    await page.goto('https://localhost:3443/#/powerpoint', { waitUntil: 'networkidle' });
     
     console.log('--> Waiting for canvas...');
-    await page.waitForSelector('canvas', { timeout: 5000 });
+    await page.locator('canvas').waitFor({ timeout: 5000 });
     
     // wait a bit for any react effects
     await new Promise(r => setTimeout(r, 2000));
     
     // click 'new slide'
     console.log('--> Clicking New Slide...');
-    const newSlideBtn = await page.$('button[title="New Slide"]');
-    if (newSlideBtn) {
+    const newSlideBtn = page.locator('button[title="New slide"]').first();
+    if (await newSlideBtn.count()) {
       await newSlideBtn.click();
       await new Promise(r => setTimeout(r, 2000));
     } else {
@@ -44,6 +44,7 @@ const puppeteer = require('puppeteer');
   } catch (err) {
     console.error('--> Test Failed: ', err.message);
   } finally {
+    await context.close();
     await browser.close();
   }
 })();

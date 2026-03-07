@@ -52,6 +52,8 @@ interface BannerState {
 }
 
 export default function Word({ toggleTheme, isDarkMode }: WordProps) {
+  const maxImportFileBytes = 20 * 1024 * 1024;
+  const maxEmbeddedImageBytes = 6 * 1024 * 1024;
   const [searchParams, setSearchParams] = useSearchParams();
   const defaultFileName = 'Untitled Document';
   const [docId] = useState(() => searchParams.get('id') || `word-${Date.now()}`);
@@ -69,6 +71,7 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
   const [imageUrl, setImageUrl] = useState('');
   const [banner, setBanner] = useState<BannerState | null>(null);
   const [isDropTargetActive, setIsDropTargetActive] = useState(false);
+  const [isImagePanelDropTargetActive, setIsImagePanelDropTargetActive] = useState(false);
   const [mobileWorkspaceView, setMobileWorkspaceView] = useState<'editor' | 'insights'>('editor');
 
   const recognitionRef = useRef<any>(null);
@@ -280,13 +283,64 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
     window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
   };
 
-  const readFileAsDataUrl = (file: File) =>
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024 * 1024) {
+      return `${Math.round(bytes / 1024)} KB`;
+    }
+
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const readBlobAsDataUrl = (blob: Blob) =>
     new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
       reader.onerror = () => reject(reader.error ?? new Error('File could not be read'));
-      reader.readAsDataURL(file);
+      reader.readAsDataURL(blob);
     });
+
+  const getImageMimeType = (source: string, currentMimeType: string) => {
+    if (currentMimeType.startsWith('image/')) {
+      return currentMimeType;
+    }
+
+    const normalizedSource = source.toLowerCase().split(/[?#]/, 1)[0];
+    if (normalizedSource.endsWith('.png')) {
+      return 'image/png';
+    }
+    if (normalizedSource.endsWith('.jpg') || normalizedSource.endsWith('.jpeg')) {
+      return 'image/jpeg';
+    }
+    if (normalizedSource.endsWith('.gif')) {
+      return 'image/gif';
+    }
+    if (normalizedSource.endsWith('.webp')) {
+      return 'image/webp';
+    }
+    if (normalizedSource.endsWith('.bmp')) {
+      return 'image/bmp';
+    }
+    if (normalizedSource.endsWith('.svg')) {
+      return 'image/svg+xml';
+    }
+
+    return currentMimeType;
+  };
+
+  const prepareEmbeddableImageBlob = (blob: Blob, source: string) => {
+    const mimeType = getImageMimeType(source, blob.type);
+    const normalizedBlob = mimeType && mimeType !== blob.type ? blob.slice(0, blob.size, mimeType) : blob;
+
+    if (normalizedBlob.type && !normalizedBlob.type.startsWith('image/')) {
+      throw new Error('The selected asset is not a supported image file');
+    }
+
+    if (normalizedBlob.size > maxEmbeddedImageBytes) {
+      throw new Error(`Images larger than ${formatFileSize(maxEmbeddedImageBytes)} cannot be embedded locally yet`);
+    }
+
+    return normalizedBlob;
+  };
 
   const loadImageBinary = async (source: string) => {
     if (source.startsWith('data:')) {
@@ -334,22 +388,32 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
     return 'png';
   };
 
+  const insertEmbeddedImage = async (blob: Blob, options: { source: string; title: string; detail: string }) => {
+    const embeddableBlob = prepareEmbeddableImageBlob(blob, options.source);
+    const dataUrl = await readBlobAsDataUrl(embeddableBlob);
+
+    // @ts-expect-error TipTap extension augments the editor commands at runtime.
+    editor.chain().focus().setImage({ src: dataUrl }).run();
+    setBanner({
+      tone: 'success',
+      title: options.title,
+      detail: options.detail,
+    });
+  };
+
   const insertImageFile = async (file: File) => {
     try {
-      const dataUrl = await readFileAsDataUrl(file);
-      // @ts-expect-error TipTap extension augments the editor commands at runtime.
-      editor.chain().focus().setImage({ src: dataUrl }).run();
-      setBanner({
-        tone: 'success',
+      await insertEmbeddedImage(file, {
+        source: file.name,
         title: 'Image inserted.',
-        detail: `Added ${file.name} directly into this document.`,
+        detail: `${file.name} is now embedded in this document and saved locally.`,
       });
     } catch (error) {
       console.error('Image file insert failed', error);
       setBanner({
         tone: 'error',
         title: 'Image could not be inserted.',
-        detail: 'The selected file could not be read in this browser session.',
+        detail: error instanceof Error ? error.message : 'The selected file could not be read in this browser session.',
       });
     }
   };
@@ -514,6 +578,16 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
       return;
     }
 
+    if (file.size > maxImportFileBytes) {
+      setBanner({
+        tone: 'error',
+        title: 'DOCX file is too large to import safely.',
+        detail: `Choose a file smaller than ${formatFileSize(maxImportFileBytes)} for in-browser conversion.`,
+      });
+      event.target.value = '';
+      return;
+    }
+
     setFileName(file.name.replace(/\.[^/.]+$/, ''));
 
     const reader = new FileReader();
@@ -662,8 +736,17 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
     setIsSpeaking(true);
   };
 
+  const validateRemoteImage = async (source: string) =>
+    new Promise<void>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('Image failed to load'));
+      image.src = source;
+    });
+
   const insertImageFromUrl = async () => {
-    if (!imageUrl.trim()) {
+    const trimmedUrl = imageUrl.trim();
+    if (!trimmedUrl) {
       setBanner({
         tone: 'warning',
         title: 'Paste an image URL first.',
@@ -672,29 +755,40 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
     }
 
     try {
-      await new Promise<void>((resolve, reject) => {
-        const image = new Image();
-        image.onload = () => resolve();
-        image.onerror = () => reject(new Error('Image failed to load'));
-        image.src = imageUrl.trim();
-      });
+      const response = await fetch(trimmedUrl);
+      if (!response.ok) {
+        throw new Error(`Image request failed with ${response.status}`);
+      }
 
-      // @ts-expect-error TipTap extension augments the editor commands at runtime.
-      editor.chain().focus().setImage({ src: imageUrl.trim() }).run();
+      await insertEmbeddedImage(await response.blob(), {
+        source: trimmedUrl,
+        title: 'Image embedded locally.',
+        detail: 'A local copy was saved with this document so it survives reloads and offline use.',
+      });
       setImageUrl('');
       setShowImagePanel(false);
-      setBanner({
-        tone: 'success',
-        title: 'Image inserted.',
-        detail: 'The image URL loaded successfully into this document.',
-      });
     } catch (error) {
       console.error('Image URL insert failed', error);
-      setBanner({
-        tone: 'error',
-        title: 'Image could not be loaded.',
-        detail: 'Check the URL and try a direct image file instead.',
-      });
+
+      try {
+        await validateRemoteImage(trimmedUrl);
+        // @ts-expect-error TipTap extension augments the editor commands at runtime.
+        editor.chain().focus().setImage({ src: trimmedUrl }).run();
+        setImageUrl('');
+        setShowImagePanel(false);
+        setBanner({
+          tone: 'warning',
+          title: 'Image inserted as a live link.',
+          detail: 'The remote site blocked local embedding, so this image may not be available offline.',
+        });
+      } catch (fallbackError) {
+        console.error('Remote image fallback insert failed', fallbackError);
+        setBanner({
+          tone: 'error',
+          title: 'Image could not be loaded.',
+          detail: 'Check the URL and try a direct image file instead.',
+        });
+      }
     }
   };
 
@@ -714,9 +808,16 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
     setIsDropTargetActive(false);
   };
 
+  const resetImagePanelDropTarget = () => {
+    dragDepthRef.current = 0;
+    setIsImagePanelDropTargetActive(false);
+  };
+
+  const dataTransferHasImageFile = (dataTransfer: DataTransfer) =>
+    [...dataTransfer.items].some((item) => item.kind === 'file' && item.type.startsWith('image/'));
+
   const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
-    const imageFiles = [...event.dataTransfer.items].some((item) => item.kind === 'file' && item.type.startsWith('image/'));
-    if (!imageFiles) {
+    if (!dataTransferHasImageFile(event.dataTransfer)) {
       return;
     }
 
@@ -726,8 +827,7 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
   };
 
   const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    const imageFiles = [...event.dataTransfer.items].some((item) => item.kind === 'file' && item.type.startsWith('image/'));
-    if (!imageFiles) {
+    if (!dataTransferHasImageFile(event.dataTransfer)) {
       return;
     }
 
@@ -752,6 +852,45 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
     }
 
     await insertImageFile(imageFile);
+  };
+
+  const handleImagePanelDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!dataTransferHasImageFile(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setIsImagePanelDropTargetActive(true);
+  };
+
+  const handleImagePanelDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!dataTransferHasImageFile(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleImagePanelDragLeave = () => {
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsImagePanelDropTargetActive(false);
+    }
+  };
+
+  const handleImagePanelDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const imageFile = [...event.dataTransfer.files].find((file) => file.type.startsWith('image/'));
+    resetImagePanelDropTarget();
+
+    if (!imageFile) {
+      return;
+    }
+
+    await insertImageFile(imageFile);
+    setShowImagePanel(false);
   };
 
   useEffect(() => {
@@ -973,18 +1112,38 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
 
       {showImagePanel && (
         <div className="insert-image-panel">
+          <div
+            className={`image-import-dropzone ${isImagePanelDropTargetActive ? 'image-import-dropzone--active' : ''}`}
+            role="button"
+            tabIndex={0}
+            onClick={() => imageInputRef.current?.click()}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                imageInputRef.current?.click();
+              }
+            }}
+            onDragEnter={handleImagePanelDragEnter}
+            onDragOver={handleImagePanelDragOver}
+            onDragLeave={handleImagePanelDragLeave}
+            onDrop={(event) => void handleImagePanelDrop(event)}
+            aria-label="Drop an image here or choose one from your device"
+          >
+            <strong>Drop image here or choose from device</strong>
+            <span>Embedded images are saved locally with this document for reloads and offline use.</span>
+          </div>
           <input
             className="form-control form-inline-field form-inline-field--wide"
             aria-label="Image URL"
-            placeholder="Paste an image URL"
+            placeholder="Paste an image URL to embed locally"
             value={imageUrl}
             onChange={(event) => setImageUrl(event.target.value)}
           />
           <button className="btn btn-primary" onClick={() => void insertImageFromUrl()} type="button">
-            Insert URL
+            Embed URL
           </button>
           <button className="btn btn-secondary" onClick={() => imageInputRef.current?.click()} type="button">
-            Upload file
+            Choose from device
           </button>
           <button className="btn btn-secondary btn-icon" onClick={() => setShowImagePanel(false)} type="button">
             <X size={16} />
@@ -1028,7 +1187,7 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
                   onDragLeave={handleDragLeave}
                   onDrop={(event) => void handleDrop(event)}
                 >
-                  {isDropTargetActive && <div className="drop-target-hint">Drop an image to embed it here.</div>}
+                  {isDropTargetActive && <div className="drop-target-hint">Drop an image to embed it here and save it locally.</div>}
                   <EditorContent editor={editor} />
                 </div>
               </div>

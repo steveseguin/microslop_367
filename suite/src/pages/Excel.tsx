@@ -310,6 +310,7 @@ function getSheetDataBounds(sheet: WorkbookSheet | undefined): SelectionBounds |
 }
 
 export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
+  const maxImportFileBytes = 12 * 1024 * 1024;
   const [searchParams, setSearchParams] = useSearchParams();
   const defaultFileName = 'Untitled Spreadsheet';
   const [docId] = useState(() => searchParams.get('id') || `excel-${Date.now()}`);
@@ -716,6 +717,15 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
   };
 
   const importWorkbookFile = async (file: File) => {
+    if (file.size > maxImportFileBytes) {
+      setBanner({
+        tone: 'error',
+        title: 'Workbook is too large to import safely.',
+        detail: 'Choose a smaller spreadsheet before importing it into the browser editor.',
+      });
+      return;
+    }
+
     try {
       const XLSX = await import('xlsx');
       const arrayBuffer = await file.arrayBuffer();

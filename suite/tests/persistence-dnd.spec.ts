@@ -55,17 +55,54 @@ async function dispatchImageDrop(page: import('@playwright/test').Page, selector
 test.use({ serviceWorkers: 'block' });
 
 test.describe('Persistence and drag-drop robustness', () => {
-  test('Word supports drag-drop image import and persists it after reload', async ({ page }) => {
+  test('Word supports the local image chooser, drag-drop import, and persists both after reload', async ({ page }) => {
     await page.goto(`${baseUrl}/#/word?id=${makeId('word-dnd')}`);
     await expect(page.locator('.document-page')).toBeVisible();
 
+    await page.locator('.toolbar-shell').getByTitle('Insert image').click();
+    await expect(page.getByText('Drop image here or choose from device')).toBeVisible();
+    const [imageChooser] = await Promise.all([
+      page.waitForEvent('filechooser'),
+      page.getByRole('button', { name: 'Choose from device' }).click(),
+    ]);
+    await imageChooser.setFiles(path.join(__dirname, '../test.png'));
+    await expect(page.locator('.editor-banner')).toContainText('embedded in this document');
+    await expect(page.locator('.ProseMirror img')).toHaveCount(1);
+
     await dispatchImageDrop(page, '.document-page');
     await expect(page.locator('.editor-banner')).toContainText('Image inserted.');
-    await expect(page.locator('.ProseMirror img')).toHaveCount(1);
+    await expect(page.locator('.ProseMirror img')).toHaveCount(2);
 
     await waitForSaved(page);
     await page.reload();
+    await expect(page.locator('.ProseMirror img')).toHaveCount(2);
+  });
+
+  test('Word embeds fetchable image URLs into the saved document instead of keeping hot links', async ({ page }) => {
+    await page.route('https://assets.officeninja.test/**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'access-control-allow-origin': '*',
+          'content-type': 'image/png',
+        },
+        body: Buffer.from(pngBytes),
+      });
+    });
+
+    await page.goto(`${baseUrl}/#/word?id=${makeId('word-url-embed')}`);
+    await expect(page.locator('.document-page')).toBeVisible();
+
+    await page.locator('.toolbar-shell').getByTitle('Insert image').click();
+    await page.getByPlaceholder('Paste an image URL to embed locally').fill('https://assets.officeninja.test/embed.png');
+    await page.getByRole('button', { name: 'Embed URL' }).click();
+    await expect(page.locator('.editor-banner')).toContainText('Image embedded locally.');
     await expect(page.locator('.ProseMirror img')).toHaveCount(1);
+    await expect(page.locator('.ProseMirror img').first()).toHaveAttribute('src', /^data:image\/png;base64,/);
+
+    await waitForSaved(page);
+    await page.reload();
+    await expect(page.locator('.ProseMirror img').first()).toHaveAttribute('src', /^data:image\/png;base64,/);
   });
 
   test('Slides supports drag-drop image import onto the canvas and still exports', async ({ page }) => {

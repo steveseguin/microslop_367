@@ -1156,6 +1156,41 @@ a {
   border-bottom: 1px solid var(--border);
 }
 
+.insert-image-panel {
+  align-items: stretch;
+}
+
+.image-import-dropzone {
+  flex: 1 1 100%;
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.9rem 1rem;
+  border-radius: 18px;
+  border: 1px dashed rgba(37, 99, 235, 0.32);
+  background: rgba(37, 99, 235, 0.06);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition), box-shadow var(--transition);
+}
+
+.image-import-dropzone strong {
+  font-size: 0.95rem;
+}
+
+.image-import-dropzone span {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.image-import-dropzone:hover,
+.image-import-dropzone:focus-visible,
+.image-import-dropzone--active {
+  outline: none;
+  border-color: rgba(37, 99, 235, 0.48);
+  background: rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+}
+
 .form-control,
 .formula-input,
 .notes-textarea {
