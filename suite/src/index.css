@@ -124,6 +124,61 @@ a {
   min-height: 100vh;
 }
 
+.app-loading {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.app-loading__card {
+  width: min(420px, 100%);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.25rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(18px);
+}
+
+.app-loading__card strong {
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+.app-loading__card p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.app-loading__spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 3px solid rgba(37, 99, 235, 0.16);
+  border-top-color: var(--accent);
+  animation: app-spin 900ms linear infinite;
+}
+
+.surface-loading {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+@keyframes app-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -145,6 +200,15 @@ a {
 
 .btn:hover:not(:disabled) {
   transform: translateY(-1px);
+}
+
+.btn:focus-visible,
+.toolbar-btn:focus-visible,
+.mobile-toolbar-toggle:focus-visible,
+.workspace-switcher-tab:focus-visible,
+.slide-color-input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14);
 }
 
 .btn:disabled,
@@ -196,7 +260,7 @@ a {
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 1rem 1.25rem;
+  padding: calc(1rem + env(safe-area-inset-top, 0px)) 1.25rem 1rem;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(18px);
@@ -409,6 +473,7 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   border-radius: 0.8rem;
   border: 1px solid transparent;
   background: transparent;
@@ -478,6 +543,7 @@ a {
   background: var(--surface-solid);
   box-shadow: var(--shadow-lg);
   overflow: hidden;
+  overscroll-behavior: contain;
   transform: translateY(100%);
   transition: transform 220ms ease;
 }
@@ -521,6 +587,7 @@ a {
 
 .mobile-toolbar-body {
   padding: 1rem;
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
   overflow: auto;
   display: flex;
   flex-direction: column;
@@ -568,6 +635,36 @@ a {
 .workspace-sidebar--left {
   border-left: 0;
   border-right: 1px solid var(--border);
+}
+
+.workspace-mobile-switcher {
+  display: none;
+  gap: 0.55rem;
+  padding: 0.9rem 1rem 0;
+  background: transparent;
+}
+
+.workspace-switcher-tab {
+  flex: 1 1 0;
+  min-height: 42px;
+  padding: 0.7rem 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-weight: 700;
+  transition:
+    border-color var(--transition),
+    background var(--transition),
+    color var(--transition),
+    box-shadow var(--transition);
+}
+
+.workspace-switcher-tab.active {
+  color: #ffffff;
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.18);
 }
 
 .panel-card {
@@ -675,7 +772,7 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.75rem 1.1rem;
+  padding: 0.75rem 1.1rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
   background: var(--surface);
   border-top: 1px solid var(--border);
   color: var(--text-muted);
@@ -982,6 +1079,12 @@ a {
   cursor: pointer;
 }
 
+.recent-card:focus-visible {
+  outline: none;
+  border-color: rgba(37, 99, 235, 0.42);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12), var(--shadow-md);
+}
+
 .recent-card__header,
 .recent-card__footer {
   display: flex;
@@ -1087,10 +1190,13 @@ a {
   gap: 1rem;
   min-height: 100%;
   padding: 1.25rem;
+  width: 100%;
 }
 
 .document-stage {
   flex: 1;
+  width: 100%;
+  min-width: 0;
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -1100,6 +1206,8 @@ a {
 
 .document-shell {
   width: min(100%, 10.6in);
+  min-width: 0;
+  flex: 1 1 auto;
   padding: 1.15rem;
   border-radius: 1.7rem;
   background: rgba(255, 255, 255, 0.32);
@@ -1108,6 +1216,7 @@ a {
 }
 
 .document-page {
+  position: relative;
   width: min(100%, 8.5in);
   min-height: 11in;
   margin: 0 auto;
@@ -1116,6 +1225,28 @@ a {
   background: #ffffff;
   color: #0f172a;
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+}
+
+.document-page--drop-target {
+  outline: 3px dashed rgba(37, 99, 235, 0.35);
+  outline-offset: -14px;
+}
+
+.drop-target-hint,
+.canvas-drop-target-hint {
+  position: absolute;
+  inset: 1rem;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  border-radius: 0.9rem;
+  border: 2px dashed rgba(37, 99, 235, 0.35);
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--accent-strong);
+  font-weight: 700;
+  text-align: center;
+  pointer-events: none;
+  z-index: 2;
 }
 
 .ProseMirror {
@@ -1190,6 +1321,8 @@ a {
   flex: 1;
   min-height: 0;
   display: flex;
+  min-width: 0;
+  min-height: clamp(440px, 72vh, 980px);
 }
 
 .spreadsheet-container {
@@ -1198,6 +1331,7 @@ a {
   min-height: 0;
   background: #ffffff;
   overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.06);
 }
 
 .spreadsheet-container .fortune-sheet-container,
@@ -1300,6 +1434,7 @@ a {
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
+  scroll-snap-type: x proximity;
 }
 
 .slide-card {
@@ -1311,12 +1446,19 @@ a {
   padding: 0.65rem;
   box-shadow: var(--shadow-sm);
   text-align: left;
+  cursor: pointer;
   transition: transform var(--transition), border-color var(--transition), box-shadow var(--transition);
 }
 
 .slide-card:hover {
   transform: translateY(-2px);
   border-color: rgba(37, 99, 235, 0.25);
+}
+
+.slide-card:focus-visible {
+  outline: none;
+  border-color: rgba(37, 99, 235, 0.42);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12), 0 18px 34px rgba(37, 99, 235, 0.12);
 }
 
 .slide-card--active {
@@ -1354,10 +1496,15 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
   border: none;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.66);
   color: #ffffff;
+}
+
+.slide-card__delete:hover {
+  background: rgba(15, 23, 42, 0.82);
 }
 
 .presentation-stage {
@@ -1369,6 +1516,7 @@ a {
 }
 
 .canvas-shell {
+  position: relative;
   width: min(100%, 1000px);
   margin: 0 auto;
   padding: 1rem;
@@ -1376,6 +1524,10 @@ a {
   background: linear-gradient(180deg, rgba(15, 23, 42, 0.08), rgba(255, 255, 255, 0.5));
   border: 1px solid rgba(255, 255, 255, 0.3);
   box-shadow: var(--shadow-md);
+}
+
+.canvas-shell--drop-target {
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14), var(--shadow-md);
 }
 
 [data-theme="dark"] .canvas-shell {
@@ -1511,6 +1663,18 @@ a {
 }
 
 @media (max-width: 900px) {
+  .workspace-mobile-switcher {
+    display: flex;
+  }
+
+  .workspace-pane--hidden-mobile {
+    display: none !important;
+  }
+
+  .workspace {
+    flex-direction: column;
+  }
+
   .suite-header {
     flex-wrap: wrap;
     align-items: stretch;
@@ -1546,7 +1710,6 @@ a {
 
   .word-stage,
   .spreadsheet-shell,
-  .slides-layout,
   .presenter-shell {
     flex-direction: column;
   }
@@ -1575,6 +1738,7 @@ a {
 
   .slide-card {
     min-width: 180px;
+    scroll-snap-align: start;
   }
 
   .formula-strip {
@@ -1642,8 +1806,19 @@ a {
   .formula-strip,
   .find-replace-bar,
   .insert-image-panel,
-  .editor-banner {
+  .editor-banner,
+  .workspace-mobile-switcher {
     padding-inline: 1rem;
+  }
+
+  .find-replace-bar,
+  .insert-image-panel {
+    align-items: stretch;
+  }
+
+  .find-replace-bar .btn,
+  .insert-image-panel .btn {
+    width: 100%;
   }
 
   .header-actions,
@@ -1663,5 +1838,9 @@ a {
   .suite-home-link__text,
   .app-brand__eyebrow {
     display: none;
+  }
+
+  .spreadsheet-shell {
+    min-height: 70svh;
   }
 }

@@ -20,13 +20,11 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import pptxgen from 'pptxgenjs';
-import JSZip from 'jszip';
 import { AppHeader } from '../components/AppHeader';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { StatusBar } from '../components/StatusBar';
 import { Toolbar, ToolbarButton, ToolbarGroup } from '../components/Toolbar';
-import { loadDocument, saveDocument } from '../utils/db';
+import { getCurrentClientId, loadDocument, saveDocument, subscribeToDocument } from '../utils/db';
 
 interface PowerPointProps {
   toggleTheme: () => void;
@@ -140,10 +138,68 @@ function normalizeColor(value: string | undefined) {
   return value.replace('#', '');
 }
 
+function readBlobAsDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error('Blob could not be read'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function resolveZipTarget(basePath: string, target: string) {
+  if (target.startsWith('/')) {
+    return target.replace(/^\/+/, '');
+  }
+
+  const segments = basePath.split('/');
+  segments.pop();
+
+  for (const part of target.split('/')) {
+    if (!part || part === '.') {
+      continue;
+    }
+
+    if (part === '..') {
+      segments.pop();
+      continue;
+    }
+
+    segments.push(part);
+  }
+
+  return segments.join('/');
+}
+
+function extractTextContent(container: ParentNode) {
+  const paragraphs = [...container.querySelectorAll('a\\:p, p')].map((paragraph) =>
+    [...paragraph.querySelectorAll('a\\:t, t')]
+      .map((textNode) => textNode.textContent || '')
+      .join(''),
+  );
+
+  return paragraphs.filter(Boolean).join('\n');
+}
+
+function extractTransformMetrics(node: ParentNode | null) {
+  const transform = node?.querySelector('a\\:xfrm, xfrm');
+  const offset = transform?.querySelector('a\\:off, off');
+  const extent = transform?.querySelector('a\\:ext, ext');
+
+  const left = ((parseInt(offset?.getAttribute('x') || '0', 10) || 0) / 914400) * 96;
+  const top = ((parseInt(offset?.getAttribute('y') || '0', 10) || 0) / 914400) * 96;
+  const width = ((parseInt(extent?.getAttribute('cx') || '0', 10) || 0) / 914400) * 96;
+  const height = ((parseInt(extent?.getAttribute('cy') || '0', 10) || 0) / 914400) * 96;
+
+  return { left, top, width, height };
+}
+
 export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const defaultFileName = 'Untitled Presentation';
   const [docId] = useState(() => searchParams.get('id') || `powerpoint-${Date.now()}`);
-  const [fileName, setFileName] = useState('Untitled Presentation');
+  const [fileName, setFileName] = useState(defaultFileName);
+  const [documentRevision, setDocumentRevision] = useState(0);
   const [fabricCanvas, setFabricCanvas] = useState<fabric.Canvas | null>(null);
   const [hasSelection, setHasSelection] = useState(false);
   const [slides, setSlides] = useState<Slide[]>([{ id: 'slide-1', data: null, notes: '' }]);
@@ -160,6 +216,8 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   const [banner, setBanner] = useState<BannerState | null>(null);
   const [pendingDeleteSlideId, setPendingDeleteSlideId] = useState<string | null>(null);
   const [importCandidate, setImportCandidate] = useState<File | null>(null);
+  const [mobileWorkspaceView, setMobileWorkspaceView] = useState<'slides' | 'canvas' | 'notes'>('canvas');
+  const [isDropTargetActive, setIsDropTargetActive] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -167,6 +225,13 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   const pptImportRef = useRef<HTMLInputElement | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
   const isHistoryUpdate = useRef(false);
+  const dragDepthRef = useRef(0);
+  const documentRevisionRef = useRef(documentRevision);
+  const hasInitializedSaveRef = useRef(false);
+
+  useEffect(() => {
+    documentRevisionRef.current = documentRevision;
+  }, [documentRevision]);
 
   useEffect(() => {
     if (!searchParams.get('id')) {
@@ -196,7 +261,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       canvas.dispose();
       setFabricCanvas(null);
     };
-  }, [isPresenterView]);
+  }, []);
 
   useEffect(() => {
     if (!fabricCanvas || isLoaded) {
@@ -212,6 +277,14 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
             setCurrentSlideId(doc.data.slides[0].id);
           }
           setLastSavedAt(doc.updatedAt);
+          setDocumentRevision(doc.revision);
+          if (doc.source === 'backup') {
+            setBanner({
+              tone: 'warning',
+              title: 'Recovered the latest local backup.',
+              detail: 'This deck was restored from the browser backup cache after a storage mismatch.',
+            });
+          }
         }
         setIsLoaded(true);
       })
@@ -336,6 +409,11 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       return;
     }
 
+    if (!hasInitializedSaveRef.current) {
+      hasInitializedSaveRef.current = true;
+      return;
+    }
+
     setSaveStatus('Saving...');
     if (saveTimeoutRef.current) {
       window.clearTimeout(saveTimeoutRef.current);
@@ -343,9 +421,26 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
     saveTimeoutRef.current = window.setTimeout(async () => {
       try {
-        await saveDocument(docId, fileName, 'powerpoint', { slides });
+        const currentSnapshot = captureCurrentSlideSnapshot();
+        const slidesToSave = slides.map((slide) =>
+          slide.id === currentSlideId && currentSnapshot ? { ...slide, data: currentSnapshot.data, thumbnail: currentSnapshot.thumbnail } : slide,
+        );
+
+        const result = await saveDocument(docId, fileName, 'powerpoint', { slides: slidesToSave }, { knownRevision: documentRevisionRef.current });
+        setDocumentRevision(result.record.revision);
+
+        if (result.status === 'conflict') {
+          setSaveStatus('Conflict detected');
+          setBanner({
+            tone: 'warning',
+            title: 'A newer presentation was saved in another tab.',
+            detail: 'Your latest slide edits are still cached locally. Save again from this tab to replace the newer version, or reload to review it first.',
+          });
+          return;
+        }
+
         setSaveStatus('Saved');
-        setLastSavedAt(Date.now());
+        setLastSavedAt(result.record.updatedAt);
       } catch (error) {
         console.error('Failed to save presentation', error);
         setSaveStatus('Save error');
@@ -362,7 +457,25 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         window.clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [docId, fileName, isLoaded, slides]);
+  }, [currentSlideId, docId, fileName, isLoaded, slides]);
+
+  useEffect(() => {
+    if (!isLoaded) {
+      return;
+    }
+
+    return subscribeToDocument(docId, (event) => {
+      if (event.lastSavedBy === getCurrentClientId() || event.revision <= documentRevision) {
+        return;
+      }
+
+      setBanner({
+        tone: 'warning',
+        title: 'A newer presentation is available from another tab.',
+        detail: 'Reload this deck if you want the latest saved version from that session.',
+      });
+    });
+  }, [docId, documentRevision, isLoaded]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -387,6 +500,11 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"]')) {
+        return;
+      }
+
       if (event.key !== 'Delete' && event.key !== 'Backspace') {
         return;
       }
@@ -427,6 +545,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     }
 
     setCurrentSlideId(nextSlideId);
+    setMobileWorkspaceView('canvas');
   };
 
   const addSlide = (variant: 'cover' | 'content' = 'content') => {
@@ -448,6 +567,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     });
 
     setCurrentSlideId(newId);
+    setMobileWorkspaceView('canvas');
   };
 
   const duplicateSlide = () => {
@@ -478,6 +598,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     });
 
     setCurrentSlideId(newId);
+    setMobileWorkspaceView('canvas');
   };
 
   const deleteSlide = () => {
@@ -627,31 +748,94 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     persistCurrentSlide();
   };
 
-  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const insertImageFile = async (file: File) => {
     if (!file || !fabricCanvas) {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const image = await fabric.Image.fromURL(reader.result as string);
-        image.scaleToWidth(260);
-        image.set({ left: 120, top: 120 });
-        fabricCanvas.add(image);
-        fabricCanvas.setActiveObject(image);
-      } catch (error) {
-        console.error('Image load failed', error);
-        setBanner({
-          tone: 'error',
-          title: 'Image could not be inserted.',
-        });
-      }
-    };
+    try {
+      const dataUrl = await readBlobAsDataUrl(file);
+      const image = await fabric.Image.fromURL(dataUrl);
+      const baseWidth = image.width || 320;
+      const baseHeight = image.height || 240;
+      const scale = Math.min(1, 320 / baseWidth, 220 / baseHeight);
 
-    reader.readAsDataURL(file);
+      image.set({
+        left: 120,
+        top: 120,
+        scaleX: scale,
+        scaleY: scale,
+      });
+      fabricCanvas.add(image);
+      fabricCanvas.setActiveObject(image);
+      fabricCanvas.requestRenderAll();
+      fabricCanvas.fire('selection:created', { selected: [image], target: image } as never);
+      window.requestAnimationFrame(() => setHasSelection(fabricCanvas.getActiveObjects().length > 0));
+      setMobileWorkspaceView('canvas');
+      setBanner({
+        tone: 'success',
+        title: 'Image inserted.',
+        detail: `Added ${file.name} to the current slide.`,
+      });
+    } catch (error) {
+      console.error('Image load failed', error);
+      setBanner({
+        tone: 'error',
+        title: 'Image could not be inserted.',
+        detail: 'The selected file could not be read in this browser session.',
+      });
+    }
+  };
+
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    await insertImageFile(file as File);
     event.target.value = '';
+  };
+
+  const resetDropTarget = () => {
+    dragDepthRef.current = 0;
+    setIsDropTargetActive(false);
+  };
+
+  const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    const hasImageFile = [...event.dataTransfer.items].some((item) => item.kind === 'file' && item.type.startsWith('image/'));
+    if (!hasImageFile) {
+      return;
+    }
+
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDropTargetActive(true);
+  };
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    const hasImageFile = [...event.dataTransfer.items].some((item) => item.kind === 'file' && item.type.startsWith('image/'));
+    if (!hasImageFile) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDragLeave = () => {
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsDropTargetActive(false);
+    }
+  };
+
+  const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const imageFile = [...event.dataTransfer.files].find((file) => file.type.startsWith('image/'));
+    resetDropTarget();
+
+    if (!imageFile) {
+      return;
+    }
+
+    await insertImageFile(imageFile);
   };
 
   const toggleFullscreen = async () => {
@@ -687,11 +871,35 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     return `${minutes}:${remainder}`;
   };
 
+  useEffect(() => {
+    if (!fabricCanvas) {
+      return;
+    }
+
+    const handlePaste = async (event: ClipboardEvent) => {
+      if (isPresenterView) {
+        return;
+      }
+
+      const imageFile = [...(event.clipboardData?.files ?? [])].find((file) => file.type.startsWith('image/'));
+      if (!imageFile) {
+        return;
+      }
+
+      event.preventDefault();
+      await insertImageFile(imageFile);
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [fabricCanvas, isPresenterView]);
+
   const importPptxFile = async (file: File) => {
     setSaveStatus('Importing...');
     setFileName(file.name.replace(/\.[^/.]+$/, ''));
 
     try {
+      const { default: JSZip } = await import('jszip');
       const arrayBuffer = await file.arrayBuffer();
       const zip = await JSZip.loadAsync(arrayBuffer);
       const relationshipsXml = await zip.file('ppt/_rels/presentation.xml.rels')?.async('string');
@@ -723,7 +931,9 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       const importedSlides: Slide[] = [];
 
       for (const slideRef of slideRefs) {
-        const slideXml = await zip.file(`ppt/${slideRef}`)?.async('string');
+        const slidePath = `ppt/${slideRef}`;
+        const slideFileName = slideRef.split('/').pop();
+        const slideXml = await zip.file(slidePath)?.async('string');
         if (!slideXml) {
           continue;
         }
@@ -737,6 +947,24 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
           backgroundColor: '#ffffff',
         });
         const slideDoc = new DOMParser().parseFromString(slideXml, 'text/xml');
+        const slideRelationships = new Map<string, { type: string; target: string }>();
+        const slideRelationshipsXml = slideFileName
+          ? await zip.file(`ppt/slides/_rels/${slideFileName}.rels`)?.async('string')
+          : undefined;
+
+        if (slideRelationshipsXml) {
+          const relsDoc = new DOMParser().parseFromString(slideRelationshipsXml, 'text/xml');
+          relsDoc.querySelectorAll('Relationship').forEach((relationship) => {
+            const id = relationship.getAttribute('Id');
+            const type = relationship.getAttribute('Type');
+            const target = relationship.getAttribute('Target');
+            if (!id || !type || !target) {
+              return;
+            }
+
+            slideRelationships.set(id, { type, target });
+          });
+        }
 
         slideDoc.querySelectorAll('p\\:sp, sp').forEach((shape) => {
           const textBody = shape.querySelector('p\\:txBody, txBody');
@@ -744,35 +972,68 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
             return;
           }
 
-          const parts: string[] = [];
-          textBody.querySelectorAll('a\\:t, t').forEach((textNode) => {
-            parts.push(textNode.textContent || '');
-          });
-
-          if (!parts.length) {
+          const textContent = extractTextContent(textBody);
+          if (!textContent) {
             return;
           }
 
-          const transform = shape.querySelector('a\\:xfrm, xfrm');
-          let left = 90;
-          let top = 110;
-
-          if (transform) {
-            const offset = transform.querySelector('a\\:off, off');
-            if (offset) {
-              left = (parseInt(offset.getAttribute('x') || '0', 10) / 914400) * 96;
-              top = (parseInt(offset.getAttribute('y') || '0', 10) / 914400) * 96;
-            }
-          }
+          const metrics = extractTransformMetrics(shape);
 
           tempCanvas.add(
-            createTextObject(parts.join(' '), {
-              left: Math.max(40, left),
-              top: Math.max(40, top),
+            createTextObject(textContent, {
+              left: Math.max(40, metrics.left || 90),
+              top: Math.max(40, metrics.top || 110),
               fontSize: 24,
+              width: Math.max(220, metrics.width || 720),
             }),
           );
         });
+
+        for (const picture of slideDoc.querySelectorAll('p\\:pic, pic')) {
+          const blip = picture.querySelector('a\\:blip, blip');
+          const embedId = blip?.getAttribute('r:embed') ?? blip?.getAttribute('embed');
+          if (!embedId) {
+            continue;
+          }
+
+          const imageRelationship = slideRelationships.get(embedId);
+          if (!imageRelationship || !imageRelationship.type.includes('/image')) {
+            continue;
+          }
+
+          const imagePath = resolveZipTarget(slidePath, imageRelationship.target);
+          const imageBlob = await zip.file(imagePath)?.async('blob');
+          if (!imageBlob) {
+            continue;
+          }
+
+          const imageDataUrl = await readBlobAsDataUrl(imageBlob);
+          const image = await fabric.Image.fromURL(imageDataUrl);
+          const metrics = extractTransformMetrics(picture);
+          const width = Math.max(120, metrics.width || image.width || 260);
+          const height = Math.max(90, metrics.height || image.height || 180);
+
+          image.set({
+            left: Math.max(40, metrics.left || 90),
+            top: Math.max(40, metrics.top || 120),
+            scaleX: width / (image.width || width),
+            scaleY: height / (image.height || height),
+          });
+          tempCanvas.add(image);
+        }
+
+        const notesRelationship = [...slideRelationships.values()].find((relationship) => relationship.type.includes('/notesSlide'));
+        const notesPath = notesRelationship ? resolveZipTarget(slidePath, notesRelationship.target) : null;
+        const notesXml = notesPath ? await zip.file(notesPath)?.async('string') : undefined;
+        let notesText = '';
+
+        if (notesXml) {
+          const notesDoc = new DOMParser().parseFromString(notesXml, 'text/xml');
+          const notesBody = [...notesDoc.querySelectorAll('p\\:sp, sp')].find(
+            (shape) => (shape.querySelector('p\\:ph, ph')?.getAttribute('type') ?? '') === 'body',
+          );
+          notesText = notesBody ? extractTextContent(notesBody).trim() : '';
+        }
 
         if (tempCanvas.getObjects().length === 0) {
           applySlideTemplate(tempCanvas as unknown as fabric.Canvas, importedSlides.length === 0 ? 'cover' : 'content');
@@ -781,7 +1042,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         importedSlides.push({
           id: `slide-${Date.now()}-${importedSlides.length}`,
           data: tempCanvas.toJSON(),
-          notes: '',
+          notes: notesText,
           thumbnail: tempCanvas.toDataURL({ format: 'png', multiplier: 0.22 }),
         });
 
@@ -794,6 +1055,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
       setSlides(importedSlides);
       setCurrentSlideId(importedSlides[0].id);
+      setMobileWorkspaceView('canvas');
       setSaveStatus('Saved');
       setBanner({
         tone: 'success',
@@ -817,7 +1079,8 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       slide.id === currentSlideId && currentSnapshot ? { ...slide, data: currentSnapshot.data } : slide,
     );
 
-    const presentation = new pptxgen();
+    const { default: PptxGenJS } = await import('pptxgenjs');
+    const presentation = new PptxGenJS();
     presentation.layout = 'LAYOUT_WIDE';
     presentation.author = 'OfficeNinja';
     presentation.subject = fileName;
@@ -825,6 +1088,9 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
     exportSlides.forEach((slideData) => {
       const slide = presentation.addSlide();
+      if (slideData.notes?.trim()) {
+        slide.addNotes(slideData.notes);
+      }
       const objects = Array.isArray(slideData.data?.objects) ? slideData.data.objects : [];
 
       if (!objects.length) {
@@ -850,7 +1116,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
             bold: object.fontWeight === '700' || object.fontWeight === 700,
           });
         } else if (object.type === 'rect') {
-          slide.addShape(pptxgen.ShapeType.roundRect, {
+          slide.addShape(PptxGenJS.ShapeType.roundRect, {
             x,
             y,
             w: Math.max(0.3, w),
@@ -859,7 +1125,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
             line: { color: normalizeColor(object.stroke || object.fill) },
           });
         } else if (object.type === 'circle') {
-          slide.addShape(pptxgen.ShapeType.ellipse, {
+          slide.addShape(PptxGenJS.ShapeType.ellipse, {
             x,
             y,
             w: Math.max(0.3, w),
@@ -885,6 +1151,34 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   const previousSlideId = slides[Math.max(0, currentSlideIndex - 1)]?.id ?? currentSlideId;
   const nextSlideId = slides[Math.min(slides.length - 1, currentSlideIndex + 1)]?.id ?? currentSlideId;
 
+  useEffect(() => {
+    if (!isPresenterView) {
+      return;
+    }
+
+    const handlePresenterKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setIsPresenterView(false);
+        return;
+      }
+
+      if (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ') {
+        event.preventDefault();
+        switchSlide(nextSlideId);
+        return;
+      }
+
+      if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+        event.preventDefault();
+        switchSlide(previousSlideId);
+      }
+    };
+
+    window.addEventListener('keydown', handlePresenterKeyDown);
+    return () => window.removeEventListener('keydown', handlePresenterKeyDown);
+  }, [currentSlideId, isPresenterView, nextSlideId, previousSlideId]);
+
   const notesPanel = (
     <div className="panel-stack">
       <div className="panel-card">
@@ -895,6 +1189,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
             value={currentSlide?.notes || ''}
             onChange={(event) => updateNotes(event.target.value)}
             placeholder="Outline talking points, reminders, or handoff notes."
+            aria-label="Speaker notes"
           />
         </div>
       </div>
@@ -918,6 +1213,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         appName="NinjaSlides"
         fileName={fileName}
         setFileName={setFileName}
+        defaultFileName={defaultFileName}
         toggleTheme={toggleTheme}
         isDarkMode={isDarkMode}
         saveStatus={saveStatus}
@@ -979,6 +1275,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
               value={currentColor}
               onChange={(event) => applyColor(event.target.value)}
               title="Fill color"
+              aria-label="Slide object fill color"
             />
           </div>
           <ToolbarButton icon={Play} onClick={() => void toggleFullscreen()} title={isFullscreen ? 'Exit fullscreen' : 'Present fullscreen'} />
@@ -987,33 +1284,150 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       </Toolbar>
 
       {banner && (
-        <div className={`editor-banner editor-banner--${banner.tone}`}>
+        <div
+          className={`editor-banner editor-banner--${banner.tone}`}
+          role={banner.tone === 'error' ? 'alert' : 'status'}
+          aria-live={banner.tone === 'error' ? 'assertive' : 'polite'}
+        >
           <div>
             <div className="editor-banner__text">{banner.title}</div>
             {banner.detail && <div className="editor-banner__hint">{banner.detail}</div>}
           </div>
-          <button className="btn btn-secondary btn-icon" onClick={() => setBanner(null)} type="button">
+          <button className="btn btn-secondary btn-icon" onClick={() => setBanner(null)} type="button" aria-label="Dismiss message">
             <X size={16} />
           </button>
         </div>
       )}
 
-      {isPresenterView ? (
-        <div className="presenter-shell">
-          <div className="presenter-stage">
+      {!isPresenterView && (
+        <div className="workspace-mobile-switcher" role="group" aria-label="Slides mobile sections">
+          <button
+            className={`workspace-switcher-tab ${mobileWorkspaceView === 'slides' ? 'active' : ''}`}
+            onClick={() => setMobileWorkspaceView('slides')}
+            type="button"
+            aria-pressed={mobileWorkspaceView === 'slides'}
+          >
+            Slides
+          </button>
+          <button
+            className={`workspace-switcher-tab ${mobileWorkspaceView === 'canvas' ? 'active' : ''}`}
+            onClick={() => setMobileWorkspaceView('canvas')}
+            type="button"
+            aria-pressed={mobileWorkspaceView === 'canvas'}
+          >
+            Canvas
+          </button>
+          <button
+            className={`workspace-switcher-tab ${mobileWorkspaceView === 'notes' ? 'active' : ''}`}
+            onClick={() => setMobileWorkspaceView('notes')}
+            type="button"
+            aria-pressed={mobileWorkspaceView === 'notes'}
+          >
+            Notes
+          </button>
+        </div>
+      )}
+
+      <div className={isPresenterView ? 'presenter-shell' : 'workspace'}>
+        {!isPresenterView && (
+          <aside className={`slide-sidebar ${mobileWorkspaceView !== 'slides' ? 'workspace-pane--hidden-mobile' : ''}`} aria-label="Slide thumbnails">
+            <div className="slide-sidebar__header">
+              <div>
+                <h3 style={{ margin: 0 }}>Slides</h3>
+                <p className="panel-note" style={{ margin: '0.25rem 0 0' }}>
+                  Tap a thumbnail to move through the deck.
+                </p>
+              </div>
+              <button className="btn btn-secondary btn-icon" onClick={() => addSlide('content')} type="button">
+                <Plus size={16} />
+              </button>
+            </div>
+
+            <div className="slide-list" role="list" aria-label="Slides">
+              {slides.map((slide, index) => (
+                <article
+                  key={slide.id}
+                  className={`slide-card ${slide.id === currentSlideId ? 'slide-card--active' : ''}`}
+                  onClick={() => switchSlide(slide.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      switchSlide(slide.id);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Open slide ${index + 1}`}
+                >
+                  <div className="slide-card__thumb">
+                    {slide.thumbnail ? <img src={slide.thumbnail} alt={`Slide ${index + 1}`} /> : <span>Slide preview</span>}
+                  </div>
+                  <div className="slide-card__caption">
+                    <span>Slide {index + 1}</span>
+                    <span>{slide.id === currentSlideId ? 'Editing' : 'Open'}</span>
+                  </div>
+                  <button
+                    className="slide-card__delete"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setPendingDeleteSlideId(slide.id);
+                    }}
+                    type="button"
+                    aria-label={`Delete slide ${index + 1}`}
+                  >
+                    <X size={14} />
+                  </button>
+                </article>
+              ))}
+            </div>
+          </aside>
+        )}
+
+        <div
+          className={`${isPresenterView ? 'presenter-stage' : 'presentation-stage'} ${!isPresenterView && mobileWorkspaceView !== 'canvas' ? 'workspace-pane--hidden-mobile' : ''}`}
+          onClick={() => {
+            if (!isPresenterView) {
+              setMobileWorkspaceView('canvas');
+            }
+          }}
+        >
+          {isPresenterView && (
             <div className="presenter-toolbar">
               <div className="presenter-clock">{formatTime(elapsedTime)}</div>
               <button className="btn btn-secondary" onClick={togglePresenterView} type="button">
                 Exit presenter view
               </button>
             </div>
-            <div className="canvas-shell" ref={stageRef}>
-              <canvas ref={canvasRef} />
-            </div>
-          </div>
+          )}
 
-          <aside className="presenter-sidebar">
-            {notesPanel}
+          <div
+            className={`canvas-shell ${isDropTargetActive ? 'canvas-shell--drop-target' : ''}`}
+            ref={stageRef}
+            role="region"
+            tabIndex={0}
+            aria-label="Slide canvas"
+            onDragEnter={handleDragEnter}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={(event) => void handleDrop(event)}
+          >
+            {isDropTargetActive && <div className="canvas-drop-target-hint">Drop an image to add it to this slide.</div>}
+            <canvas ref={canvasRef} />
+          </div>
+        </div>
+
+        <aside
+          className={`${isPresenterView ? 'presenter-sidebar' : 'notes-sidebar'} ${!isPresenterView && mobileWorkspaceView !== 'notes' ? 'workspace-pane--hidden-mobile' : ''}`}
+          aria-label={isPresenterView ? 'Presenter notes' : 'Slide notes'}
+          onClick={() => {
+            if (!isPresenterView) {
+              setMobileWorkspaceView('notes');
+            }
+          }}
+        >
+          {notesPanel}
+          {isPresenterView && (
             <div className="panel-card" style={{ marginTop: '1rem' }}>
               <div className="panel-section">
                 <h3>Slide controls</h3>
@@ -1027,64 +1441,9 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
                 </div>
               </div>
             </div>
-          </aside>
-        </div>
-      ) : (
-        <div className="workspace">
-          <div className="slides-layout">
-            <aside className="slide-sidebar">
-              <div className="slide-sidebar__header">
-                <div>
-                  <h3 style={{ margin: 0 }}>Slides</h3>
-                  <p className="panel-note" style={{ margin: '0.25rem 0 0' }}>
-                    Tap a thumbnail to move through the deck.
-                  </p>
-                </div>
-                <button className="btn btn-secondary btn-icon" onClick={() => addSlide('content')} type="button">
-                  <Plus size={16} />
-                </button>
-              </div>
-
-              <div className="slide-list">
-                {slides.map((slide, index) => (
-                  <button
-                    key={slide.id}
-                    className={`slide-card ${slide.id === currentSlideId ? 'slide-card--active' : ''}`}
-                    onClick={() => switchSlide(slide.id)}
-                    type="button"
-                  >
-                    <div className="slide-card__thumb">
-                      {slide.thumbnail ? <img src={slide.thumbnail} alt={`Slide ${index + 1}`} /> : <span>Slide preview</span>}
-                    </div>
-                    <div className="slide-card__caption">
-                      <span>Slide {index + 1}</span>
-                      <span>{slide.id === currentSlideId ? 'Editing' : 'Open'}</span>
-                    </div>
-                    <span
-                      className="slide-card__delete"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setPendingDeleteSlideId(slide.id);
-                      }}
-                    >
-                      <X size={14} />
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </aside>
-
-            <div className="presentation-stage">
-              <div className="canvas-shell" ref={stageRef}>
-                <canvas ref={canvasRef} />
-              </div>
-            </div>
-
-            <aside className="notes-sidebar">{notesPanel}</aside>
-          </div>
-        </div>
-      )}
+          )}
+        </aside>
+      </div>
 
       <StatusBar leftContent={<span>Slide {slideCountLabel} | {saveSummary}</span>} rightContent={<span>{isFullscreen ? 'Fullscreen presentation' : 'Editing canvas'}</span>} />
 

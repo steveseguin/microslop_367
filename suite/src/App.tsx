@@ -1,9 +1,24 @@
 import { Routes, Route } from 'react-router-dom';
-import { useState, useEffect } from 'react';
-import Dashboard from './pages/Dashboard';
-import Word from './pages/Word';
-import Excel from './pages/Excel';
-import PowerPoint from './pages/PowerPoint';
+import { Suspense, lazy, useEffect, useState } from 'react';
+
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Word = lazy(() => import('./pages/Word'));
+const Excel = lazy(() => import('./pages/Excel'));
+const PowerPoint = lazy(() => import('./pages/PowerPoint'));
+
+function AppLoading() {
+  return (
+    <div className="app-loading">
+      <div className="app-loading__card">
+        <div className="app-loading__spinner" aria-hidden="true" />
+        <div>
+          <strong>Loading workspace</strong>
+          <p>Opening the editor and preparing local files.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function App() {
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -36,12 +51,14 @@ function App() {
 
   return (
     <div className="app">
-      <Routes>
-        <Route path="/" element={<Dashboard toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
-        <Route path="/word" element={<Word toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
-        <Route path="/excel" element={<Excel toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
-        <Route path="/powerpoint" element={<PowerPoint toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
-      </Routes>
+      <Suspense fallback={<AppLoading />}>
+        <Routes>
+          <Route path="/" element={<Dashboard toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+          <Route path="/word" element={<Word toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+          <Route path="/excel" element={<Excel toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+          <Route path="/powerpoint" element={<PowerPoint toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+        </Routes>
+      </Suspense>
     </div>
   );
 }

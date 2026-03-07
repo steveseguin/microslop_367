@@ -78,6 +78,10 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
     setPendingDelete(doc);
   };
 
+  const openDocument = (doc: DocMeta) => {
+    navigate(`/${doc.type}?id=${doc.id}`);
+  };
+
   const handleDeleteConfirm = async () => {
     if (!pendingDelete) {
       return;
@@ -251,7 +255,20 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
           ) : (
             <div className="recent-grid">
               {recentDocs.slice(0, 8).map((doc) => (
-                <article key={doc.id} className="recent-card" onClick={() => navigate(`/${doc.type}?id=${doc.id}`)}>
+                <article
+                  key={doc.id}
+                  className="recent-card"
+                  onClick={() => openDocument(doc)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      openDocument(doc);
+                    }
+                  }}
+                  role="link"
+                  tabIndex={0}
+                  aria-label={`Open ${doc.title}`}
+                >
                   <div className="recent-card__header">
                     <div className="recent-card__type">
                       {doc.type === 'word' && <FileText size={14} />}

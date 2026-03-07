@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronLeft, Moon, Sun } from 'lucide-react';
 
@@ -6,6 +6,7 @@ interface AppHeaderProps {
   appName: 'NinjaWord' | 'NinjaCalc' | 'NinjaSlides';
   fileName: string;
   setFileName: (name: string) => void;
+  defaultFileName: string;
   actions?: React.ReactNode;
   toggleTheme?: () => void;
   isDarkMode?: boolean;
@@ -28,12 +29,14 @@ export function AppHeader({
   appName,
   fileName,
   setFileName,
+  defaultFileName,
   actions,
   toggleTheme,
   isDarkMode,
   saveStatus,
 }: AppHeaderProps) {
   const { iconLetter, iconClass, suiteLabel } = getAppMeta(appName);
+  const saveStatusId = useId();
 
   const handleHomeClick = (event: React.MouseEvent) => {
     if (saveStatus !== 'Saving...') {
@@ -43,6 +46,11 @@ export function AppHeader({
     if (!window.confirm('Changes are still saving. Leave this editor anyway?')) {
       event.preventDefault();
     }
+  };
+
+  const handleFileNameBlur = (event: React.FocusEvent<HTMLInputElement>) => {
+    const trimmedName = event.target.value.trim();
+    setFileName(trimmedName || defaultFileName);
   };
 
   return (
@@ -72,11 +80,19 @@ export function AppHeader({
             className="file-name"
             value={fileName}
             onChange={(event) => setFileName(event.target.value)}
+            onBlur={handleFileNameBlur}
             aria-label="File name"
+            aria-describedby={saveStatus ? saveStatusId : undefined}
+            placeholder={defaultFileName}
           />
         </label>
         {saveStatus && (
-          <span className={`status-pill status-pill--${saveStatus === 'Saved' ? 'success' : saveStatus === 'Saving...' ? 'pending' : 'alert'}`}>
+          <span
+            id={saveStatusId}
+            className={`status-pill status-pill--${saveStatus === 'Saved' ? 'success' : saveStatus === 'Saving...' ? 'pending' : 'alert'}`}
+            role="status"
+            aria-live="polite"
+          >
             {saveStatus}
           </span>
         )}
@@ -85,7 +101,13 @@ export function AppHeader({
       <div className="header-actions">
         {actions && <div className="header-action-cluster">{actions}</div>}
         {toggleTheme && (
-          <button className="btn btn-secondary btn-icon" onClick={toggleTheme} title="Toggle theme" type="button">
+          <button
+            className="btn btn-secondary btn-icon"
+            onClick={toggleTheme}
+            title="Toggle theme"
+            aria-label={isDarkMode ? 'Switch to light theme' : 'Switch to dark theme'}
+            type="button"
+          >
             {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
           </button>
         )}
