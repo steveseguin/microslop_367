@@ -57,7 +57,7 @@ test.describe('Current UI exploratory coverage', () => {
     await desktopRibbon.getByTitle('Insert table').click();
     await expect(page.locator('.ProseMirror table')).toBeVisible();
 
-    await desktopRibbon.getByTitle('Insert image').click();
+    await desktopRibbon.getByTitle('Embed image URL').click();
     await page.getByPlaceholder('Paste an image URL to embed locally').fill(
       'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
     );

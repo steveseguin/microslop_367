@@ -59,11 +59,9 @@ test.describe('Persistence and drag-drop robustness', () => {
     await page.goto(`${baseUrl}/#/word?id=${makeId('word-dnd')}`);
     await expect(page.locator('.document-page')).toBeVisible();
 
-    await page.locator('.toolbar-shell').getByTitle('Insert image').click();
-    await expect(page.getByText('Drop image here or choose from device')).toBeVisible();
     const [imageChooser] = await Promise.all([
       page.waitForEvent('filechooser'),
-      page.getByRole('button', { name: 'Choose from device' }).click(),
+      page.locator('.toolbar-shell').getByTitle('Insert image').click(),
     ]);
     await imageChooser.setFiles(path.join(__dirname, '../test.png'));
     await expect(page.locator('.editor-banner')).toContainText('embedded in this document');
@@ -93,7 +91,7 @@ test.describe('Persistence and drag-drop robustness', () => {
     await page.goto(`${baseUrl}/#/word?id=${makeId('word-url-embed')}`);
     await expect(page.locator('.document-page')).toBeVisible();
 
-    await page.locator('.toolbar-shell').getByTitle('Insert image').click();
+    await page.locator('.toolbar-shell').getByTitle('Embed image URL').click();
     await page.getByPlaceholder('Paste an image URL to embed locally').fill('https://assets.officeninja.test/embed.png');
     await page.getByRole('button', { name: 'Embed URL' }).click();
     await expect(page.locator('.editor-banner')).toContainText('Image embedded locally.');

@@ -21,6 +21,7 @@ import {
   Italic,
   List,
   ListOrdered,
+  Link2,
   Mic,
   Redo,
   Search,
@@ -747,6 +748,17 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
       image.src = source;
     });
 
+  const openImageFilePicker = () => {
+    setShowFindReplace(false);
+    setShowImagePanel(false);
+    imageInputRef.current?.click();
+  };
+
+  const toggleImageEmbedPanel = () => {
+    setShowFindReplace(false);
+    setShowImagePanel((value) => !value);
+  };
+
   const insertImageFromUrl = async () => {
     const trimmedUrl = imageUrl.trim();
     if (!trimmedUrl) {
@@ -1052,13 +1064,10 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
           />
           <ToolbarButton
             icon={ImageIcon}
-            onClick={() => {
-              setShowFindReplace(false);
-              setShowImagePanel((value) => !value);
-            }}
-            isActive={showImagePanel}
+            onClick={openImageFilePicker}
             title="Insert image"
           />
+          <ToolbarButton icon={Link2} onClick={toggleImageEmbedPanel} isActive={showImagePanel} title="Embed image URL" />
         </ToolbarGroup>
 
         <ToolbarGroup label="Review">
