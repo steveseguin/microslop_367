@@ -11,13 +11,14 @@ import {
   Download,
   GripVertical,
   Image as ImageIcon,
-  MonitorPlay,
+  PanelRightClose,
   Palette,
   Play,
   Plus,
   Redo,
   SendToBack,
   Square,
+  StickyNote,
   Trash2,
   Type,
   Undo,
@@ -126,6 +127,36 @@ const EMU_PER_INCH = 914400;
  * back 22px thick on every round trip.
  */
 const MIN_EXPORT_SIZE_IN = 0.01;
+
+/**
+ * The notes rail. 288px of permanently reserved horizontal space bought one textarea and a
+ * panel of state the status bar already carried; 248px is enough for real note-taking (the
+ * textarea now runs the full height of the rail instead of a stubby 160px box) and hands
+ * 40px straight back to the slide. Collapsing gives the rest back.
+ *
+ * Notes are NOT moved under the canvas the way PowerPoint does it: the slide is 16:9, so a
+ * pixel of height costs the canvas 1/540 of its scale while a pixel of width costs 1/960 —
+ * horizontal space is the cheaper currency here, and at every viewport measured below the
+ * fit is width-bound only until the rail is collapsed, after which height binds. A notes
+ * strip would spend the expensive axis to free the cheap one.
+ */
+const NOTES_PANEL_WIDTH = 248;
+/** Width of the collapsed rail. Free at every measured size: height binds before this does. */
+const NOTES_RAIL_WIDTH = 52;
+const NOTES_OPEN_STORAGE_KEY = 'ninjaslides:notes-open';
+/** Mirrors the `max-width: 900px` breakpoint in index.css where the panes stack and the
+ *  mobile section switcher takes over. Below it the rail is a full-width tab pane and must
+ *  not be given a fixed width or a collapse control. */
+const COMPACT_LAYOUT_QUERY = '(max-width: 900px)';
+
+function readNotesPreference() {
+  try {
+    return window.localStorage.getItem(NOTES_OPEN_STORAGE_KEY) !== '0';
+  } catch {
+    // Storage can be blocked outright (private mode, third-party cookie policies).
+    return true;
+  }
+}
 
 /**
  * Serialized type tags are taken from the fabric classes themselves, so a fabric rename
@@ -467,6 +498,15 @@ const SlideCard = memo(function SlideCard({
   onReorderPointerCancel,
   registerCard,
 }: SlideCardProps) {
+  // Delete used to be a filled dark disc pinned over the thumbnail: permanently visible and
+  // the highest-contrast thing in the rail, so the easiest target on the card was the one
+  // that destroys a slide. It now sits with the other card controls and only materialises
+  // for a pointer that is on the card, for keyboard focus anywhere inside it, or on the
+  // slide being edited (the only reveal a touch device can produce).
+  const [isPointerOver, setIsPointerOver] = useState(false);
+  const [isFocusWithin, setIsFocusWithin] = useState(false);
+  const showDelete = isPointerOver || isFocusWithin || isActive;
+
   return (
     <article
       ref={(element) => registerCard(index, element)}
@@ -476,6 +516,10 @@ const SlideCard = memo(function SlideCard({
         outline: isDropTarget ? '2px dashed #2563eb' : undefined,
         outlineOffset: '2px',
       }}
+      onMouseEnter={() => setIsPointerOver(true)}
+      onMouseLeave={() => setIsPointerOver(false)}
+      onFocus={() => setIsFocusWithin(true)}
+      onBlur={() => setIsFocusWithin(false)}
       onClick={() => onSelect(slide.id)}
       onKeyDown={(event) => {
         if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
@@ -550,19 +594,31 @@ const SlideCard = memo(function SlideCard({
         >
           <GripVertical size={14} />
         </button>
+        <button
+          type="button"
+          // opacity + pointer-events rather than `visibility`/`display`: a hidden-by-either
+          // of those leaves the tab order, and this is the ONLY way to delete a slide.
+          // Tabbing to it fires focus on the card, which reveals it before it is activated.
+          style={{
+            ...slideActionButtonStyle,
+            borderColor: 'rgba(239, 68, 68, 0.4)',
+            background: 'rgba(239, 68, 68, 0.14)',
+            color: '#ef4444',
+            opacity: showDelete ? 1 : 0,
+            pointerEvents: showDelete ? 'auto' : 'none',
+            transition: 'opacity 140ms ease',
+          }}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onDelete(slide.id);
+          }}
+          aria-label={`Delete slide ${index + 1}`}
+          title="Delete slide"
+        >
+          <Trash2 size={14} />
+        </button>
       </div>
-      <button
-        className="slide-card__delete"
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onDelete(slide.id);
-        }}
-        type="button"
-        aria-label={`Delete slide ${index + 1}`}
-      >
-        <X size={14} />
-      </button>
     </article>
   );
 });
@@ -583,9 +639,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   const [slides, setSlides] = useState<Slide[]>([{ id: 'slide-1', data: null, notes: '' }]);
   const [currentSlideId, setCurrentSlideId] = useState('slide-1');
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isPresenterView, setIsPresenterView] = useState(false);
   const [presentIndex, setPresentIndex] = useState<number | null>(null);
-  const [elapsedTime, setElapsedTime] = useState(0);
   const [saveStatus, setSaveStatus] = useState('Saved');
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -596,6 +650,10 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   const [pendingDeleteSlideId, setPendingDeleteSlideId] = useState<string | null>(null);
   const [importCandidate, setImportCandidate] = useState<File | null>(null);
   const [mobileWorkspaceView, setMobileWorkspaceView] = useState<'slides' | 'canvas' | 'notes'>('canvas');
+  const [isNotesOpen, setIsNotesOpen] = useState(readNotesPreference);
+  const [isCompactLayout, setIsCompactLayout] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(COMPACT_LAYOUT_QUERY).matches,
+  );
   const [isDropTargetActive, setIsDropTargetActive] = useState(false);
   const [dragSlideIndex, setDragSlideIndex] = useState<number | null>(null);
   const [dropSlideIndex, setDropSlideIndex] = useState<number | null>(null);
@@ -669,6 +727,25 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   useEffect(() => {
     isLoadedRef.current = isLoaded;
   }, [isLoaded]);
+
+  // Below the stacking breakpoint the notes rail is a full-width tab pane owned by the
+  // mobile switcher, so the fixed width and the collapse control are suppressed there.
+  useEffect(() => {
+    const query = window.matchMedia(COMPACT_LAYOUT_QUERY);
+    const update = () => setIsCompactLayout(query.matches);
+
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(NOTES_OPEN_STORAGE_KEY, isNotesOpen ? '1' : '0');
+    } catch {
+      // Storage unavailable: the choice simply does not survive the session.
+    }
+  }, [isNotesOpen]);
 
   useEffect(() => {
     if (!searchParams.get('id')) {
@@ -1575,18 +1652,6 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  useEffect(() => {
-    if (!isPresenterView) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      setElapsedTime((previous) => previous + 1);
-    }, 1000);
-
-    return () => window.clearInterval(intervalId);
-  }, [isPresenterView]);
-
   const currentSlideIndex = slides.findIndex((slide) => slide.id === currentSlideId);
   const currentSlide = slides[currentSlideIndex];
 
@@ -2114,22 +2179,9 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     }
   }, [presentIndex, switchSlide]);
 
-  const togglePresenterView = () => {
-    setIsPresenterView((previous) => !previous);
-    setElapsedTime(0);
-  };
-
   const updateNotes = (notes: string) => {
     commitSlides((previous) => previous.map((slide) => (slide.id === currentSlideId ? { ...slide, notes } : slide)));
     scheduleSave();
-  };
-
-  const formatTime = (seconds: number) => {
-    const minutes = Math.floor(seconds / 60)
-      .toString()
-      .padStart(2, '0');
-    const remainder = (seconds % 60).toString().padStart(2, '0');
-    return `${minutes}:${remainder}`;
   };
 
   useEffect(() => {
@@ -2138,7 +2190,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     }
 
     const handlePaste = async (event: ClipboardEvent) => {
-      if (isPresenterView || presentIndex !== null) {
+      if (presentIndex !== null) {
         return;
       }
 
@@ -2154,7 +2206,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fabricCanvas, isPresenterView, presentIndex]);
+  }, [fabricCanvas, presentIndex]);
 
   // Ctrl/Cmd+S saves the deck instead of opening the browser's "Save Page As" dialog.
   useEffect(() => {
@@ -2491,37 +2543,6 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     await presentation.writeFile({ fileName: `${fileName}.pptx` });
   };
 
-  const previousSlideId = slides[Math.max(0, currentSlideIndex - 1)]?.id ?? currentSlideId;
-  const nextSlideId = slides[Math.min(slides.length - 1, currentSlideIndex + 1)]?.id ?? currentSlideId;
-
-  useEffect(() => {
-    if (!isPresenterView) {
-      return;
-    }
-
-    const handlePresenterKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setIsPresenterView(false);
-        return;
-      }
-
-      if (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ') {
-        event.preventDefault();
-        switchSlide(nextSlideId);
-        return;
-      }
-
-      if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
-        event.preventDefault();
-        switchSlide(previousSlideId);
-      }
-    };
-
-    window.addEventListener('keydown', handlePresenterKeyDown);
-    return () => window.removeEventListener('keydown', handlePresenterKeyDown);
-  }, [isPresenterView, nextSlideId, previousSlideId, switchSlide]);
-
   // ---- present mode ---------------------------------------------------------------
   const isPresenting = presentIndex !== null;
 
@@ -2652,30 +2673,38 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     return () => window.removeEventListener('keydown', handlePresentKeyDown);
   }, [isPresenting, stopPresenting]);
 
-  const notesPanel = (
-    <div className="panel-stack">
-      <div className="panel-card">
-        <div className="panel-section">
-          <h3>Speaker notes</h3>
-          <textarea
-            className="notes-textarea"
-            value={currentSlide?.notes || ''}
-            onChange={(event) => updateNotes(event.target.value)}
-            placeholder="Outline talking points, reminders, or handoff notes."
-            aria-label="Speaker notes"
-          />
-        </div>
-      </div>
+  const hasNotesOnCurrentSlide = Boolean(currentSlide?.notes?.trim());
 
-      <div className="panel-card">
-        <div className="panel-section">
-          <h3>Deck status</h3>
-          <ul className="panel-list">
-            <li>Current slide: {slideCountLabel}</li>
-            <li>Selection: {hasSelection ? 'Object selected' : 'Nothing selected'}</li>
-            <li>Autosave: {saveSummary}</li>
-          </ul>
+  // The "Deck status" card that used to sit under this one is gone: current slide, selection
+  // and autosave were all duplicates of the status bar, restated in a panel that cost the
+  // slide 288px of width to display them a second time.
+  const notesPanel = (
+    <div className="panel-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div className="panel-section" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+          <h3 style={{ margin: 0 }}>Speaker notes</h3>
+          {!isCompactLayout && (
+            <button
+              className="btn btn-secondary btn-icon"
+              type="button"
+              onClick={() => setIsNotesOpen(false)}
+              aria-expanded
+              aria-controls={notesSectionId}
+              aria-label="Hide speaker notes"
+              title="Hide speaker notes"
+            >
+              <PanelRightClose size={16} />
+            </button>
+          )}
         </div>
+        <textarea
+          className="notes-textarea"
+          style={{ flex: 1, marginTop: '0.5rem' }}
+          value={currentSlide?.notes || ''}
+          onChange={(event) => updateNotes(event.target.value)}
+          placeholder="Outline talking points, reminders, or handoff notes."
+          aria-label="Speaker notes"
+        />
       </div>
     </div>
   );
@@ -2752,7 +2781,15 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
             />
           </div>
           <ToolbarButton icon={Play} onClick={startPresenting} title="Start presentation" />
-          <ToolbarButton icon={MonitorPlay} onClick={togglePresenterView} isActive={isPresenterView} title="Presenter view" />
+          {/*
+            "Presenter view" used to live here. It was not a presenter view: it repainted the
+            same single-window editor dark, put a stopwatch in a toolbar and moved the notes
+            box next to Previous/Next buttons. No second screen, no next-slide preview, no
+            audience/presenter split — nothing a real presenter console gives you, and the
+            fullscreen present mode next to it already does the actual presenting. A control
+            that promises a second-screen console and delivers a dark theme with a timer is
+            worse than no control, so it is gone rather than half-kept.
+          */}
         </ToolbarGroup>
       </Toolbar>
 
@@ -2787,108 +2824,91 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         </div>
       )}
 
-      {!isPresenterView && (
-        <div className="workspace-mobile-switcher" role="group" aria-label="Slides mobile sections">
-          <button
-            className={`workspace-switcher-tab ${mobileWorkspaceView === 'slides' ? 'active' : ''}`}
-            onClick={() => setMobileWorkspaceView('slides')}
-            type="button"
-            aria-controls={slidesSectionId}
-            aria-expanded={mobileWorkspaceView === 'slides'}
-          >
-            Slides
-          </button>
-          <button
-            className={`workspace-switcher-tab ${mobileWorkspaceView === 'canvas' ? 'active' : ''}`}
-            onClick={() => setMobileWorkspaceView('canvas')}
-            type="button"
-            aria-controls={canvasSectionId}
-            aria-expanded={mobileWorkspaceView === 'canvas'}
-          >
-            Canvas
-          </button>
-          <button
-            className={`workspace-switcher-tab ${mobileWorkspaceView === 'notes' ? 'active' : ''}`}
-            onClick={() => setMobileWorkspaceView('notes')}
-            type="button"
-            aria-controls={notesSectionId}
-            aria-expanded={mobileWorkspaceView === 'notes'}
-          >
-            Notes
-          </button>
-        </div>
-      )}
+      <div className="workspace-mobile-switcher" role="group" aria-label="Slides mobile sections">
+        <button
+          className={`workspace-switcher-tab ${mobileWorkspaceView === 'slides' ? 'active' : ''}`}
+          onClick={() => setMobileWorkspaceView('slides')}
+          type="button"
+          aria-controls={slidesSectionId}
+          aria-expanded={mobileWorkspaceView === 'slides'}
+        >
+          Slides
+        </button>
+        <button
+          className={`workspace-switcher-tab ${mobileWorkspaceView === 'canvas' ? 'active' : ''}`}
+          onClick={() => setMobileWorkspaceView('canvas')}
+          type="button"
+          aria-controls={canvasSectionId}
+          aria-expanded={mobileWorkspaceView === 'canvas'}
+        >
+          Canvas
+        </button>
+        <button
+          className={`workspace-switcher-tab ${mobileWorkspaceView === 'notes' ? 'active' : ''}`}
+          onClick={() => setMobileWorkspaceView('notes')}
+          type="button"
+          aria-controls={notesSectionId}
+          aria-expanded={mobileWorkspaceView === 'notes'}
+        >
+          Notes
+        </button>
+      </div>
 
-      <div className={isPresenterView ? 'presenter-shell' : 'workspace'}>
-        {!isPresenterView && (
-          <aside
-            id={slidesSectionId}
-            className={`slide-sidebar ${mobileWorkspaceView !== 'slides' ? 'workspace-pane--hidden-mobile' : ''}`}
-            aria-label="Slide thumbnails"
-            role="region"
-          >
-            <div className="slide-sidebar__header">
-              <div>
-                <h3 style={{ margin: 0 }}>Slides</h3>
-                <p className="panel-note" style={{ margin: '0.25rem 0 0' }}>
-                  Tap a thumbnail to move through the deck. Drag the grip, or use the arrows, to reorder.
-                </p>
-              </div>
-              <button
-                className="btn btn-secondary btn-icon"
-                onClick={() => addSlide('content')}
-                type="button"
-                aria-label="Add slide"
-              >
-                <Plus size={16} />
-              </button>
+      <div className="workspace">
+        <aside
+          id={slidesSectionId}
+          className={`slide-sidebar ${mobileWorkspaceView !== 'slides' ? 'workspace-pane--hidden-mobile' : ''}`}
+          aria-label="Slide thumbnails"
+          role="region"
+        >
+          <div className="slide-sidebar__header">
+            <div>
+              <h3 style={{ margin: 0 }}>Slides</h3>
+              <p className="panel-note" style={{ margin: '0.25rem 0 0' }}>
+                Select a slide to edit it. Drag the grip, or use the arrows, to reorder.
+              </p>
             </div>
+            <button
+              className="btn btn-secondary btn-icon"
+              onClick={() => addSlide('content')}
+              type="button"
+              aria-label="Add slide"
+            >
+              <Plus size={16} />
+            </button>
+          </div>
 
-            <div className="slide-list" role="list" aria-label="Slides">
-              {slides.map((slide, index) => (
-                <SlideCard
-                  key={slide.id}
-                  slide={slide}
-                  index={index}
-                  total={slides.length}
-                  isActive={slide.id === currentSlideId}
-                  isDragging={dragSlideIndex === index}
-                  isDropTarget={dragSlideIndex !== null && dropSlideIndex === index && dropSlideIndex !== dragSlideIndex}
-                  onSelect={switchSlide}
-                  onMove={moveSlide}
-                  onDelete={setPendingDeleteSlideId}
-                  onReorderPointerDown={handleReorderPointerDown}
-                  onReorderPointerMove={handleReorderPointerMove}
-                  onReorderPointerUp={handleReorderPointerUp}
-                  onReorderPointerCancel={handleReorderPointerCancel}
-                  registerCard={registerSlideCard}
-                />
-              ))}
-            </div>
-          </aside>
-        )}
+          <div className="slide-list" role="list" aria-label="Slides">
+            {slides.map((slide, index) => (
+              <SlideCard
+                key={slide.id}
+                slide={slide}
+                index={index}
+                total={slides.length}
+                isActive={slide.id === currentSlideId}
+                isDragging={dragSlideIndex === index}
+                isDropTarget={dragSlideIndex !== null && dropSlideIndex === index && dropSlideIndex !== dragSlideIndex}
+                onSelect={switchSlide}
+                onMove={moveSlide}
+                onDelete={setPendingDeleteSlideId}
+                onReorderPointerDown={handleReorderPointerDown}
+                onReorderPointerMove={handleReorderPointerMove}
+                onReorderPointerUp={handleReorderPointerUp}
+                onReorderPointerCancel={handleReorderPointerCancel}
+                registerCard={registerSlideCard}
+              />
+            ))}
+          </div>
+        </aside>
 
         <div
           id={canvasSectionId}
           ref={stageWrapRef}
-          className={`${isPresenterView ? 'presenter-stage' : 'presentation-stage'} ${!isPresenterView && mobileWorkspaceView !== 'canvas' ? 'workspace-pane--hidden-mobile' : ''}`}
-          onClick={() => {
-            if (!isPresenterView) {
-              setMobileWorkspaceView('canvas');
-            }
-          }}
-          role={isPresenterView ? undefined : 'region'}
-          aria-label={isPresenterView ? undefined : 'Slide canvas workspace'}
+          className={`presentation-stage ${mobileWorkspaceView !== 'canvas' ? 'workspace-pane--hidden-mobile' : ''}`}
+          onClick={() => setMobileWorkspaceView('canvas')}
+          role="region"
+          aria-label="Slide canvas workspace"
         >
-          {isPresenterView && (
-            <div className="presenter-toolbar">
-              <div className="presenter-clock">{formatTime(elapsedTime)}</div>
-              <button className="btn btn-secondary" onClick={togglePresenterView} type="button">
-                Exit presenter view
-              </button>
-            </div>
-          )}
-
           <div
             className={`canvas-shell ${isDropTargetActive ? 'canvas-shell--drop-target' : ''}`}
             ref={stageRef}
@@ -2956,34 +2976,77 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
           </div>
         </div>
 
-        <aside
-          id={notesSectionId}
-          className={`${isPresenterView ? 'presenter-sidebar' : 'notes-sidebar'} ${!isPresenterView && mobileWorkspaceView !== 'notes' ? 'workspace-pane--hidden-mobile' : ''}`}
-          aria-label={isPresenterView ? 'Presenter notes' : 'Slide notes'}
-          onClick={() => {
-            if (!isPresenterView) {
-              setMobileWorkspaceView('notes');
+        {/*
+          Notes stay in the workspace — they are the one thing in this rail that was real
+          work rather than a readout — but they no longer hold 288px hostage. Open, the rail
+          is 248px and the textarea fills its full height; collapsed, it is a 52px strip that
+          still says "Notes" and still flags a slide that has some, so nobody loses track of
+          notes they are in the middle of writing. The choice is remembered per browser.
+        */}
+        {isCompactLayout || isNotesOpen ? (
+          <aside
+            id={notesSectionId}
+            className={`notes-sidebar ${mobileWorkspaceView !== 'notes' ? 'workspace-pane--hidden-mobile' : ''}`}
+            style={
+              isCompactLayout
+                ? undefined
+                : { width: NOTES_PANEL_WIDTH, display: 'flex', flexDirection: 'column' }
             }
-          }}
-          role="region"
-        >
-          {notesPanel}
-          {isPresenterView && (
-            <div className="panel-card" style={{ marginTop: '1rem' }}>
-              <div className="panel-section">
-                <h3>Slide controls</h3>
-                <div className="slide-nav">
-                  <button className="btn btn-secondary" onClick={() => switchSlide(previousSlideId)} type="button">
-                    Previous
-                  </button>
-                  <button className="btn btn-primary" onClick={() => switchSlide(nextSlideId)} type="button">
-                    Next
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </aside>
+            aria-label="Slide notes"
+            onClick={() => setMobileWorkspaceView('notes')}
+            role="region"
+          >
+            {notesPanel}
+          </aside>
+        ) : (
+          <aside
+            id={notesSectionId}
+            className="notes-sidebar workspace-pane--hidden-mobile"
+            style={{
+              width: NOTES_RAIL_WIDTH,
+              padding: '0.75rem 0.35rem',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}
+            aria-label="Slide notes"
+          >
+            <button
+              className="btn btn-secondary btn-icon"
+              type="button"
+              onClick={() => setIsNotesOpen(true)}
+              aria-expanded={false}
+              aria-controls={notesSectionId}
+              aria-label={
+                hasNotesOnCurrentSlide
+                  ? 'Show speaker notes (this slide has notes)'
+                  : 'Show speaker notes'
+              }
+              title="Show speaker notes"
+            >
+              <StickyNote size={16} />
+            </button>
+            {hasNotesOnCurrentSlide && (
+              <span
+                aria-hidden="true"
+                style={{
+                  width: '0.4rem',
+                  height: '0.4rem',
+                  borderRadius: '999px',
+                  background: 'var(--accent, #2563eb)',
+                }}
+              />
+            )}
+            <span
+              aria-hidden="true"
+              className="panel-note"
+              style={{ writingMode: 'vertical-rl', letterSpacing: '0.08em', fontWeight: 600 }}
+            >
+              Notes
+            </span>
+          </aside>
+        )}
       </div>
 
       <StatusBar
@@ -3017,6 +3080,14 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
                 No crash recovery ({Math.round(oversizeForBackup / 1024)}KB)
               </span>
             )}
+            {/*
+              The third line of the deleted "Deck status" card. Rendered only when something
+              IS selected: "Nothing selected" is the resting state of every editor and said
+              nothing, while an appearing chip inside the status bar's live region announces
+              the selection to a screen reader at the moment it happens. Slide position and
+              autosave are already on the left of this bar, which is why the card went.
+            */}
+            {hasSelection && <span>Object selected</span>}
             <span>{isPresenting ? 'Presenting' : isFullscreen ? 'Fullscreen presentation' : 'Editing canvas'}</span>
           </span>
         }

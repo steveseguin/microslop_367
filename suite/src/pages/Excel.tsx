@@ -1,4 +1,5 @@
-import { Suspense, lazy, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   ArrowDownAZ,
@@ -132,6 +133,14 @@ const starterSheets = [
     ],
   },
 ];
+
+/*
+ * Status-bar spacing is set here rather than in a class because `index.css` is shared and
+ * the bar changes layout mode across breakpoints (inline-flex with a gap on desktop, a
+ * plain truncating block on a phone). Explicit margins read the same in both.
+ */
+const statusSeparatorStyle: CSSProperties = { margin: '0 6px', opacity: 0.4 };
+const statusDotStyle: CSSProperties = { margin: '0 5px', opacity: 0.4 };
 
 const emptySelection: SelectionSummary = {
   label: 'A1',
@@ -612,6 +621,29 @@ function detectCurrencyFormat(rawText: string): { format: string; value: number 
   };
 }
 
+/**
+ * True while the status bar is in its single-truncating-line layout.
+ *
+ * Below 640px `index.css` switches `.status-bar__segment` to a `display: block` with
+ * `text-overflow: ellipsis`, and the two segments then compete for one 390px line: a full
+ * four-stat read-out on the left starves the save status on the right down to "Sa...".
+ * The read-out is what gives way, not the save status.
+ */
+function useIsNarrowStatusBar() {
+  const [isNarrow, setIsNarrow] = useState(false);
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 640px)');
+    const update = () => setIsNarrow(query.matches);
+
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
+  return isNarrow;
+}
+
 function cellSearchText(cell: WorkbookCell | null | undefined) {
   if (!cell) {
     return '';
@@ -650,10 +682,6 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
   const [chartData, setChartData] = useState<SelectionChartData | null>(null);
   const [banner, setBanner] = useState<BannerState | null>(null);
   const [importCandidate, setImportCandidate] = useState<File | null>(null);
-  const [mobileWorkspaceView, setMobileWorkspaceView] = useState<'sheet' | 'insights'>('sheet');
-  const mobileSectionId = useId();
-  const sheetSectionId = `${mobileSectionId}-sheet`;
-  const insightsSectionId = `${mobileSectionId}-insights`;
 
   const [isFindOpen, setIsFindOpen] = useState(false);
   const [findTerm, setFindTerm] = useState('');
@@ -695,6 +723,7 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
   const [hasConflict, setHasConflict] = useState(false);
   // Another tab has saved past us: neither save path can win from here without forcing.
   const [isStale, setIsStale] = useState(false);
+  const isNarrowStatusBar = useIsNarrowStatusBar();
 
   useEffect(() => {
     documentRevisionRef.current = documentRevision;
@@ -1530,7 +1559,6 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
     setSelectionSummary(emptySelection);
     setFormulaValue('');
     setChartData(null);
-    setMobileWorkspaceView('sheet');
     lastSelectionRef.current = null;
     if (countPersistedCells(snapshot) > 0) {
       hasHadCellsRef.current = true;
@@ -2194,11 +2222,33 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
     setChartData(result.chart);
   };
 
-  const isDirty = workbookChangeToken !== savedTokenRef.current;
   const saveSummary =
     saveStatus === 'Saved' && lastSavedAt
       ? `Saved ${new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(lastSavedAt)}`
       : saveStatus;
+
+  /**
+   * Compact selection statistics for the status bar, in the order Filled / Numbers / Sum /
+   * Average. Empty while nothing is selected, so the bar stays short in the common case.
+   * The number formatting is unchanged from the removed sidebar panel.
+   *
+   * Only Sum survives on a phone. Measured at 390px: the cell reference, the sheet name and
+   * all four statistics come to 283px against 342px of usable line, which leaves no room
+   * for the 98px "Saved 11:14 AM" on the right. Sum alone fits with room to spare, and
+   * fortune-sheet's own strip is directly above reporting Count (the one figure it derives
+   * without needing `ct`), so the loss is Average only, and only below 640px.
+   */
+  const selectionStats: [string, string][] =
+    selectionSummary.filledCount > 0
+      ? isNarrowStatusBar
+        ? [['Sum', selectionSummary.sum.toFixed(selectionSummary.numericCount > 0 ? 2 : 0)]]
+        : [
+            ['Filled', String(selectionSummary.filledCount)],
+            ['Numbers', String(selectionSummary.numericCount)],
+            ['Sum', selectionSummary.sum.toFixed(selectionSummary.numericCount > 0 ? 2 : 0)],
+            ['Avg', selectionSummary.numericCount > 0 ? selectionSummary.average.toFixed(2) : '0'],
+          ]
+      : [];
 
   return (
     <div className="app-container">
@@ -2317,27 +2367,6 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
           </div>
         </div>
       )}
-
-      <div className="workspace-mobile-switcher" role="group" aria-label="Spreadsheet mobile sections">
-        <button
-          className={`workspace-switcher-tab ${mobileWorkspaceView === 'sheet' ? 'active' : ''}`}
-          onClick={() => setMobileWorkspaceView('sheet')}
-          type="button"
-          aria-controls={sheetSectionId}
-          aria-expanded={mobileWorkspaceView === 'sheet'}
-        >
-          Sheet
-        </button>
-        <button
-          className={`workspace-switcher-tab ${mobileWorkspaceView === 'insights' ? 'active' : ''}`}
-          onClick={() => setMobileWorkspaceView('insights')}
-          type="button"
-          aria-controls={insightsSectionId}
-          aria-expanded={mobileWorkspaceView === 'insights'}
-        >
-          Insights
-        </button>
-      </div>
 
       <div className="formula-strip">
         <div className="formula-coordinate">{selectionSummary.activeCell}</div>
@@ -2497,13 +2526,7 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
       )}
 
       <div className="workspace">
-        <div
-          id={sheetSectionId}
-          className={`spreadsheet-shell ${mobileWorkspaceView === 'insights' ? 'workspace-pane--hidden-mobile' : ''}`}
-          onClick={() => setMobileWorkspaceView('sheet')}
-          role="region"
-          aria-label="Spreadsheet workspace"
-        >
+        <div className="spreadsheet-shell">
           <div className="spreadsheet-container" role="region" aria-label="Spreadsheet grid">
             <Suspense fallback={<div className="surface-loading" role="status">Loading spreadsheet engine...</div>}>
               <ExcelWorkbook
@@ -2516,63 +2539,71 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
             </Suspense>
           </div>
         </div>
-
-        <aside
-          id={insightsSectionId}
-          className={`workspace-sidebar ${mobileWorkspaceView === 'sheet' ? 'workspace-pane--hidden-mobile' : ''}`}
-          onClick={() => setMobileWorkspaceView('insights')}
-          role="region"
-          aria-label="Spreadsheet insights"
-        >
-          <div className="panel-stack">
-            <div className="panel-card">
-              <div className="panel-section selection-summary">
-                <h3>Selection summary</h3>
-                <strong>{selectionSummary.label}</strong>
-                <p className="panel-note">Sheet: {activeSheetName}</p>
-                <div className="selection-summary__stats">
-                  <div>
-                    <span>Filled cells</span>
-                    <strong>{selectionSummary.filledCount}</strong>
-                  </div>
-                  <div>
-                    <span>Numbers</span>
-                    <strong>{selectionSummary.numericCount}</strong>
-                  </div>
-                  <div>
-                    <span>Sum</span>
-                    <strong>{selectionSummary.sum.toFixed(selectionSummary.numericCount > 0 ? 2 : 0)}</strong>
-                  </div>
-                  <div>
-                    <span>Average</span>
-                    <strong>{selectionSummary.numericCount > 0 ? selectionSummary.average.toFixed(2) : '0'}</strong>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="panel-card">
-              <div className="panel-section">
-                <h3>Workbook status</h3>
-                <ul className="panel-list">
-                  <li>Open sheet: {activeSheetName}</li>
-                  <li>Total sheets: {sheetCount}</li>
-                  <li>Autosave: {saveSummary}</li>
-                  <li>Unsaved changes: {isDirty ? 'yes' : 'no'}</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </aside>
       </div>
 
+      {/*
+        The status bar carries everything the removed "Selection summary" / "Workbook
+        status" sidebar used to. The statistics are NOT redundant with fortune-sheet's own
+        stat area: that area derives its Sum/Average from `ct.t`, which is only set on
+        cells the user typed in this session, so every cell hydrated from stored
+        `celldata` (i.e. any reopened or imported workbook) reports a bare "Count: n" with
+        no sum and no average.
+      */}
       <StatusBar
         leftContent={
-          <span>
-            {selectionSummary.label} | {activeSheetName} | {saveSummary}
+          /*
+           * One inline span rather than several flex children: below 640px `.status-bar__
+           * segment` switches to `display: block` with `text-overflow: ellipsis`, which only
+           * truncates inline content. Spacing therefore comes from the separators' own
+           * margins so it survives both layouts, and the least important item (the
+           * statistics) is last, so that is what the ellipsis eats first on a phone.
+           */
+          <span className="status-bar__group">
+            <span className="status-selection" title="Selected range">
+              {selectionSummary.label}
+            </span>
+            <span aria-hidden="true" style={statusSeparatorStyle}>
+              |
+            </span>
+            <span className="status-sheet" title="Active sheet">
+              {activeSheetName}
+            </span>
+            {sheetCount > 1 && !isNarrowStatusBar && (
+              <>
+                <span aria-hidden="true" style={statusSeparatorStyle}>
+                  |
+                </span>
+                <span className="status-sheet-count">{sheetCount} sheets</span>
+              </>
+            )}
+            {selectionStats.length > 0 && (
+              <>
+                <span aria-hidden="true" style={statusSeparatorStyle}>
+                  |
+                </span>
+                {/*
+                  The enclosing <footer> is aria-live="polite", and these four numbers change
+                  on every arrow-key move. Announcing them each time would bury the save
+                  status this region exists to report, so the subtree opts out; the values
+                  stay fully readable in browse mode.
+                */}
+                <span className="status-stats" aria-live="off">
+                  {selectionStats.map(([statLabel, statValue], index) => (
+                    <span className="status-stat" key={statLabel}>
+                      {index > 0 && (
+                        <span aria-hidden="true" style={statusDotStyle}>
+                          ·
+                        </span>
+                      )}
+                      {statLabel} <strong>{statValue}</strong>
+                    </span>
+                  ))}
+                </span>
+              </>
+            )}
           </span>
         }
-        rightContent={<span>Workbook ready</span>}
+        rightContent={<span className="status-save">{saveSummary}</span>}
       />
 
       {chartData && (

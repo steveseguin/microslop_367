@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { EditorContent, useEditor } from '@tiptap/react';
 import type { Editor } from '@tiptap/react';
@@ -373,6 +373,13 @@ function computeStats(doc: ProseMirrorNode | null): DocumentStats {
   return { words, characters, paragraphs };
 }
 
+const COUNT_FORMATTER = new Intl.NumberFormat();
+
+/** `1,204 words` / `1 word` — the status bar's only presentation of `computeStats`. */
+function formatCount(value: number, noun: string) {
+  return `${COUNT_FORMATTER.format(value)} ${value === 1 ? noun : `${noun}s`}`;
+}
+
 /* ------------------------------------------------------------------ */
 /* Pure helpers                                                        */
 /* ------------------------------------------------------------------ */
@@ -632,16 +639,11 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
   const [banner, setBanner] = useState<BannerState | null>(null);
   const [isDropTargetActive, setIsDropTargetActive] = useState(false);
   const [isImagePanelDropTargetActive, setIsImagePanelDropTargetActive] = useState(false);
-  const [mobileWorkspaceView, setMobileWorkspaceView] = useState<'editor' | 'insights'>('editor');
   const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
   const [isDiscardConfirmOpen, setIsDiscardConfirmOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [statsDoc, setStatsDoc] = useState<ProseMirrorNode | null>(null);
   const [contentToken, setContentToken] = useState(0);
-
-  const mobileSectionId = useId();
-  const editorSectionId = `${mobileSectionId}-editor`;
-  const insightsSectionId = `${mobileSectionId}-insights`;
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -1956,7 +1958,6 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
 
   /* ---------------- derived view state ---------------- */
 
-  const readingMinutes = Math.max(1, Math.ceil(stats.words / 200));
   const isInTable = editor.isActive('table');
   const currentFontFamily = (editor.getAttributes('textStyle').fontFamily as string | undefined) ?? '';
   const currentFontSize = (editor.getAttributes('textStyle').fontSize as string | undefined) ?? '';
@@ -2409,35 +2410,8 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
         </div>
       )}
 
-      <div className="workspace-mobile-switcher" role="group" aria-label="Word mobile sections">
-        <button
-          className={`workspace-switcher-tab ${mobileWorkspaceView === 'editor' ? 'active' : ''}`}
-          onClick={() => setMobileWorkspaceView('editor')}
-          type="button"
-          aria-controls={editorSectionId}
-          aria-expanded={mobileWorkspaceView === 'editor'}
-        >
-          Editor
-        </button>
-        <button
-          className={`workspace-switcher-tab ${mobileWorkspaceView === 'insights' ? 'active' : ''}`}
-          onClick={() => setMobileWorkspaceView('insights')}
-          type="button"
-          aria-controls={insightsSectionId}
-          aria-expanded={mobileWorkspaceView === 'insights'}
-        >
-          Insights
-        </button>
-      </div>
-
       <div className="workspace">
-        <div
-          id={editorSectionId}
-          className={`workspace-center ${mobileWorkspaceView === 'insights' ? 'workspace-pane--hidden-mobile' : ''}`}
-          onClick={() => setMobileWorkspaceView('editor')}
-          role="region"
-          aria-label="Word editor workspace"
-        >
+        <div className="workspace-center" role="region" aria-label="Word editor workspace">
           <div className="word-stage">
             <div className="document-stage">
               <div className="document-shell">
@@ -2457,50 +2431,6 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
             </div>
           </div>
         </div>
-
-        <aside
-          id={insightsSectionId}
-          className={`workspace-sidebar ${mobileWorkspaceView === 'editor' ? 'workspace-pane--hidden-mobile' : ''}`}
-          role="region"
-          aria-label="Word insights"
-        >
-          <div className="panel-stack">
-            <div className="panel-card">
-              <div className="panel-section">
-                <h3>Document insights</h3>
-                <div className="metric-grid">
-                  <div className="metric-card">
-                    <span className="metric-label">Words</span>
-                    <span className="metric-value">{stats.words}</span>
-                  </div>
-                  <div className="metric-card">
-                    <span className="metric-label">Characters</span>
-                    <span className="metric-value">{stats.characters}</span>
-                  </div>
-                  <div className="metric-card">
-                    <span className="metric-label">Paragraphs</span>
-                    <span className="metric-value">{stats.paragraphs}</span>
-                  </div>
-                  <div className="metric-card">
-                    <span className="metric-label">Read time</span>
-                    <span className="metric-value">{readingMinutes} min</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="panel-card">
-              <div className="panel-section">
-                <h3>Working session</h3>
-                <ul className="panel-list">
-                  <li>Autosave status: {saveSummary}</li>
-                  <li>Ctrl/Cmd+S saves immediately, Ctrl/Cmd+F opens find and replace.</li>
-                  <li>Import DOCX when you need to start from an existing file.</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </aside>
       </div>
 
       <ConfirmDialog
@@ -2530,14 +2460,20 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
         onClose={() => setPendingImportFile(null)}
       />
 
+      {/*
+        The only surface for `computeStats` now that the insights sidebar is gone. The
+        separators are real text rather than `aria-hidden` spacers so the whitespace
+        around them survives into the accessibility tree and the counts are not run
+        together when the status bar's live region is announced.
+      */}
       <StatusBar
         leftContent={
           <span>
-            {stats.words} {stats.words === 1 ? 'word' : 'words'} | {stats.paragraphs}{' '}
-            {stats.paragraphs === 1 ? 'paragraph' : 'paragraphs'} | {saveSummary}
+            {formatCount(stats.words, 'word')} · {formatCount(stats.characters, 'character')} ·{' '}
+            {formatCount(stats.paragraphs, 'paragraph')}
           </span>
         }
-        rightContent={<span>Rich text mode</span>}
+        rightContent={<span>{saveSummary}</span>}
       />
     </div>
   );
