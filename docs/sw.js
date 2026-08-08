@@ -26,7 +26,7 @@
  * new shell cache containing the new index.html, and the old cache is deleted on activate.
  */
 
-const VERSION = "7c0ceb63e842";
+const VERSION = "95c270bb384e";
 const SHELL_CACHE = `officeninja-shell-${VERSION}`;
 const RUNTIME_CACHE = `officeninja-runtime-${VERSION}`;
 
@@ -51,12 +51,12 @@ const LEGACY_CACHE_PATTERN = /^officeninja-v\d+$/;
 
 /** Precached on install. Kept small on purpose; see the budget check in vite.config.ts. */
 const SHELL_ASSETS = [
-  "./assets/Dashboard-Cj5T1oA1.js",
-  "./assets/db-paxG37Wo.js",
+  "./assets/Dashboard-DRtnOtSO.js",
+  "./assets/db-C83LQPJx.js",
   "./assets/framework-UhDwY1uT.js",
+  "./assets/index-CXGXuXfw.js",
   "./assets/index-Cpf08yo3.css",
   "./assets/index-CsNR6eKv.js",
-  "./assets/index-Dgkxep6c.js",
   "./assets/inter-latin-wght-italic-DpCbqKDY.woff2",
   "./assets/inter-latin-wght-normal-Dx4kXJAl.woff2",
   "./assets/route-loader-PPVm8Dsz.js",
@@ -71,11 +71,11 @@ const SHELL_ASSETS = [
 
 /** Cached on first use, or during the idle warm pass. Multiple megabytes. */
 const WARM_ASSETS = [
-  "./assets/Excel-H8jDcd36.js",
+  "./assets/Excel-JU0eSeBB.js",
   "./assets/ExcelWorkbook-BdEgVCf9.js",
-  "./assets/PowerPoint-A_2JAODp.js",
+  "./assets/PowerPoint-D6Rd8JxL.js",
   "./assets/SelectionChart-Wc-QAbsv.js",
-  "./assets/Word-B82W9KHN.js",
+  "./assets/Word-B4EPK8BA.js",
   "./assets/__vite-browser-external-BIHI7g3E.js",
   "./assets/excel-chart-CLI4euYl.js",
   "./assets/excel-io-CKwrMZHi.js",
