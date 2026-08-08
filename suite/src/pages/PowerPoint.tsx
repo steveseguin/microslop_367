@@ -924,13 +924,16 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   const loadChainRef = useRef<Promise<void>>(Promise.resolve());
   const canvasScaleRef = useRef(1);
   const historyRef = useRef<{ stack: SlideCanvasJSON[]; index: number }>({ stack: [], index: -1 });
-  // The winner's revision from the last conflict. An EXPLICIT save adopts it so the user
-  // can actually overwrite; autosave never does, so a conflict is never resolved silently.
+  // The winner's revision from the last conflict. An EXPLICIT overwrite adopts it so this
+  // tab is no longer stale afterwards; autosave and Ctrl+S never do, so a conflict is
+  // never resolved silently.
   const conflictRevisionRef = useRef<number | null>(null);
   const crashSafetyWarnedRef = useRef(false);
   const saveInFlightRef = useRef(false);
   const saveAgainRef = useRef(false);
-  const performSaveRef = useRef<((options?: { force?: boolean; allowResurrect?: boolean }) => Promise<void>) | null>(null);
+  const performSaveRef = useRef<
+    ((options?: { force?: boolean; overwrite?: boolean; allowResurrect?: boolean }) => Promise<void>) | null
+  >(null);
   const dragStateRef = useRef<{ index: number; pointerId: number } | null>(null);
   const dropSlideIndexRef = useRef<number | null>(null);
   const slideCardRefs = useRef<(HTMLElement | null)[]>([]);
@@ -1145,7 +1148,23 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   const unopenableBannerRef = useRef(unopenableBanner);
   unopenableBannerRef.current = unopenableBanner;
 
-  const performSave = useCallback(async ({ force = false, allowResurrect = false }: { force?: boolean; allowResurrect?: boolean } = {}) => {
+  /**
+   * `force` and `overwrite` are deliberately SEPARATE.
+   *
+   *  - `force` means "save even though nothing is dirty" (Ctrl+S, the unload flush). It
+   *    changes nothing about who wins: a stale tab pressing Ctrl+S still gets a conflict.
+   *  - `overwrite` means "replace the version another tab saved". It is set ONLY by the
+   *    "Overwrite with my version" / "Restore this presentation" banner actions, each of
+   *    which has already told the user what it is about to replace, and it is what becomes
+   *    `overwriteExisting` in db.ts.
+   *
+   * They used to be the same flag, which quietly made Ctrl+S a blanket overwrite.
+   */
+  const performSave = useCallback(async ({
+    force = false,
+    overwrite = false,
+    allowResurrect = false,
+  }: { force?: boolean; overwrite?: boolean; allowResurrect?: boolean } = {}) => {
     /*
      * The stored deck could not be READ. Anything this page could serialise now is its own
      * starter deck, and writing that would destroy a record nobody has seen. This guard
@@ -1171,14 +1190,17 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       return;
     }
 
-    if (!deckDirtyRef.current && !canvasDirtyRef.current && !force) {
+    if (!deckDirtyRef.current && !canvasDirtyRef.current && !force && !overwrite) {
       return;
     }
 
-    if (force && conflictRevisionRef.current !== null) {
+    if (overwrite && conflictRevisionRef.current !== null) {
       // Explicit user intent to replace the other tab's version: adopt the winner's
-      // revision so this write is no longer stale. Without this the local revision stays
-      // behind for ever and EVERY later save conflicts, leaving no way to save at all.
+      // revision so this tab is no longer stale AFTERWARDS. Without this the local
+      // revision stays behind for ever and EVERY later save conflicts, leaving no way to
+      // save at all. It is not what gets this write past the check — `overwriteExisting`
+      // below is — so a conflict that could not be read back (no winning revision to
+      // adopt) is still resolvable.
       documentRevisionRef.current = conflictRevisionRef.current;
       conflictRevisionRef.current = null;
     }
@@ -1197,7 +1219,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         title,
         'powerpoint',
         { slides: slidesRef.current },
-        { knownRevision: documentRevisionRef.current, allowResurrect },
+        { knownRevision: documentRevisionRef.current, allowResurrect, overwriteExisting: overwrite },
       );
 
       if (docIdRef.current !== savingDocId) {
@@ -1218,7 +1240,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
           action: {
             label: 'Overwrite with my version',
             onClick: () => {
-              void performSaveRef.current?.({ force: true }).catch((error) => console.error('Force save failed', error));
+              void performSaveRef.current?.({ force: true, overwrite: true }).catch((error) => console.error('Force save failed', error));
             },
           },
         });
@@ -1283,7 +1305,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
           action: {
             label: 'Restore this presentation',
             onClick: () => {
-              void performSaveRef.current?.({ force: true, allowResurrect: true }).catch((restoreError) =>
+              void performSaveRef.current?.({ force: true, overwrite: true, allowResurrect: true }).catch((restoreError) =>
                 console.error('Restore failed', restoreError),
               );
             },
@@ -1300,7 +1322,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
           action: {
             label: 'Overwrite with my version',
             onClick: () => {
-              void performSaveRef.current?.({ force: true }).catch((forceError) => console.error('Force save failed', forceError));
+              void performSaveRef.current?.({ force: true, overwrite: true }).catch((forceError) => console.error('Force save failed', forceError));
             },
           },
         });
@@ -1863,7 +1885,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         action: {
           label: 'Overwrite with my version',
           onClick: () => {
-            void performSaveRef.current?.({ force: true }).catch((error) => console.error('Force save failed', error));
+            void performSaveRef.current?.({ force: true, overwrite: true }).catch((error) => console.error('Force save failed', error));
           },
         },
       });
@@ -1936,7 +1958,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
           ? {
               label: 'Overwrite with my version',
               onClick: () => {
-                void performSaveRef.current?.({ force: true }).catch((error) => console.error('Force save failed', error));
+                void performSaveRef.current?.({ force: true, overwrite: true }).catch((error) => console.error('Force save failed', error));
               },
             }
           : undefined,
@@ -2542,7 +2564,10 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
       event.preventDefault();
       deckDirtyRef.current = deckDirtyRef.current || canvasDirtyRef.current;
-      // An explicit Ctrl/Cmd+S is the user asserting "this version wins".
+      // `force` only means "save even if nothing is dirty". Ctrl+S is NOT an overwrite:
+      // the user pressing it has not been shown another tab's version, so a stale tab must
+      // still get the conflict banner (which offers a real overwrite) rather than silently
+      // replacing work it has never seen.
       void performSaveRef.current?.({ force: true }).catch((error) => console.error('Save flush failed', error));
     };
 

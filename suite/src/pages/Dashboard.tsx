@@ -246,7 +246,20 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
       // db.ts tombstones deletions, and saveDocument never clears one implicitly:
       // the tombstone has to go first or the restore is refused.
       clearDocumentTombstone(id);
-      await saveDocument(entry.record.id, entry.record.title, entry.record.type, entry.record.data);
+      /*
+       * `overwriteExisting: true` is REQUIRED, and this is one of only two places in the
+       * app entitled to set it.
+       *
+       * This snapshot was taken before the delete, so it has no current revision to offer,
+       * and db.ts no longer treats "no knownRevision" as permission to overwrite -- that
+       * inference is what allowed a document to be destroyed by a caller that had merely
+       * failed to read it. Restoring is the opposite case: the user pressed Undo on a
+       * delete they just performed, so replacing whatever survived the delete (a row whose
+       * deletion never reached IndexedDB, for instance) is exactly what they asked for.
+       */
+      await saveDocument(entry.record.id, entry.record.title, entry.record.type, entry.record.data, {
+        overwriteExisting: true,
+      });
     } catch (error) {
       console.error('Could not restore the deleted document', error);
     }
@@ -267,7 +280,15 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
       if (!record) {
         return;
       }
-      await saveDocument(doc.id, nextTitle, doc.type, record.data);
+      // A rename is an ORDINARY write, not an overwrite: it carries the revision it just
+      // read, so an editor tab that moved the document on in the meantime wins and the
+      // rename is reported as a conflict rather than reverting that tab's content.
+      const result = await saveDocument(doc.id, nextTitle, doc.type, record.data, {
+        knownRevision: record.revision,
+      });
+      if (result.status === 'conflict') {
+        console.warn(`Rename of "${doc.id}" skipped: it was saved elsewhere at revision ${result.record.revision}.`);
+      }
       void loadRecentDocs();
     } catch (error) {
       console.error('Rename failed', error);

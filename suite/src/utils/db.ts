@@ -19,6 +19,17 @@ export interface DocumentRecord<T = unknown> extends StoredDocument {
 }
 
 export interface SaveDocumentOptions {
+  /**
+   * The revision this save is based on — the `revision` of the record the caller last
+   * loaded or wrote. It is the ONLY thing that entitles a caller to advance a document
+   * that already exists.
+   *
+   * Omitting it (or passing `null`) means "I have no basis for this write". Over a
+   * document that already exists that is a COLLISION, reported as `status: 'conflict'`
+   * with nothing written — it is NOT a licence to fast-forward. Omit it only for a
+   * document the caller believes is new; if the caller means "replace whatever is
+   * there", it must say so with `overwriteExisting`.
+   */
   knownRevision?: number | null;
   /**
    * Save even though the id is tombstoned (deleted here or in another tab), clearing the
@@ -27,6 +38,20 @@ export interface SaveDocumentOptions {
    * deleted document throws rather than silently resurrecting it.
    */
   allowResurrect?: boolean;
+  /**
+   * REPLACE WHATEVER IS STORED, at any revision, by anyone. This is destructive by
+   * design and must only ever be set from an explicit user action that was shown what it
+   * is about to replace — "Overwrite with this version" after a conflict, or restoring a
+   * document the user just deleted.
+   *
+   * It exists so that overwrite intent is DECLARED rather than inferred from a missing
+   * `knownRevision`. Inferring it is how a document could be destroyed by a caller that
+   * simply had no revision to offer (it had failed to read one), while the pill read
+   * "Saved". Never set it from an autosave path, and never set it "just in case a
+   * conflict happens": a caller that cannot name the revision it is replacing is exactly
+   * the caller this flag must not serve.
+   */
+  overwriteExisting?: boolean;
 }
 
 /**
@@ -34,8 +59,13 @@ export interface SaveDocumentOptions {
  *
  *  - 'saved'    -> persisted. `record.source` is 'database' when IndexedDB accepted the
  *                  write, 'backup' when only the localStorage copy could be written.
- *  - 'conflict' -> NOTHING was written; another client advanced the document past
- *                  `options.knownRevision`. `record` is the real stored winner.
+ *  - 'conflict' -> NOTHING was written and `record` is the real stored winner. Either
+ *                  another client advanced the document past `options.knownRevision`, or
+ *                  the document exists and the caller offered no `knownRevision` at all
+ *                  (see `SaveDocumentOptions.knownRevision`). Both mean the same thing to
+ *                  a page: this write is not entitled to land. The way forward is to
+ *                  reload, or to re-save with `overwriteExisting: true` from an explicit
+ *                  user action.
  *  - 'failed'   -> RESERVED, NEVER RETURNED. Total failure throws a
  *                  `DocumentPersistenceError`, because widening a union is invisible to
  *                  TypeScript and would have rendered as "Saved". Kept so code already
@@ -106,9 +136,15 @@ export class DocumentPersistenceError extends Error {
  * EXIST — and every caller acts on it by seeding a default document and entering its
  * autosave loop. So "I could not find out whether it exists" must never be expressed as
  * `undefined`: when IndexedDB cannot be read and there is no localStorage copy, the stored
- * record may be sitting in the database intact, and the first keystroke would overwrite it
- * (the revision check cannot help — a tab reloading a document it saved itself keeps the
- * same `lastSavedBy`, which disables half of `isConflict`).
+ * record may be sitting in the database intact, and a caller told "absent" will go on to
+ * edit a document it has never seen.
+ *
+ * This lock is now the OUTER of two defences, not the only one. `saveDocument` refuses a
+ * write that offers no `knownRevision` over an existing record, and only exempts a
+ * same-client record when this page instance actually wrote it — so the first keystroke
+ * after a mistaken "absent" is reported as a conflict rather than overwriting the stored
+ * document. The lock still matters: a conflict banner on a document the user believes is
+ * blank and new is a confusing place to end up, and this error says plainly what happened.
  *
  * An exception rather than a widened return type, for the same reason `saveDocument`
  * throws: pages already have a `.catch`, so the fail-safe behaviour is the default and a
@@ -494,8 +530,11 @@ export function clearDocumentTombstone(id: string) {
   delete tombstones[id];
   writeTombstones(tombstones);
   removePendingDelete(id);
-  // The document is being recreated; any remembered revision belongs to the deleted one.
+  // The document is being recreated; any remembered revision belongs to the deleted one,
+  // and so does any memory of having written it (which would otherwise exempt this page
+  // from conflicting with a same-id record it never actually wrote).
   forgetRevision(id);
+  forgetOwnWrites(id);
 }
 
 export function isDocumentTombstoned(id: string) {
@@ -1103,18 +1142,85 @@ function enqueue<R>(id: string, task: () => Promise<R>): Promise<R> {
 // ---------------------------------------------------------------------------
 
 /**
- * The single definition of "someone else got there first": a strictly higher revision
- * written by a different client. Takes only the two fields it needs so it can be applied
- * to a full record or to a bare revision-ledger witness.
+ * Revisions THIS PAGE INSTANCE has written, per document id. In memory only, and
+ * deliberately so — see `isConflict`.
+ */
+const ownWrites = new Map<string, number>();
+
+function recordOwnWrite(id: string, revision: number) {
+  if (!Number.isFinite(revision)) {
+    return;
+  }
+
+  if ((ownWrites.get(id) ?? 0) < revision) {
+    ownWrites.set(id, revision);
+  }
+}
+
+/** True when this page instance is the one that wrote `revision` (or something later). */
+function wroteRevision(id: string, revision: number) {
+  return (ownWrites.get(id) ?? 0) >= revision;
+}
+
+function forgetOwnWrites(id: string) {
+  ownWrites.delete(id);
+}
+
+/**
+ * The single definition of "this write is not entitled to land". Takes only the two
+ * fields it needs from the stored side, so it can be applied to a full record or to a
+ * bare revision-ledger witness.
+ *
+ * In order:
+ *
+ *  1. Nothing stored -> never a conflict. There is nothing to lose.
+ *  2. `overwriteExisting` -> never a conflict. The caller declared intent to replace
+ *     whatever is there, from an explicit user action.
+ *  3. NO `knownRevision` over an existing record -> ALWAYS a conflict. A missing revision
+ *     is the absence of a basis for the write, not permission to fast-forward. This is
+ *     the half of the check that used to be missing: a page that had failed to read the
+ *     document (so it had no revision) looked identical to a page creating a new one, and
+ *     its first autosave replaced the stored record.
+ *  4. Stored revision at or below `knownRevision` -> not a conflict. Ordinary path.
+ *  5. Stored revision ahead, written by a DIFFERENT client -> conflict.
+ *  6. Stored revision ahead, written by the SAME client id -> conflict UNLESS this page
+ *     instance is the one that wrote it.
+ *
+ * Rule 6 is deliberately narrow. The exemption exists so a client does not conflict with
+ * its own in-flight writes: a save queued before an earlier save landed carries a
+ * `knownRevision` one behind the record it is about to see, and refusing it would drop the
+ * user's newest edit (this happened, via an ephemeral client id, and was fixed once
+ * already). But `clientId` lives in sessionStorage, which SURVIVES A RELOAD and is COPIED
+ * INTO A DUPLICATED TAB, so "same client id" on its own does not mean "my own write" — it
+ * also covers a previous page load of this tab and a genuinely concurrent duplicate. The
+ * in-memory `ownWrites` map is scoped to exactly what the exemption is for: writes this
+ * page instance actually performed. A reloaded tab has an empty map, and it does not need
+ * the exemption anyway — it read its `knownRevision` from the record it is now looking at.
  */
 function isConflict(
+  id: string,
   current: Pick<StoredDocument, 'revision' | 'lastSavedBy'> | undefined,
-  knownRevision: number | null | undefined,
+  options: Pick<SaveDocumentOptions, 'knownRevision' | 'overwriteExisting'>,
   clientId: string,
 ) {
-  return Boolean(
-    current && knownRevision != null && current.revision > knownRevision && current.lastSavedBy !== clientId,
-  );
+  if (!current || options.overwriteExisting) {
+    return false;
+  }
+
+  const { knownRevision } = options;
+  if (knownRevision == null) {
+    return true;
+  }
+
+  if (current.revision <= knownRevision) {
+    return false;
+  }
+
+  if (current.lastSavedBy !== clientId) {
+    return true;
+  }
+
+  return !wroteRevision(id, current.revision);
 }
 
 async function saveDocumentInternal<T>(
@@ -1194,7 +1300,7 @@ async function saveDocumentInternal<T>(
       const current = normalizeDocument<T>(await tx.store.get(id), 'database');
       databaseReadable = true;
 
-      if (isConflict(current, knownRevision, clientId)) {
+      if (isConflict(id, current, options, clientId)) {
         conflictRecord = current;
       } else {
         const candidate = buildRecord(current ? current.revision + 1 : Math.max(1, (knownRevision ?? 0) + 1));
@@ -1242,7 +1348,7 @@ async function saveDocumentInternal<T>(
       .filter((record): record is DocumentRecord<T> => record !== undefined)
       .sort((left, right) => right.revision - left.revision)[0];
 
-    if (isConflict(bestRecord, knownRevision, clientId)) {
+    if (bestRecord && isConflict(id, bestRecord, options, clientId)) {
       recordRevision(id, bestRecord.revision, bestRecord.lastSavedBy);
       return { status: 'conflict', record: bestRecord };
     }
@@ -1266,11 +1372,14 @@ async function saveDocumentInternal<T>(
     // authority and the (now repaired) ledger has nothing left to say.
     const trustedLedger = !storeWasRead && ledger && ledger.r > visibleRevision ? ledger : undefined;
 
-    if (trustedLedger && knownRevision != null && trustedLedger.r > knownRevision && trustedLedger.by !== clientId) {
-      // We know the document moved on, but cannot produce the winning record to hand
-      // back. Reporting "saved" here would discard the user's edit on recovery. This is a
-      // CONFLICT that could not be verified, not a storage failure — pages should offer a
-      // rebase/force-save route, not "could not be written locally".
+    if (
+      trustedLedger &&
+      isConflict(id, { revision: trustedLedger.r, lastSavedBy: trustedLedger.by }, options, clientId)
+    ) {
+      // We know the document exists and has moved on, but cannot produce the winning
+      // record to hand back. Reporting "saved" here would discard the user's edit on
+      // recovery. This is a CONFLICT that could not be verified, not a storage failure —
+      // pages should offer a rebase/force-save route, not "could not be written locally".
       throw new DocumentPersistenceError(
         `Document "${id}" advanced to revision ${trustedLedger.r} elsewhere and IndexedDB cannot be read to confirm it. Nothing was written.`,
         'conflict-unverifiable',
@@ -1313,6 +1422,9 @@ async function saveDocumentInternal<T>(
   }
 
   recordRevision(id, nextRecord.revision, clientId);
+  // Evidence for the same-client exemption in `isConflict`, and the ONLY thing that grants
+  // it. Recorded after the write is known to have landed somewhere.
+  recordOwnWrite(id, nextRecord.revision);
   postToChannel(createDocumentChangeEvent(nextRecord));
 
   return {
@@ -1327,6 +1439,11 @@ async function saveDocumentInternal<T>(
  * Read, conflict check and write happen inside ONE IndexedDB readwrite transaction, and
  * concurrent calls for the same id are serialised in-process, so neither another tab nor
  * another call in this page can interleave with a save.
+ *
+ * A write over a document that already exists must be ENTITLED to land: either it carries
+ * a `knownRevision` the stored record has not moved past, or it sets `overwriteExisting`.
+ * Anything else is `status: 'conflict'` with nothing written. Overwrite intent is never
+ * inferred from an absent `knownRevision` — see `SaveDocumentOptions` and `isConflict`.
  *
  * Throws `DocumentPersistenceError` rather than reporting a false success. See that class
  * for the codes.
@@ -1363,19 +1480,20 @@ export function saveDocument<T = unknown>(
  * in every tab, so a winning tab leaves evidence here even though its own write went to
  * IndexedDB.
  *
- * The test is the same `isConflict` used by `saveDocument`: refuse when a witness is at a
- * STRICTLY higher revision than the caller's `knownRevision` AND was last written by a
- * different client. The `lastSavedBy` half is what keeps the ordinary cases working — a
- * tab that has been editing for a while is named in the ledger itself, and a fresh tab
- * opening a document saved by an earlier tab sees an equal, not higher, revision.
+ * The test is the same `isConflict` used by `saveDocument`, with the same rules: a witness
+ * ahead of the caller's `knownRevision` refuses the snapshot unless this page instance
+ * wrote that revision itself, and a witness with NO `knownRevision` offered refuses it
+ * outright. That last case is why an unload handler cannot accidentally resurrect an old
+ * view of a document it never managed to read.
  *
  * Returns true only if the snapshot is now on disk. Never throws. Returns false when:
- * storage is unavailable, the id is tombstoned, another client owns a newer revision
- * (conflict), the payload exceeds `BACKUP_SIZE_LIMIT_BYTES`, or the write was refused.
- * In every one of those cases any PREVIOUS local copy is left intact.
+ * storage is unavailable, the id is tombstoned, a witness shows the document is ahead of
+ * this caller (conflict), the payload exceeds `BACKUP_SIZE_LIMIT_BYTES`, or the write was
+ * refused. In every one of those cases any PREVIOUS local copy is left intact.
  *
- * Pass the SAME `knownRevision` you pass to `saveDocument`. Omitting it disables the
- * conflict check, which is correct only for a document that does not exist yet.
+ * Pass the SAME `knownRevision` you pass to `saveDocument`. Omitting it is safe but not
+ * useful: it is now read as "no basis for this write", so the snapshot is refused whenever
+ * any witness exists at all.
  *
  * Call it from a `pagehide` handler, after (not instead of) your normal autosave.
  */
@@ -1409,10 +1527,11 @@ export function saveDocumentBackupNow<T = unknown>(
     ];
 
     for (const witness of witnesses) {
-      if (witness && isConflict(witness, options.knownRevision, clientId)) {
+      if (witness && isConflict(id, witness, options, clientId)) {
         lastBackupError =
           `Emergency snapshot for "${id}" refused: revision ${witness.revision} by ${witness.lastSavedBy} ` +
-          `is ahead of this tab's revision ${options.knownRevision}. Refusing to overwrite the newer document.`;
+          `is ahead of this tab's revision ${options.knownRevision ?? '(none supplied)'}. ` +
+          `Refusing to overwrite the newer document.`;
         console.warn(lastBackupError);
         return false;
       }
@@ -1437,6 +1556,7 @@ export function saveDocumentBackupNow<T = unknown>(
     }
 
     recordRevision(id, record.revision, clientId);
+    recordOwnWrite(id, record.revision);
     return true;
   } catch (error) {
     // Nothing may escape into an unload handler.
@@ -1496,10 +1616,28 @@ export async function loadDocument<T = unknown>(id: string) {
      * browsing, blocked site data), which is precisely the degraded mode the localStorage
      * path exists to serve. So that case still resolves to `undefined`.
      *
-     * KNOWN GAP: the ledger lives in localStorage, holds at most MAX_LEDGER_ENTRIES ids and
-     * is dropped when the user clears site data. A document whose entry has been evicted or
-     * cleared, opened while IndexedDB is unreadable, is still reported absent. Closing that
-     * would mean refusing to open any new document in a browser without IndexedDB.
+     * The ledger lives in localStorage, holds at most MAX_LEDGER_ENTRIES ids and is dropped
+     * when the user clears site data, so a document whose entry has been evicted or cleared
+     * and is then opened while IndexedDB is unreadable IS still reported absent here. That
+     * used to be a data-loss gap: the caller seeded a default document and its first
+     * autosave replaced the stored record, because a save carrying no (or a zeroed)
+     * `knownRevision` was treated as a fast-forward, and the `lastSavedBy` half of the
+     * conflict check was disabled for the very common case of a tab reopening a document it
+     * had saved itself.
+     *
+     * It is no longer a data-loss gap, because `saveDocument` no longer infers overwrite
+     * intent. A write over an existing record must either carry a `knownRevision` the
+     * record has not moved past, or set `overwriteExisting` explicitly; and the same-client
+     * exemption now requires that THIS PAGE INSTANCE wrote the stored revision, which a
+     * freshly reloaded tab has not. So the mistaken-absent path ends in `status: 'conflict'`
+     * with the stored record intact and offered back to the caller.
+     *
+     * RESIDUAL: if IndexedDB is unreadable at SAVE time too, and there is no local copy and
+     * no ledger entry, nothing in this browser can witness the document — the save writes a
+     * fresh localStorage copy at revision 1. That copy can never beat the stored record
+     * (`backupBeatsDatabase` requires a strictly higher revision), so the document is not
+     * destroyed; it is simply shadowed until IndexedDB recovers. Closing even that would
+     * mean refusing to create any new document in a browser without IndexedDB.
      */
     const witness = getLedgerEntry(id);
     if (witness) {
@@ -1677,6 +1815,7 @@ async function deleteDocumentInternal(id: string) {
     addTombstone(id, true);
     // The remembered revision described a document that no longer exists.
     forgetRevision(id);
+    forgetOwnWrites(id);
   } else {
     console.warn(`Delete of "${id}" is not durable yet; the local copy is kept until IndexedDB confirms it.`);
   }

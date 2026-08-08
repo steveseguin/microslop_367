@@ -1096,9 +1096,17 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
   }, [clearSaveTimer, runSave]);
 
   /**
-   * Resolve a conflict in this tab's favour. Omitting `knownRevision` skips db.ts's
-   * conflict check entirely, which is the only way out of an otherwise permanent
-   * conflict loop (a normal retry re-sends the same stale revision and conflicts again).
+   * Resolve a conflict in this tab's favour.
+   *
+   * `overwriteExisting: true` is REQUIRED here and is the whole point of this function.
+   * db.ts no longer infers overwrite intent from a missing `knownRevision` — omitting the
+   * revision now reads as "this caller has no basis for its write" and is reported as a
+   * conflict, which is exactly what protects a document whose load failed. Without the
+   * explicit opt-in this button would do nothing but re-report the same conflict, and the
+   * user would be stuck in a permanent loop with no way to save at all.
+   *
+   * It is safe to set here, and only here, because it is reached from a banner that has
+   * already told the user a newer version exists and that this replaces it.
    */
   const forceSave = useCallback(async () => {
     const activeEditor = editorRef.current;
@@ -1115,7 +1123,7 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
         fileNameRef.current.trim() || DEFAULT_FILE_NAME,
         'word',
         activeEditor.getJSON(),
-        {},
+        { overwriteExisting: true },
       );
       dirtyRef.current = false;
       revisionRef.current = result.record.revision;

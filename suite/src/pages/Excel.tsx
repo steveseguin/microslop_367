@@ -1668,9 +1668,18 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
 
       try {
         const result = await saveDocument(docId, title, 'excel', payload, {
-          // knownRevision:null disables db.ts's conflict check -- the supported override
-          // for a user-initiated force save.
-          knownRevision: options.force ? null : documentRevisionRef.current,
+          // Always tell db.ts the revision this tab is working from, even when forcing:
+          // omitting it no longer means "skip the check", it means "this caller has no
+          // basis for its write", which db.ts reports as a conflict.
+          knownRevision: documentRevisionRef.current,
+          /*
+           * The supported override for a user-initiated force save, and the ONLY thing
+           * that gets a stale tab past the conflict check. `options.force` is set by the
+           * "Force save" toolbar button and the conflict banner's button -- both of which
+           * have already shown the user that a newer workbook exists. It is never set by
+           * autosave, Ctrl+S or the unload flush.
+           */
+          overwriteExisting: options.force,
         });
 
         if (result.status === 'conflict') {
@@ -1845,9 +1854,9 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
       /*
        * ALWAYS pass the real knownRevision here. `saveDocumentBackupNow` performs its own
        * conflict check and returns false rather than overwriting another tab's committed
-       * work; `knownRevision: null` would disable that check. (Force save passes null to
-       * `saveDocument` deliberately -- that is a different function and the pattern must
-       * NOT migrate to this one.)
+       * work. Never pass `overwriteExisting` from an unload handler: nobody is there to be
+       * asked, so there is no user intent to declare -- that flag belongs only to the
+       * "Force save" controls.
        *
        * A false return inside an unload handler is the CORRECT outcome: it means another
        * tab was protected. There is no UI available here, so it is not surfaced.
