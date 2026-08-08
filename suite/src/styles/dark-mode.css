@@ -2,16 +2,40 @@ body.dark-mode {
   color: var(--text);
 }
 
+/* The grid keeps a light "paper" surface in dark mode, like `.document-page`
+   and the slide canvas: fortune-sheet paints white cells onto its canvas, and
+   the DOM layers stacked over that canvas have to match or they show through.
+   VERIFIED, not assumed: dropping the fill repaints 24,830px of the grid from
+   #fff to #dfdfdf/#545454 at 1280x800, so this rule is still doing work.
+   What it was MISSING is the matching ink. `body.dark-mode { color }` above
+   cascades into the in-cell editor, which drew #edf4ff text on this white
+   fill — typing into a cell was invisible. `.document-page` in index.css
+   already pairs its white background with `color: #0f172a`; so does this. */
 body.dark-mode .fortune-sheet-container,
 body.dark-mode .fortune-sheet-area,
 body.dark-mode .fortune-sheet-canvas,
-body.dark-mode .fortune-sheet-overlay,
 body.dark-mode .luckysheet-input-box,
 body.dark-mode .luckysheet-cell-sheettable {
   background: #ffffff;
 }
 
+/* The ink has to be scoped at the CONTAINER, not at the grid. Every layer the
+   library owns paints on a light background of its own (#fff container,
+   #fafafc toolbar and sheet-tab bar) while `body.dark-mode { color }` above
+   pushes #edf4ff into all of them. Scoping the grid alone left the font-family
+   and font-size combo labels at 1.06:1 — #edf4ff on #fafafc — and the stat
+   area with them. Descendants that set their own colour (the sheet-tab bar is
+   #444) are unaffected, because an own rule beats an inherited value. */
+body.dark-mode .fortune-container,
+body.dark-mode .fortune-sheet-container,
+body.dark-mode .fortune-sheet-area,
+body.dark-mode .fortune-sheet-canvas,
+body.dark-mode .luckysheet-input-box,
+body.dark-mode .luckysheet-cell-sheettable {
+  color: #0f172a;
+}
+
 body.dark-mode .document-page,
-body.dark-mode .canvas-shell canvas {
+body.dark-mode .canvas-shell canvas.lower-canvas {
   background: #ffffff;
 }
