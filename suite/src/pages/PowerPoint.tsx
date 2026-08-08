@@ -9,12 +9,14 @@ import {
   Circle,
   Copy,
   Download,
+  FileText,
   GripVertical,
   Image as ImageIcon,
   PanelRightClose,
   Palette,
   Play,
   Plus,
+  Printer,
   Redo,
   Save,
   SendToBack,
@@ -147,6 +149,31 @@ const EMU_PER_INCH = 914400;
  * back 22px thick on every round trip.
  */
 const MIN_EXPORT_SIZE_IN = 0.01;
+
+/*
+ * ---------------------------------------------------------------------------------
+ * Printing a deck
+ * ---------------------------------------------------------------------------------
+ *
+ * A fabric canvas is a bitmap the size of the STAGE, holding one slide. Printing the live
+ * page therefore yields a single scaled-down screenshot of whichever slide happens to be
+ * open — not a deck. So each slide is rendered to a PNG the way the thumbnails already
+ * are, on a DETACHED `fabric.StaticCanvas`: nothing about that path touches the live
+ * canvas, `renderCurrentSlide`'s promise chain, or its monotonic load token.
+ *
+ * 2x of the 960x540 design size is 1920x1080, which lands at ~190dpi across the 10.1in
+ * printable width of a landscape Letter page — past the point where more pixels show up
+ * in ink, and well short of the point where sixty base64 strings become a memory problem.
+ */
+const PRINT_SLIDE_MULTIPLIER = 2;
+/** Progress is reported in batches; a re-render per slide costs more than it tells anyone. */
+const PRINT_PROGRESS_STRIDE = 5;
+
+interface PrintSlide {
+  id: string;
+  image: string;
+  notes: string;
+}
 
 /**
  * The notes rail. 288px of permanently reserved horizontal space bought one textarea and a
@@ -2807,6 +2834,182 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     }
   };
 
+  /* ---------------- print ---------------- */
+
+  /**
+   * Rendered slides waiting to be printed. `null` means the print root holds only its
+   * standing notice, which is what a print started from the BROWSER's own menu gets:
+   * rendering sixty canvases is asynchronous and `beforeprint` cannot be awaited, so
+   * rather than hand back a blank page it says which control to use instead.
+   */
+  const [printSlides, setPrintSlides] = useState<PrintSlide[] | null>(null);
+  const [printedSlideCount, setPrintedSlideCount] = useState<number | null>(null);
+  const printRootRef = useRef<HTMLDivElement | null>(null);
+  const isPreparingPrintRef = useRef(false);
+
+  const renderDeckForPrint = useCallback(
+    async (includeNotes: boolean) => {
+      // The slide on screen may hold uncommitted edits; this is the same flush `exportPptx`
+      // performs, and it is a no-op when the canvas is clean.
+      flushActiveSlide(false);
+      const deck = slidesRef.current;
+      const rendered: PrintSlide[] = [];
+
+      for (let index = 0; index < deck.length; index += 1) {
+        const slide = deck[index];
+        const element = document.createElement('canvas');
+        element.width = SLIDE_WIDTH;
+        element.height = SLIDE_HEIGHT;
+        const temp = new fabric.StaticCanvas(element, {
+          width: SLIDE_WIDTH,
+          height: SLIDE_HEIGHT,
+          backgroundColor: '#ffffff',
+        });
+
+        try {
+          if (slide.data) {
+            await temp.loadFromJSON(slide.data);
+          } else {
+            // Never opened, so it has no saved JSON — the same template `renderCurrentSlide`
+            // would apply the moment it was selected. Skipping it would silently drop a
+            // slide from the printed deck.
+            applySlideTemplate(temp, index === 0 ? 'cover' : 'content');
+          }
+
+          temp.backgroundColor = '#ffffff';
+          temp.renderAll();
+          rendered.push({
+            id: slide.id,
+            image: temp.toDataURL({ format: 'png', multiplier: PRINT_SLIDE_MULTIPLIER }),
+            notes: includeNotes ? (slide.notes ?? '').trim() : '',
+          });
+        } catch (error) {
+          // One unreadable slide must not cost the other fifty-nine their print.
+          console.warn('Slide could not be rendered for printing', error);
+          rendered.push({ id: slide.id, image: '', notes: includeNotes ? (slide.notes ?? '').trim() : '' });
+        } finally {
+          void temp.dispose();
+        }
+
+        if (index % PRINT_PROGRESS_STRIDE === 0) {
+          setPrintedSlideCount(index + 1);
+        }
+
+        // Yield between slides so a long deck cannot freeze the tab, exactly as the
+        // thumbnail rebuild does.
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
+      }
+
+      return rendered;
+    },
+    [flushActiveSlide],
+  );
+
+  const startPrint = useCallback(
+    async (includeNotes: boolean) => {
+      if (isPreparingPrintRef.current) {
+        return;
+      }
+
+      // Same rule as Excel's: a deck whose stored copy could not be read is showing the
+      // starter deck, and printing that as if it were the user's presentation would be a
+      // lie told in PDF form.
+      if (isDeckUnopenableRef.current) {
+        setBanner({
+          tone: 'error',
+          title: 'This presentation could not be opened, so there is nothing to print.',
+          detail: 'Your saved copy has not been changed.',
+        });
+        return;
+      }
+
+      isPreparingPrintRef.current = true;
+      setPrintedSlideCount(0);
+
+      try {
+        const rendered = await renderDeckForPrint(includeNotes);
+        if (rendered.length === 0) {
+          setBanner({ tone: 'warning', title: 'There are no slides to print.' });
+          return;
+        }
+
+        setPrintSlides(rendered);
+      } catch (error) {
+        console.error('Print preparation failed', error);
+        setBanner({
+          tone: 'error',
+          title: 'This deck could not be prepared for printing.',
+          detail: 'Try again, or export to PPTX and print from there.',
+        });
+      } finally {
+        setPrintedSlideCount(null);
+        isPreparingPrintRef.current = false;
+      }
+    },
+    [renderDeckForPrint],
+  );
+
+  const startPrintRef = useRef(startPrint);
+  startPrintRef.current = startPrint;
+
+  /*
+   * Print once the images are actually decoded. An `<img>` whose data URL has not been
+   * decoded yet lays out at zero height, and the print would be a deck of empty pages.
+   */
+  useEffect(() => {
+    if (!printSlides) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const run = async () => {
+      const root = printRootRef.current;
+      if (root) {
+        const images = Array.from(root.querySelectorAll('img'));
+        await Promise.all(
+          images.map((image) => (image.complete ? Promise.resolve() : image.decode().catch(() => undefined))),
+        );
+      }
+
+      if (!cancelled) {
+        window.print();
+      }
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [printSlides]);
+
+  /*
+   * Released on `afterprint`, not immediately after `window.print()` returns. The print
+   * preview re-lays-out the page every time the user changes a setting in the dialog, so
+   * the images have to survive for as long as the dialog is open.
+   */
+  useEffect(() => {
+    const release = () => setPrintSlides(null);
+    window.addEventListener('afterprint', release);
+    return () => window.removeEventListener('afterprint', release);
+  }, []);
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'p' || event.shiftKey || event.altKey) {
+        return;
+      }
+
+      // Otherwise the browser prints the app chrome around one shrunken slide.
+      event.preventDefault();
+      void startPrintRef.current(false);
+    };
+
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, []);
+
   const exportPptx = async () => {
     flushActiveSlide(false);
     const exportSlides = slidesRef.current;
@@ -3105,6 +3308,20 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
               <Upload size={16} />
               Import PPTX
             </button>
+            {/*
+              Slides only. Speaker notes are a deliberate opt-in on the ribbon next to
+              this — see the note on the "Print notes pages" button.
+            */}
+            <button
+              className="btn btn-secondary"
+              onClick={() => void startPrint(false)}
+              type="button"
+              disabled={printedSlideCount !== null}
+              title="Print or save as PDF (Ctrl/Cmd+P)"
+            >
+              <Printer size={16} />
+              {printedSlideCount === null ? 'Print' : `Rendering ${printedSlideCount}/${slides.length}`}
+            </button>
             <button className="btn btn-secondary" onClick={exportPptx} type="button">
               <Download size={16} />
               Export PPTX
@@ -3167,6 +3384,39 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
             that promises a second-screen console and delivers a dark theme with a timer is
             worse than no control, so it is gone rather than half-kept.
           */}
+        </ToolbarGroup>
+
+        {/*
+          Its own group, and the LAST one, deliberately. The desktop ribbon moves whole
+          groups into its overflow popover from the end backwards, so putting these two
+          inside "Present" pushed Start Presentation off the visible ribbon at 1280px.
+          A trailing group is the one that should be sacrificed first, and the header
+          already carries a Print button for the common case.
+        */}
+        <ToolbarGroup label="Print">
+          <ToolbarButton
+            icon={Printer}
+            onClick={() => void startPrint(false)}
+            isDisabled={printedSlideCount !== null}
+            title="Print slides or save as PDF (Ctrl/Cmd+P)"
+          />
+          {/*
+            Notes pages are a SEPARATE control, and Ctrl+P never reaches them, because
+            speaker notes are the presenter's private crib sheet. PowerPoint keeps them
+            behind a distinct "Notes Pages" layout for the same reason: a deck is usually
+            printed to hand round or to attach to an email, and quietly folding the notes
+            into that PDF leaks them to exactly the audience they were written about.
+            Opting in costs one click; opting out after the fact is not possible.
+
+            The layout is PowerPoint's own: the slide on the upper part of a landscape
+            page with the notes beneath it, one slide per page.
+          */}
+          <ToolbarButton
+            icon={FileText}
+            onClick={() => void startPrint(true)}
+            isDisabled={printedSlideCount !== null}
+            title="Print notes pages (slides with speaker notes)"
+          />
         </ToolbarGroup>
       </Toolbar>
 
@@ -3250,6 +3500,37 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         >
           Notes
         </button>
+      </div>
+
+      {/*
+        The printed deck. `display: none` on screen, so it takes no part in layout, in the
+        tab order or in the accessibility tree; the print stylesheet reveals it and hides
+        every sibling. It holds nothing but its notice until a print is actually asked for.
+      */}
+      <div className="print-doc print-doc--landscape" ref={printRootRef} aria-hidden="true">
+        {printSlides ? (
+          printSlides.map((slide, index) => (
+            <section
+              key={slide.id}
+              className={`print-slide ${slide.notes ? 'print-slide--with-notes' : ''}`}
+            >
+              {slide.image ? (
+                <img className="print-slide__image" src={slide.image} alt="" />
+              ) : (
+                <p className="print-doc__note">Slide {index + 1} could not be rendered.</p>
+              )}
+              {slide.notes && <div className="print-slide__notes">{slide.notes}</div>}
+              <div className="print-slide__number">
+                Slide {index + 1} of {printSlides.length}
+              </div>
+            </section>
+          ))
+        ) : (
+          <p className="print-doc__note">
+            Use Print in the ribbon, or Ctrl/Cmd+P, to print this presentation. Each slide has to
+            be rendered to an image first, which the browser&rsquo;s own print command cannot wait for.
+          </p>
+        )}
       </div>
 
       <div className="workspace">

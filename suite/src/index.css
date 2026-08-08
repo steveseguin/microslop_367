@@ -3503,3 +3503,384 @@ input[type="color"]::-moz-color-swatch {
     transform: none;
   }
 }
+
+/* =========================================================================
+   Print — and, through the browser's own "Save as PDF" destination, PDF.
+
+   There is deliberately no PDF library here. `window.print()` plus this
+   stylesheet produces both outputs from one implementation, works with no
+   network, and adds nothing at all to the bundle. A client-side PDF writer
+   would have to re-implement pagination, web fonts, and image embedding, and
+   would still print worse than the engine already rendering the page.
+
+   Everything below is inside `@media print` (or an `@page` rule, which only
+   ever applies to paged media). None of it can reach the screen, which is what
+   makes it safe to unpick the `overflow: hidden` viewport shell that the
+   on-screen layout depends on.
+   ========================================================================= */
+
+/* On screen the generated print roots do not exist as far as layout, the tab
+   order and the accessibility tree are concerned. This is the ONLY rule in this
+   section outside a paged context, and it is the one that keeps the feature
+   free on screen. */
+.print-doc {
+  display: none;
+}
+
+@page {
+  size: letter;
+  margin: 0.75in;
+}
+
+/* A named page is the only way for one shared stylesheet to give the sheet and
+   the deck a different orientation from the document. Applied by the `page`
+   property on the print roots below. */
+@page ninja-landscape {
+  size: letter landscape;
+  margin: 0.45in;
+}
+
+@media print {
+  /* ---------------------------------------------------------------------
+     1. The shell stops being a viewport.
+
+     On screen `.app` is exactly one viewport tall with `overflow: hidden`, and
+     only `.workspace-center` scrolls. Printed as-is that yields ONE page: the
+     first screenful, with the rest of the document clipped away. Each of these
+     is the print-media counterpart of a screen rule a few hundred lines above,
+     and none of them exists outside this block.
+     --------------------------------------------------------------------- */
+  html,
+  body,
+  #root {
+    height: auto;
+    overflow: visible;
+  }
+
+  /* Paper is white. `body` carries `background: var(--app-bg)`, which is #0b1119
+     in dark mode — with "Background graphics" enabled in the print dialog that
+     prints a black page and drains a cartridge. The dark-mode selector is listed
+     explicitly because `styles/dark-mode.css` loads after this file and would
+     otherwise win the tie on `color`. Printing is always light. */
+  body,
+  html body.dark-mode {
+    background: #ffffff;
+    color: #111111;
+  }
+
+  .app {
+    height: auto;
+    min-height: 0;
+    display: block;
+    overflow: visible;
+  }
+
+  .app-main,
+  .app-container {
+    height: auto;
+    min-height: 0;
+    display: block;
+    overflow: visible;
+  }
+
+  .workspace {
+    display: block;
+    background: #ffffff;
+  }
+
+  .workspace-center {
+    overflow: visible;
+  }
+
+  /* ---------------------------------------------------------------------
+     2. Chrome is not the document.
+     --------------------------------------------------------------------- */
+  .skip-link,
+  .suite-header,
+  .toolbar-shell,
+  .toolbar-overflow-panel,
+  .mobile-toolbar-launcher,
+  .mobile-toolbar-modal,
+  .workspace-mobile-switcher,
+  .status-bar,
+  .editor-banner,
+  .find-replace-bar,
+  .insert-image-panel,
+  .formula-strip,
+  .chart-modal,
+  .dialog-backdrop,
+  .drop-target-hint,
+  .canvas-drop-target-hint {
+    display: none;
+  }
+
+  /* Editor furniture that is drawn INSIDE the document. The find highlight is
+     applied by ProseMirror as an inline `style`, so a print-only `!important`
+     is the only thing that can beat it — there is no screen rule competing for
+     this property, so nothing to escalate against. */
+  .word-find-match {
+    background-color: transparent !important;
+    color: inherit !important;
+  }
+
+  /* ---------------------------------------------------------------------
+     3. Word — the sheet of paper becomes the page.
+
+     `@page` already supplies the margin, so the on-screen 1in padding and the
+     11in minimum (which would emit a blank page after a one-line document) are
+     both dropped. `.document-page` is already white-on-near-black in every
+     theme, so dark mode needs nothing extra here.
+     --------------------------------------------------------------------- */
+  .word-stage {
+    display: block;
+    min-height: 0;
+    padding: 0;
+  }
+
+  .document-stage {
+    display: block;
+  }
+
+  .document-shell {
+    width: auto;
+  }
+
+  .document-page {
+    width: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .ProseMirror {
+    min-height: 0;
+  }
+
+  /* ProseMirror keeps an empty paragraph at the end of the document as a place to
+     put the caret after a table or an image. It is editor scaffolding, and on a
+     document that ends within ~40px of the bottom of the page it was buying a
+     whole extra sheet of paper (measured: content ended at 921px against a 912px
+     page box). Same `:has` hook the placeholder rule above uses. */
+  .ProseMirror > p:last-child:has(> br.ProseMirror-trailingBreak:only-child) {
+    display: none;
+  }
+
+  /* A heading at the foot of a page with its section overleaf, a single line of
+     a paragraph stranded, or a table row split down the middle — the three
+     things that make a browser print look like a browser print. */
+  .ProseMirror h1,
+  .ProseMirror h2,
+  .ProseMirror h3,
+  .ProseMirror h4 {
+    break-after: avoid;
+    break-inside: avoid;
+  }
+
+  .ProseMirror p,
+  .ProseMirror li {
+    orphans: 2;
+    widows: 2;
+  }
+
+  .ProseMirror img {
+    /* Capped so a tall image is scaled onto one page instead of being sliced by
+       the page break. `object-fit` preserves the aspect ratio the width still
+       dictates, rather than squashing it into the shorter box. */
+    max-height: 8.5in;
+    object-fit: contain;
+    break-inside: avoid;
+  }
+
+  .ProseMirror table {
+    break-inside: auto;
+  }
+
+  .ProseMirror tr,
+  .ProseMirror th,
+  .ProseMirror td {
+    break-inside: avoid;
+  }
+
+  .ProseMirror thead {
+    display: table-header-group;
+  }
+
+  .ProseMirror table th {
+    /* The screen fill is a background, and backgrounds are off by default in the
+       print dialog — which left header cells indistinguishable from body cells.
+       A border reads either way. */
+    background: transparent;
+    border-bottom-width: 2px;
+    font-weight: 700;
+  }
+
+  /* ---------------------------------------------------------------------
+     4. The generated print roots (Excel's table, PowerPoint's slides).
+
+     Both editors render a document that CANNOT be printed from the screen DOM —
+     one is a canvas grid, the other a canvas slide — so each builds a paged
+     representation into a `.print-doc` and this rule swaps the two over.
+     --------------------------------------------------------------------- */
+  .print-doc {
+    display: block;
+    background: #ffffff;
+    color: #111111;
+  }
+
+  .app-container:has(> .print-doc) > :not(.print-doc) {
+    display: none;
+  }
+
+  .print-doc--landscape {
+    page: ninja-landscape;
+  }
+
+  .print-doc__title {
+    margin: 0 0 10pt;
+    font-size: 14pt;
+    letter-spacing: -0.01em;
+  }
+
+  .print-doc__sheet {
+    /* Every sheet after the first starts on a fresh page, the way a workbook
+       print does; `:first-of-type` keeps a blank leading page from appearing. */
+    break-before: page;
+  }
+
+  .print-doc__sheet:first-of-type {
+    break-before: auto;
+  }
+
+  .print-doc__sheet-name {
+    margin: 0 0 6pt;
+    font-size: 10pt;
+    font-weight: 700;
+    color: #444444;
+  }
+
+  .print-doc__note {
+    margin: 8pt 0 0;
+    font-size: 8pt;
+    color: #555555;
+    break-inside: avoid;
+  }
+
+  /* ---------------------------------------------------------------------
+     5. Excel's printed grid.
+     --------------------------------------------------------------------- */
+  .print-table {
+    border-collapse: collapse;
+    table-layout: fixed;
+    max-width: 100%;
+    font-variant-numeric: tabular-nums;
+    /* Cell fills are real data — a highlighted row means something — so this one
+       table opts out of the dialog's "no backgrounds" default. Scoped here and
+       nowhere else, so the page itself is still plain white. */
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .print-table th,
+  .print-table td {
+    border: 0.5pt solid #9aa3b2;
+    /*
+     * The horizontal padding is deliberately mean. A fortune-sheet column is 73px
+     * (54.7pt) and its default text is 10pt, so an eight-character figure such as
+     * `24975.00` needs ~48pt of ink; at 3pt of padding a side plus the borders that
+     * came to 55pt and every such number wrapped onto a second line, doubling the
+     * height of every row in the sheet. 2pt leaves it fitting on one.
+     */
+    padding: 0.75pt 2pt;
+    vertical-align: top;
+    /* Anything that still does not fit wraps inside its column rather than widening
+       the table past the page. Combined with the fitted column widths, that means no
+       value is ever clipped — the sheet stays complete even where it is not pretty. */
+    overflow-wrap: anywhere;
+  }
+
+  .print-table thead {
+    display: table-header-group;
+  }
+
+  .print-table tr {
+    break-inside: avoid;
+  }
+
+  /* The A/B/C and 1/2/3 gutters, so a printed extract can still be talked about
+     by cell reference. Grey enough to stay clearly separate from the data. */
+  .print-table__corner,
+  .print-table__colhead,
+  .print-table__rowhead {
+    background: #e8ebf0;
+    color: #333333;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  /* ---------------------------------------------------------------------
+     6. PowerPoint's printed slides.
+     --------------------------------------------------------------------- */
+  /*
+   * One slide per sheet of paper.
+   *
+   * The height is deliberately left to the content, and that is load-bearing rather
+   * than lazy. Giving this box ANY explicit height — 7.2in, 6.5in, even 6in against a
+   * 7.6in page box it comfortably fits inside — makes Chromium emit a blank leading
+   * page and push the whole deck back by one (measured: 5 pages for a 4-slide deck at
+   * every height tried, 4 pages with `auto`, `min-height` worse still at 8). The slide
+   * therefore sits at the top of its page instead of being centred on it, which is a
+   * cosmetic price worth paying to not ship a blank first page in every PDF.
+   */
+  .print-slide {
+    break-after: page;
+    break-inside: avoid;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .print-slide:last-child {
+    break-after: auto;
+  }
+
+  /* Notes are unbounded user text, so this variant is allowed to spill onto a second
+     page rather than clipping what the presenter wrote. */
+  .print-slide--with-notes {
+    break-inside: auto;
+  }
+
+  .print-slide__image {
+    max-width: 100%;
+    /* A percentage would resolve against an auto-height parent and be ignored, so the
+       cap is absolute: the page box is 7.6in and the slide number sits below. A 16:9
+       slide is width-bound at ~5.7in and never reaches this, but a squarer one would. */
+    max-height: 6.8in;
+    width: auto;
+    /* A slide is artwork edge to edge; without an outline a white slide has no
+       discernible boundary on a white page. */
+    border: 0.5pt solid #b6bdc9;
+  }
+
+  .print-slide--with-notes .print-slide__image {
+    max-height: 4.5in;
+  }
+
+  .print-slide__notes {
+    width: 100%;
+    margin-top: 12pt;
+    padding-top: 8pt;
+    border-top: 0.5pt solid #c4cad4;
+    font-size: 10pt;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .print-slide__number {
+    margin-top: 6pt;
+    font-size: 8pt;
+    color: #555555;
+  }
+}

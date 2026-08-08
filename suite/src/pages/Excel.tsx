@@ -11,6 +11,7 @@ import {
   Download,
   FileSpreadsheet,
   Plus,
+  Printer,
   Redo,
   Rows3,
   Save,
@@ -80,6 +81,11 @@ interface SelectionChartData {
 interface CellType {
   fa?: string;
   t?: string;
+  /**
+   * Inline rich text: an array of run objects. When it is present `v`/`m` are NOT the
+   * cell's text, so anything reading a cell for display has to check here first.
+   */
+  s?: unknown;
 }
 
 interface WorkbookCell {
@@ -593,6 +599,533 @@ function sheetToCsv(sheet: WorkbookSheet) {
   }
 
   return lines.join('\r\n');
+}
+
+/* ------------------------------------------------------------------ */
+/* Print                                                               */
+/* ------------------------------------------------------------------ */
+
+/*
+ * ---------------------------------------------------------------------------------
+ * Why the printed sheet is rebuilt as an HTML table
+ * ---------------------------------------------------------------------------------
+ *
+ * fortune-sheet paints the grid onto a <canvas>. A canvas is one indivisible image the
+ * size of the VIEWPORT, so printing the live page yields exactly one screenful of cells
+ * and nothing else: no pagination, no rows past the fold, and no text a PDF reader could
+ * ever select or search. There is no print API in the library either -- the `print.*`
+ * strings in its locale files are inherited from Luckysheet and nothing reads them.
+ *
+ * The one HTML the library CAN emit is `getHtmlByRange` (the clipboard payload). It was
+ * evaluated and rejected: it reads `sheet.data` directly, returns null when that matrix
+ * is absent, emits un-substituted placeholder tokens for null cells in a sparse range,
+ * and -- decisively -- drops cell FILLS entirely, because its `getStyleByCell` gates the
+ * whole `bg` branch on a conditional-format hit. A print that loses every highlight in
+ * the sheet is not a print of the sheet.
+ *
+ * So the table is built here, from the same normalised `celldata` the .xlsx and .csv
+ * exports already use. That buys pagination, repeated headers, selectable text, and the
+ * DISPLAYED string for every cell -- `m` is maintained by fortune-sheet on every write
+ * and every format change, so `$1,234.56` and `42%` print as the user sees them without
+ * this file re-implementing a single number format.
+ */
+
+/** Printable width of landscape Letter at the 0.45in margin `@page ninja-landscape` sets. */
+const PRINT_AREA_PX = 960;
+/** fortune-sheet's `defaultSettings`: 73px columns, 10pt text. */
+const PRINT_DEFAULT_COL_WIDTH = 73;
+const SHEET_DEFAULT_FONT_PT = 10;
+/**
+ * The size the printed table renders at, and it is 9pt rather than the grid's 10pt for
+ * one measured reason: a default 73px column leaves 66.4px of usable width after the
+ * padding and rules, and `24981.00` — an unremarkable eight-character figure — measures
+ * 67px at 10pt in Inter. Six tenths of a pixel over, so it wrapped, and EVERY row of a
+ * numeric sheet came out double height. The same string is 59px at 9pt.
+ *
+ * Explicit per-cell sizes are scaled by the same 9/10 ratio, so relative emphasis in the
+ * sheet survives.
+ */
+const PRINT_BASE_FONT_PT = 9;
+/** Below this the print is a picture of a sheet rather than a readable one. */
+const PRINT_MIN_FONT_PT = 6;
+
+/**
+ * Ceiling on the cells written into the print DOM.
+ *
+ * This number is measured, not guessed. Building the markup is cheap and scales
+ * linearly; it is the browser's PAGINATION pass that costs, and past a point it does not
+ * merely get slow. Chromium, 6-column sheets, time to produce the PDF:
+ *
+ *     2,000 rows   ( 14k cells,  ~130 pages)    0.8s
+ *     5,000 rows   ( 35k cells,  ~330 pages)    2.8s
+ *    10,000 rows   ( 70k cells,  ~660 pages)    7.7s
+ *    20,000 rows   (140k cells, ~1300 pages)    FAILS -- the print pipeline gives up
+ *
+ * So an uncapped print of a large sheet is not a slow print, it is no print at all, with
+ * the tab frozen for the duration on the way to nothing. 50k cells is ~8,000 rows at six
+ * columns and lands around four seconds, which covers every realistic reason to put a
+ * spreadsheet on paper. Beyond it the sheet is truncated and SAYS SO on the page itself,
+ * pointing at the XLSX and CSV exports, which have no such limit.
+ */
+const MAX_PRINT_CELLS = 50000;
+
+const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"]/g, (character) => HTML_ESCAPES[character]);
+}
+
+/**
+ * A colour that is safe to concatenate into a `style` attribute.
+ *
+ * The values come out of an imported .xlsx, so they are untrusted text on the way into a
+ * string that becomes markup. An allowlist of the two notations fortune-sheet actually
+ * writes (`normalizedCellAttr` converts everything else to hex) means a `;` or a `)` can
+ * never terminate the declaration early and start a new one.
+ */
+function printSafeColor(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (/^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$|^#[0-9a-fA-F]{8}$/.test(trimmed)) {
+    return trimmed;
+  }
+  if (/^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\)$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  return null;
+}
+
+/** Same reasoning as `printSafeColor`: a font name reaches a style attribute, so it is fenced. */
+function printSafeFontFamily(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim().replace(/^["']|["']$/g, '');
+  return /^[A-Za-z0-9 _-]{1,48}$/.test(trimmed) ? trimmed : null;
+}
+
+function printNumberField(cell: WorkbookCell, key: string): number | undefined {
+  const value = cell[key];
+  return typeof value === 'number' ? value : undefined;
+}
+
+/** `ht`: 0 centre, 1 left, 2 right. `vt`: 0 middle, 1 top, 2 bottom. */
+const PRINT_H_ALIGN = ['center', 'left', 'right'];
+const PRINT_V_ALIGN = ['middle', 'top', 'bottom'];
+
+/**
+ * The text the grid is showing for this cell.
+ *
+ * `m` first, always: it is the formatted string fortune-sheet recomputes on every write
+ * and every format change, so currency, percent and date masks survive with no formatter
+ * here. `v` is only the fallback for a cell that predates a format.
+ */
+function printCellText(cell: WorkbookCell): string {
+  const runs = cell.ct?.s;
+  if (Array.isArray(runs)) {
+    // Inline rich text: `v`/`m` are not the source, the runs are.
+    return runs.map((run) => (run && typeof run === 'object' && 'v' in run ? String((run as { v: unknown }).v ?? '') : '')).join('');
+  }
+
+  const display = cell.m;
+  if (display !== undefined && display !== null && display !== '') {
+    return String(display);
+  }
+
+  const raw = cell.v;
+  return raw === undefined || raw === null ? '' : String(raw);
+}
+
+function printCellStyle(cell: WorkbookCell, scale: number): string {
+  const declarations: string[] = [];
+
+  if (printNumberField(cell, 'bl')) {
+    declarations.push('font-weight:700');
+  }
+  if (printNumberField(cell, 'it')) {
+    declarations.push('font-style:italic');
+  }
+
+  const underline = printNumberField(cell, 'un');
+  const strike = printNumberField(cell, 'cl');
+  const decorations: string[] = [];
+  if (underline === 1 || underline === 3) {
+    decorations.push('underline');
+  }
+  if (strike) {
+    decorations.push('line-through');
+  }
+  if (decorations.length > 0) {
+    declarations.push(`text-decoration:${decorations.join(' ')}`);
+  }
+
+  const color = printSafeColor(cell.fc);
+  if (color) {
+    declarations.push(`color:${color}`);
+  }
+
+  const background = printSafeColor(cell.bg);
+  if (background) {
+    declarations.push(`background-color:${background}`);
+  }
+
+  const fontFamily = printSafeFontFamily(cell.ff);
+  if (fontFamily) {
+    declarations.push(`font-family:'${fontFamily}'`);
+  }
+
+  const fontSize = printNumberField(cell, 'fs');
+  if (fontSize && fontSize !== SHEET_DEFAULT_FONT_PT) {
+    const printed = (fontSize * PRINT_BASE_FONT_PT) / SHEET_DEFAULT_FONT_PT;
+    declarations.push(`font-size:${Math.max(PRINT_MIN_FONT_PT, printed * scale).toFixed(1)}pt`);
+  }
+
+  const horizontal = printNumberField(cell, 'ht');
+  if (horizontal !== undefined && PRINT_H_ALIGN[horizontal]) {
+    declarations.push(`text-align:${PRINT_H_ALIGN[horizontal]}`);
+  } else if (cell.ct?.t === 'n' || typeof cell.v === 'number') {
+    // Excel's own default, and fortune-sheet's: numbers hug the right edge so decimal
+    // points line up down the column. Without this every figure prints left-aligned.
+    declarations.push('text-align:right');
+  }
+
+  const vertical = printNumberField(cell, 'vt');
+  if (vertical !== undefined && PRINT_V_ALIGN[vertical]) {
+    declarations.push(`vertical-align:${PRINT_V_ALIGN[vertical]}`);
+  }
+
+  return declarations.join(';');
+}
+
+interface PrintMerge {
+  rows: number;
+  columns: number;
+}
+
+/**
+ * Merges are read from `config.merge` rather than from each cell's `mc`.
+ *
+ * The anchor and every covered cell both carry an `mc`, but a covered one is
+ * content-free and is therefore dropped by `isBlankCell` before it reaches here --
+ * so the cells that must be SKIPPED are exactly the ones that are missing.
+ * `config.merge` is keyed by anchor and states the full span, which is enough to
+ * derive both halves.
+ */
+function readSheetMerges(sheet: WorkbookSheet, bounds: SelectionBounds) {
+  const anchors = new Map<string, PrintMerge>();
+  const covered = new Set<string>();
+
+  const config = sheet.config as { merge?: Record<string, { r: number; c: number; rs?: number; cs?: number }> } | undefined;
+  const merges = config?.merge;
+  if (!merges || typeof merges !== 'object') {
+    return { anchors, covered };
+  }
+
+  Object.values(merges).forEach((entry) => {
+    if (!entry || typeof entry.r !== 'number' || typeof entry.c !== 'number') {
+      return;
+    }
+
+    const rows = Math.max(1, Math.floor(entry.rs ?? 1) || 1);
+    const columns = Math.max(1, Math.floor(entry.cs ?? 1) || 1);
+    anchors.set(`${entry.r}:${entry.c}`, { rows, columns });
+
+    /*
+     * Clamped to the used range rather than trusting the span. `rs`/`cs` arrive from a
+     * stored (possibly imported, possibly corrupt) file, and a merge claiming a million
+     * rows would otherwise spin this nested loop for a million iterations to record
+     * coverage of cells that are not being printed. Everything past the range is
+     * irrelevant here: the renderer only ever asks about cells inside it.
+     */
+    const lastRow = Math.min(entry.r + rows, bounds.endRow + 1);
+    const lastColumn = Math.min(entry.c + columns, bounds.endColumn + 1);
+
+    for (let row = entry.r; row < lastRow; row += 1) {
+      for (let column = entry.c; column < lastColumn; column += 1) {
+        if (row !== entry.r || column !== entry.c) {
+          covered.add(`${row}:${column}`);
+        }
+      }
+    }
+  });
+
+  return { anchors, covered };
+}
+
+function readHiddenIndices(sheet: WorkbookSheet, key: 'rowhidden' | 'colhidden') {
+  const config = sheet.config as Record<string, Record<string, number> | undefined> | undefined;
+  const hidden = config?.[key];
+  return hidden && typeof hidden === 'object' ? new Set(Object.keys(hidden).map(Number)) : new Set<number>();
+}
+
+function readLengths(sheet: WorkbookSheet, key: 'columnlen' | 'rowlen') {
+  const config = sheet.config as Record<string, Record<string, number> | undefined> | undefined;
+  const lengths = config?.[key];
+  return lengths && typeof lengths === 'object' ? lengths : {};
+}
+
+/**
+ * Whether row 1 should be repeated at the top of every printed page.
+ *
+ * fortune-sheet has no notion of a header row, so this is inferred. A frozen top row is
+ * taken at its word; otherwise the shape of the data decides, which is the same test a
+ * spreadsheet import uses: a row of labels sitting above at least one number.
+ *
+ * Getting it wrong is cheap in both directions -- a repeated first data row is odd but
+ * harmless, and a missed header only costs the repetition.
+ */
+function shouldRepeatHeaderRow(
+  sheet: WorkbookSheet,
+  bounds: SelectionBounds,
+  cellAt: (row: number, column: number) => WorkbookCell | undefined,
+) {
+  const frozen = sheet.frozen as { type?: string; range?: { row_focus?: number } } | undefined;
+  const frozenType = frozen?.type;
+  if (frozenType === 'row' || frozenType === 'both') {
+    return true;
+  }
+  if ((frozenType === 'rangeRow' || frozenType === 'rangeBoth') && frozen?.range?.row_focus === bounds.startRow) {
+    return true;
+  }
+
+  if (bounds.endRow <= bounds.startRow) {
+    return false;
+  }
+
+  let labelCount = 0;
+  for (let column = bounds.startColumn; column <= bounds.endColumn; column += 1) {
+    const cell = cellAt(bounds.startRow, column);
+    if (!cell) {
+      continue;
+    }
+    if (cell.ct?.t === 'n' || typeof cell.v === 'number') {
+      return false;
+    }
+    labelCount += 1;
+  }
+
+  if (labelCount === 0) {
+    return false;
+  }
+
+  // ...and something numeric underneath, so a block of prose is not mistaken for a table.
+  const probeLimit = Math.min(bounds.endRow, bounds.startRow + 20);
+  for (let row = bounds.startRow + 1; row <= probeLimit; row += 1) {
+    for (let column = bounds.startColumn; column <= bounds.endColumn; column += 1) {
+      const cell = cellAt(row, column);
+      if (cell && (cell.ct?.t === 'n' || typeof cell.v === 'number')) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+interface SheetPrintResult {
+  html: string;
+  /** Cells written, so a multi-sheet workbook shares one budget instead of multiplying it. */
+  cellsUsed: number;
+}
+
+function renderSheetPrintHtml(sheet: WorkbookSheet, cellBudget: number): SheetPrintResult {
+  const entries = collectSheetCellEntries(sheet);
+  const bounds = getSheetBounds(entries);
+
+  if (!bounds) {
+    return { html: '', cellsUsed: 0 };
+  }
+
+  const grid = new Map<string, WorkbookCell>();
+  entries.forEach(({ row, column, cell }) => grid.set(`${row}:${column}`, cell));
+  const cellAt = (row: number, column: number) => grid.get(`${row}:${column}`);
+
+  const { anchors, covered } = readSheetMerges(sheet, bounds);
+  const hiddenRows = readHiddenIndices(sheet, 'rowhidden');
+  const hiddenColumns = readHiddenIndices(sheet, 'colhidden');
+  const columnLengths = readLengths(sheet, 'columnlen');
+  const rowLengths = readLengths(sheet, 'rowlen');
+  const defaultColumnWidth =
+    typeof sheet.defaultColWidth === 'number' && sheet.defaultColWidth > 0 ? sheet.defaultColWidth : PRINT_DEFAULT_COL_WIDTH;
+
+  const columns: number[] = [];
+  for (let column = bounds.startColumn; column <= bounds.endColumn; column += 1) {
+    if (!hiddenColumns.has(column)) {
+      columns.push(column);
+    }
+  }
+
+  const rows: number[] = [];
+  for (let row = bounds.startRow; row <= bounds.endRow; row += 1) {
+    if (!hiddenRows.has(row)) {
+      rows.push(row);
+    }
+  }
+
+  if (columns.length === 0 || rows.length === 0) {
+    return { html: '', cellsUsed: 0 };
+  }
+
+  /*
+   * FIT TO WIDTH, always. A page cannot be scrolled sideways, and CSS has no way to
+   * continue a table onto a second sheet of paper horizontally the way Excel does. So
+   * the used columns are scaled to the printable width and the font is scaled with them
+   * (floored, so a very wide sheet trades legible-but-small text plus wrapping for
+   * silently amputated columns). Nothing is ever cut off the right-hand edge.
+   */
+  /*
+   * The row-number gutter is sized to the widest number it has to hold. A fixed 34px was
+   * fine to row 999 and then started wrapping "8326" onto two lines, which turned every
+   * row of a long sheet into a double-height row.
+   */
+  const rowHeaderWidth = 16 + 7 * String(bounds.endRow + 1).length;
+  const naturalWidth = columns.reduce((total, column) => total + (columnLengths[column] || defaultColumnWidth), rowHeaderWidth);
+  const scale = Math.min(1, PRINT_AREA_PX / naturalWidth);
+  const fontSize = Math.max(PRINT_MIN_FONT_PT, PRINT_BASE_FONT_PT * scale);
+
+  const maxRows = Math.max(1, Math.floor(cellBudget / columns.length));
+  const printedRows = rows.slice(0, maxRows);
+  const droppedRows = rows.length - printedRows.length;
+
+  const repeatHeader = shouldRepeatHeaderRow(sheet, bounds, cellAt);
+  const headerRow = repeatHeader ? printedRows[0] : undefined;
+  const bodyRows = repeatHeader ? printedRows.slice(1) : printedRows;
+
+  /*
+   * Spans are counted in PRINTED rows and columns, not in sheet coordinates. A merge
+   * that runs through a hidden column, or off the end of a truncated print, would
+   * otherwise claim more cells than the table has and shove every following row out of
+   * alignment for the rest of the page.
+   */
+  const printedRowSet = new Set(printedRows);
+  const printedColumnSet = new Set(columns);
+  const countSpan = (start: number, length: number, printed: Set<number>) => {
+    let total = 0;
+    for (let index = start; index < start + length; index += 1) {
+      if (printed.has(index)) {
+        total += 1;
+      }
+    }
+    return Math.max(1, total);
+  };
+
+  const renderRow = (row: number) => {
+    const parts: string[] = [];
+    const height = rowLengths[row];
+    parts.push(height ? `<tr style="height:${Math.round(height * scale)}px">` : '<tr>');
+    parts.push(`<th scope="row" class="print-table__rowhead">${row + 1}</th>`);
+
+    for (const column of columns) {
+      const key = `${row}:${column}`;
+      if (covered.has(key)) {
+        continue;
+      }
+
+      const merge = anchors.get(key);
+      const span = merge
+        ? ` rowspan="${countSpan(row, merge.rows, printedRowSet)}" colspan="${countSpan(column, merge.columns, printedColumnSet)}"`
+        : '';
+      const cell = grid.get(key);
+      const style = cell ? printCellStyle(cell, scale) : '';
+      const text = cell ? escapeHtml(printCellText(cell)) : '';
+      parts.push(`<td${span}${style ? ` style="${style}"` : ''}>${text}</td>`);
+    }
+
+    parts.push('</tr>');
+    return parts.join('');
+  };
+
+  const parts: string[] = [];
+  parts.push(`<section class="print-doc__sheet">`);
+  parts.push(`<h2 class="print-doc__sheet-name">${escapeHtml(sheet.name || 'Sheet')}</h2>`);
+  parts.push(
+    `<table class="print-table" style="width:${Math.round(naturalWidth * scale)}px;font-size:${fontSize.toFixed(1)}pt">`,
+  );
+
+  parts.push('<colgroup>');
+  parts.push(`<col style="width:${Math.round(rowHeaderWidth * scale)}px">`);
+  for (const column of columns) {
+    parts.push(`<col style="width:${Math.round((columnLengths[column] || defaultColumnWidth) * scale)}px">`);
+  }
+  parts.push('</colgroup>');
+
+  // `<thead>` is repeated by the browser at the top of every page it spills onto, which
+  // is the whole reason the column band and the detected header row live in here.
+  parts.push('<thead><tr><th class="print-table__corner"></th>');
+  for (const column of columns) {
+    parts.push(`<th scope="col" class="print-table__colhead">${columnLabel(column)}</th>`);
+  }
+  parts.push('</tr>');
+  if (headerRow !== undefined) {
+    parts.push(renderRow(headerRow));
+  }
+  parts.push('</thead>');
+
+  parts.push('<tbody>');
+  for (const row of bodyRows) {
+    parts.push(renderRow(row));
+  }
+  parts.push('</tbody></table>');
+
+  if (droppedRows > 0) {
+    parts.push(
+      `<p class="print-doc__note">Printed the first ${printedRows.length.toLocaleString()} rows of ${rows.length.toLocaleString()}. Export to XLSX or CSV for the complete sheet.</p>`,
+    );
+  }
+
+  parts.push('</section>');
+
+  return { html: parts.join(''), cellsUsed: printedRows.length * columns.length };
+}
+
+/**
+ * Every sheet that holds data, each starting on a fresh page.
+ *
+ * Excel defaults to printing only the ACTIVE sheet; this deliberately does not, because
+ * the point of the feature is that something shareable can leave the product, and a PDF
+ * of a workbook that silently omitted three of its four sheets is a trap. For a
+ * single-sheet workbook the two behaviours are identical.
+ */
+function renderWorkbookPrintHtml(sheets: WorkbookData, title: string) {
+  const rendered: string[] = [];
+  let budget = MAX_PRINT_CELLS;
+  let skippedSheets = 0;
+
+  sheets.forEach((sheet) => {
+    if (budget <= 0) {
+      if (collectSheetCellEntries(sheet).length > 0) {
+        skippedSheets += 1;
+      }
+      return;
+    }
+
+    const result = renderSheetPrintHtml(sheet, budget);
+    if (!result.html) {
+      return;
+    }
+
+    rendered.push(result.html);
+    // One budget for the whole workbook, so a file of large sheets cannot multiply it.
+    budget -= result.cellsUsed;
+  });
+
+  const heading = `<h1 class="print-doc__title">${escapeHtml(title)}</h1>`;
+  if (rendered.length === 0) {
+    return `${heading}<p class="print-doc__note">This workbook has no cell data to print.</p>`;
+  }
+
+  if (skippedSheets > 0) {
+    rendered.push(
+      `<p class="print-doc__note">${skippedSheets} further sheet${skippedSheets === 1 ? '' : 's'} could not be included in one print. Export to XLSX for the complete workbook.</p>`,
+    );
+  }
+
+  return heading + rendered.join('');
 }
 
 const CURRENCY_SYMBOLS = ['$', '€', '£', '¥', '₩', '₹'];
@@ -2069,7 +2602,7 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
     window.setTimeout(refreshSelectionState, 0);
   }, [refreshSelectionState]);
 
-  /** Ctrl/Cmd+S saves, Ctrl/Cmd+F finds. Both used to fall through to the browser. */
+  /** Ctrl/Cmd+S saves, Ctrl/Cmd+F finds, Ctrl/Cmd+P prints. All used to fall through. */
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey) {
@@ -2082,6 +2615,15 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
         event.preventDefault();
         event.stopPropagation();
         void performSaveRef.current();
+        return;
+      }
+
+      if (key === 'p') {
+        // Left alone, the browser prints the app chrome plus one screenshot-sized slice
+        // of the grid canvas. `printWorkbook` commits the open cell editor first.
+        event.preventDefault();
+        event.stopPropagation();
+        printWorkbookRef.current();
         return;
       }
 
@@ -2100,6 +2642,85 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
     const payload = buildPersistablePayload();
     return payload ?? workbookSeed;
   }, [buildPersistablePayload, workbookSeed]);
+
+  /* ---------------- print ---------------- */
+
+  /*
+   * The printed table is built in `beforeprint` and torn down in `afterprint`, rather
+   * than being kept in the DOM.
+   *
+   * `beforeprint` is the only hook that also covers the browser's OWN print entry points
+   * (its menu, its toolbar), so the ribbon button and Ctrl+P do nothing but call
+   * `window.print()` and let the same one path build the page. Chromium fires the pair
+   * for headless `printToPDF` as well, so a generated PDF exercises exactly this code.
+   *
+   * Tearing down afterwards is not tidiness: at the cell ceiling this is tens of
+   * thousands of table cells, and leaving them mounted would make every subsequent
+   * layout in the tab pay for a print that has already happened.
+   */
+  const printRootRef = useRef<HTMLDivElement | null>(null);
+  const printTitleRef = useRef(fileName);
+  printTitleRef.current = fileName || defaultFileName;
+
+  useEffect(() => {
+    const buildPrintDocument = () => {
+      const root = printRootRef.current;
+      if (!root) {
+        return;
+      }
+
+      /*
+       * NEVER print the starter workbook dressed as the user's file. When the stored
+       * copy could not be read the grid is deliberately not mounted, so
+       * `buildPersistablePayload` has no instance to read and `getExportSheets` falls
+       * back to `workbookSeed` -- which is the seeded "Quarterly Plan". Handing that to
+       * someone as a PDF of their own spreadsheet is the same class of mistake as
+       * autosaving it over their file.
+       */
+      if (isWorkbookUnopenableRef.current) {
+        root.innerHTML =
+          '<p class="print-doc__note">This workbook could not be opened, so there is nothing to print. Your saved copy has not been changed.</p>';
+        return;
+      }
+
+      try {
+        root.innerHTML = renderWorkbookPrintHtml(getExportSheets(), printTitleRef.current);
+      } catch (error) {
+        console.error('Print rendering failed', error);
+        root.innerHTML = '<p class="print-doc__note">This workbook could not be prepared for printing.</p>';
+      }
+    };
+
+    const clearPrintDocument = () => {
+      if (printRootRef.current) {
+        printRootRef.current.innerHTML = '';
+      }
+    };
+
+    window.addEventListener('beforeprint', buildPrintDocument);
+    window.addEventListener('afterprint', clearPrintDocument);
+    return () => {
+      window.removeEventListener('beforeprint', buildPrintDocument);
+      window.removeEventListener('afterprint', clearPrintDocument);
+      clearPrintDocument();
+    };
+  }, [getExportSheets]);
+
+  /**
+   * A cell being typed into has not reached the model yet, and would print blank. This is
+   * the same commit-then-settle dance `performSave` does before it serialises.
+   */
+  const printWorkbook = useCallback(() => {
+    if (commitOpenCellEditor()) {
+      window.setTimeout(() => window.print(), 120);
+      return;
+    }
+
+    window.print();
+  }, [commitOpenCellEditor]);
+
+  const printWorkbookRef = useRef(printWorkbook);
+  printWorkbookRef.current = printWorkbook;
 
   const exportXlsx = async () => {
     if (!workbookRef.current) {
@@ -2394,6 +3015,20 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
               <Upload size={16} />
               Import workbook
             </button>
+            {/*
+              Print doubles as "Save as PDF": every desktop browser offers a PDF
+              destination inside its own print dialog, so one control covers both and
+              nothing has to be downloaded to be shared.
+            */}
+            <button
+              className="btn btn-secondary"
+              onClick={printWorkbook}
+              type="button"
+              title="Print or save as PDF (Ctrl/Cmd+P)"
+            >
+              <Printer size={16} />
+              Print
+            </button>
             <button className="btn btn-secondary" onClick={exportXlsx} type="button">
               <Download size={16} />
               Export XLSX
@@ -2450,6 +3085,7 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
 
         <ToolbarGroup label="Insights">
           <ToolbarButton icon={BarChart3} onClick={openChart} title="Chart selection" />
+          <ToolbarButton icon={Printer} onClick={printWorkbook} title="Print or save as PDF (Ctrl/Cmd+P)" />
         </ToolbarGroup>
       </Toolbar>
 
@@ -2658,6 +3294,14 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
           </button>
         </div>
       )}
+
+      {/*
+        The printed workbook. `display: none` on screen, so it costs nothing in layout and
+        cannot be reached by tab or by a screen reader; the print stylesheet reveals it and
+        hides every sibling. It is filled in `beforeprint` and emptied in `afterprint`, so
+        for all but the moments a print is being composed this element is empty.
+      */}
+      <div className="print-doc print-doc--landscape" ref={printRootRef} aria-hidden="true" />
 
       <div className="workspace">
         <div className="spreadsheet-shell">
