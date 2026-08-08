@@ -2515,7 +2515,13 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
       */}
       <StatusBar
         leftContent={
-          <span>
+          /*
+            The status bar's <footer> is aria-live="polite". These counts refresh on a
+            150ms debounce while typing, so leaving them inside the live region made a
+            screen reader re-announce the whole triple continuously and bury the save
+            status the region exists to report. They stay fully readable in browse mode.
+          */
+          <span aria-live="off">
             {formatCount(stats.words, 'word')} · {formatCount(stats.characters, 'character')} ·{' '}
             {formatCount(stats.paragraphs, 'paragraph')}
           </span>

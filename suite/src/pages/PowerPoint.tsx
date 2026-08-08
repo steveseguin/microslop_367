@@ -16,6 +16,7 @@ import {
   Play,
   Plus,
   Redo,
+  Save,
   SendToBack,
   Square,
   StickyNote,
@@ -665,7 +666,10 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   const [currentSlideId, setCurrentSlideId] = useState('slide-1');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [presentIndex, setPresentIndex] = useState<number | null>(null);
-  const [saveStatus, setSaveStatus] = useState('Saved');
+  // Not 'Saved'. A deck that has never been written must not claim it has: the
+  // header paints exactly 'Saved' as a green success pill, so starting there
+  // showed a brand-new deck as safely stored with zero bytes on disk.
+  const [saveStatus, setSaveStatus] = useState('Not saved yet');
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [currentColor, setCurrentColor] = useState('#2563eb');
@@ -2793,6 +2797,14 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         <ToolbarGroup label="History">
           <ToolbarButton icon={Undo} onClick={() => void undo()} isDisabled={!canUndo} title="Undo" />
           <ToolbarButton icon={Redo} onClick={() => void redo()} isDisabled={!canRedo} title="Redo" />
+          {/* Ctrl+S was the only way to force a save, which is unreachable on a
+              phone or tablet -- the two surfaces where a user is most likely to
+              be interrupted mid-edit. Word and Excel both expose this control. */}
+          <ToolbarButton
+            icon={Save}
+            onClick={() => void performSaveRef.current?.()}
+            title="Save now (Ctrl/Cmd+S)"
+          />
         </ToolbarGroup>
 
         <ToolbarGroup label="Insert">
@@ -3232,6 +3244,10 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         title="Replace this presentation?"
         description="Importing a PPTX will replace the slides currently open in this deck."
         confirmLabel="Import presentation"
+        // Discarding the open deck is destructive, so the dialog must not put
+        // initial focus on the confirm button -- a stray Enter carried over from
+        // the keypress that opened it would otherwise wipe every slide.
+        tone="danger"
         onConfirm={() => {
           if (importCandidate) {
             void importPptxFile(importCandidate);

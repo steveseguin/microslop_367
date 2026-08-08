@@ -57,6 +57,16 @@
      up instead of each inventing a size. */
   --control-h: 1.875rem;  /* 30px */
 
+  /* App identity colours. ONE definition, consumed by the create button, the
+     file-list row icon and the editor's app mark, so blue=document,
+     green=spreadsheet, red=presentation is learned once and never contradicted.
+     `--brand-ink` is the glyph that sits ON a brand chip, and it flips with the
+     tones below rather than being assumed white. */
+  --brand-word: #2b579a;
+  --brand-excel: #1c7048;
+  --brand-powerpoint: #c0431f;
+  --brand-ink: #ffffff;
+
   --accent: #2563eb;
   --accent-strong: #1d4ed8;
   --accent-soft: rgba(37, 99, 235, 0.12);
@@ -96,6 +106,18 @@
 }
 
 [data-theme="dark"] {
+  /* The print-brand tones are far too dark to sit on a dark surface: #2b579a on
+     --surface-muted (#1b2534) measures 2.0:1, i.e. an identity colour you have
+     to hunt for. These are the same three hues lifted until each clears 3:1
+     against the darkest surface they are used on (measured: 6.3, 6.9 and 6.2),
+     with `--brand-ink` flipping to dark ink so the glyph inside still clears
+     4.5:1 (7.0, 7.5, 6.9). Hue identity is what carries the mapping, not
+     lightness, so light-blue still reads as "the blue one". */
+  --brand-word: #7ba7e0;
+  --brand-excel: #57bd8a;
+  --brand-powerpoint: #f08a63;
+  --brand-ink: #0f172a;
+
   --accent: #60a5fa;
   --accent-strong: #3b82f6;
   --accent-soft: rgba(96, 165, 250, 0.18);
@@ -171,7 +193,6 @@ h4 {
 /* Numbers that sit in columns or update in place must not jitter. */
 .status-bar,
 .status-pill,
-.metric-value,
 .formula-coordinate,
 .file-meta {
   font-variant-numeric: tabular-nums;
@@ -530,22 +551,22 @@ body.dark-mode .btn-primary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #ffffff;
+  color: var(--brand-ink);
   font-size: var(--text-xs);
   font-weight: 700;
   letter-spacing: 0.02em;
 }
 
 .app-logo-icon.word {
-  background: #2b579a;
+  background: var(--brand-word);
 }
 
 .app-logo-icon.excel {
-  background: #1c7048;
+  background: var(--brand-excel);
 }
 
 .app-logo-icon.powerpoint {
-  background: #c0431f;
+  background: var(--brand-powerpoint);
 }
 
 .app-brand__copy {
@@ -1013,6 +1034,43 @@ input[type="color"]::-moz-color-swatch {
   width: 100%;
 }
 
+/* --- header overflow (the `⋯` that replaces the export row on a phone) ---
+
+   This panel used to be styled ONLY by borrowing `.toolbar-overflow-panel`'s
+   class, i.e. it looked right by accident and the next ribbon restyle would
+   have silently moved it. It keeps that class for the shared popover shape and
+   adds what is genuinely its own below: it hangs off `.suite-header`, not off
+   `.toolbar-shell`, so it needs its own containing-block-relative offsets and
+   a stacking level above the header's own 20. */
+.header-overflow {
+  position: static;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.header-overflow-panel {
+  /* Anchored to `.suite-header` (which sets `position: relative` for exactly
+     this), never to the 44px trigger — from the trigger the panel's left border
+     measured x = -4 at 390px. */
+  top: 100%;
+  right: var(--space-3);
+  left: var(--space-3);
+  z-index: 40;
+  width: auto;
+  max-height: min(70dvh, 26rem);
+  /* Export actions are full-width rows here, not a wrapped cluster: at 390px a
+     row of three labelled buttons is what forced the overflow menu to exist. */
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.header-overflow-panel .btn {
+  width: 100%;
+  justify-content: flex-start;
+  min-height: 44px;
+}
+
 .mobile-toolbar-launcher {
   display: none;
   padding: var(--space-3) var(--space-4) 0;
@@ -1218,17 +1276,10 @@ input[type="color"]::-moz-color-swatch {
    frames around one piece of content. A rail already IS the container, so a
    panel that fills it drops its own frame. */
 .notes-sidebar > .panel-card,
-.notes-sidebar > .panel-stack > .panel-card,
 .slide-sidebar > .panel-card {
   padding: 0;
   border: 0;
   background: none;
-}
-
-.panel-stack {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
 }
 
 .panel-section + .panel-section {
@@ -1241,49 +1292,9 @@ input[type="color"]::-moz-color-swatch {
 }
 
 .panel-section p,
-.panel-note,
-.panel-list,
-.panel-list li {
+.panel-note {
   color: var(--text-muted);
   font-size: var(--text-sm);
-}
-
-.panel-list {
-  display: grid;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.metric-grid {
-  display: grid;
-  gap: var(--space-3);
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.metric-card {
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  background: var(--surface-muted);
-  border: 1px solid var(--border);
-}
-
-.metric-label {
-  display: block;
-  font-size: var(--text-2xs);
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-subtle);
-}
-
-.metric-value {
-  display: block;
-  margin-top: var(--space-1);
-  font-size: var(--text-lg);
-  font-weight: 700;
-  color: var(--text);
 }
 
 .editor-banner {
@@ -1459,6 +1470,73 @@ input[type="color"]::-moz-color-swatch {
   white-space: nowrap;
 }
 
+/* --- create actions: recognisable before they are read ---
+
+   These were one `.btn-primary` and two `.btn-secondary`, all three carrying a
+   grey line icon: three identical pills that could only be told apart by
+   reading them. Each now leads with a filled chip in its app's identity colour,
+   the SAME token the file-list row and the editor's app mark use, so the
+   blue/green/red mapping is learned once and holds everywhere.
+
+   Deliberately NOT three primary-weight buttons — that is three things
+   shouting and no default. The surfaces stay neutral and equal; only the 24px
+   chip is coloured, and "New document" keeps `.btn-primary` so one action still
+   reads as the default.
+
+   HOOK: the type is matched off the router's `href` because there is no
+   per-type class on this element. It works (HashRouter renders `to="/word"` as
+   `href="#/word"`) but it silently loses its colour if a route is ever renamed.
+   A `dashboard-create__btn--word|--excel|--powerpoint` class is requested — see
+   the handover note; when it lands these three selectors become one-liners. */
+.dashboard-create__btn {
+  --create-brand: var(--accent);
+}
+
+.dashboard-create__btn[href$="/word"] {
+  --create-brand: var(--brand-word);
+}
+
+.dashboard-create__btn[href$="/excel"] {
+  --create-brand: var(--brand-excel);
+}
+
+.dashboard-create__btn[href$="/powerpoint"] {
+  --create-brand: var(--brand-powerpoint);
+}
+
+.dashboard-create__btn svg {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  padding: 4px;
+  border-radius: var(--radius-xs);
+  background: var(--create-brand);
+  color: var(--brand-ink);
+}
+
+/* The default action stays a filled button — but filled in ITS OWN identity
+   colour rather than the generic `--accent`, which put a Word-blue chip on an
+   accent-blue field where neither could be seen. Inside a filled button the
+   chip inverts: the ink becomes the surface and the brand becomes the glyph, so
+   the same two colours are doing the same job either way round. */
+.dashboard-create__btn.btn-primary {
+  background: var(--create-brand);
+  border-color: var(--create-brand);
+  color: var(--brand-ink);
+}
+
+.dashboard-create__btn.btn-primary svg {
+  background: var(--brand-ink);
+  color: var(--create-brand);
+}
+
+.dashboard-create__btn.btn-primary:hover {
+  background: var(--create-brand);
+  /* Dims chip and field together, so the pair keeps its measured ratio instead
+     of needing a second hand-picked hover tone per brand and per theme. */
+  filter: brightness(0.92);
+}
+
 .dashboard-create__label--short {
   display: none;
 }
@@ -1545,10 +1623,18 @@ input[type="color"]::-moz-color-swatch {
   font-size: var(--text-sm);
 }
 
+/* A LIST, one file per row, at every width.
+
+   It used to be `repeat(auto-fill, minmax(min(100%, 20rem), 1fr))`, which tiled
+   into three or four columns on a wide screen. Tiles are for things you
+   recognise by their picture; these rows have no picture, so a grid forces the
+   eye to scan in two dimensions and read every name to find one file. A single
+   column is scanned once, vertically, and the width it gives back is what lets
+   each row lay out as mark -> name -> meta -> actions on one line. */
 .recent-grid {
   display: grid;
-  gap: var(--space-2);
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
+  gap: var(--space-1);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 /* A file row, not a marketing card: icon, name, one meta line, two actions.
@@ -1576,32 +1662,59 @@ input[type="color"]::-moz-color-swatch {
   border-color: var(--accent);
 }
 
+/* The row's first mark, and the fastest thing on the screen to read: colour and
+   shape land before the filename does. */
 .file-icon {
-  width: 2rem;
-  height: 2rem;
+  width: 2.25rem;
+  height: 2.25rem;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-xs);
-  color: #ffffff;
+  border-radius: var(--radius-sm);
+  color: var(--brand-ink);
 }
 
 .file-icon.word {
-  background: #2b579a;
+  background: var(--brand-word);
 }
 
 .file-icon.excel {
-  background: #1c7048;
+  background: var(--brand-excel);
 }
 
 .file-icon.powerpoint {
-  background: #c0431f;
+  background: var(--brand-powerpoint);
 }
 
 .recent-card__meta {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* One row, once there is width for one. Stacking the name over "Document · 3
+   May" makes every row 2 lines tall for no reason on a screen that just gave
+   the list its full width back; side by side, the type word lands in a fixed
+   column so it can be scanned down the page like the colour chips beside it.
+   Below this width the two go back to stacking, where truncating one filename
+   is worse than spending a second line. */
+@media (min-width: 641px) {
+  .recent-card__meta {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-4);
+  }
+
+  .recent-card__meta > :first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .recent-card .file-meta {
+    flex: 0 0 auto;
+    width: 15rem;
+    text-align: right;
+  }
 }
 
 .recent-card h3 {
@@ -1917,6 +2030,31 @@ input[type="color"]::-moz-color-swatch {
   min-height: calc(11in - 2in);
 }
 
+/* A genuinely empty document now that the instructional seed content is gone —
+   an entirely blank sheet with a blinking caret and no other cue on the screen.
+
+   ProseMirror renders an empty top-level paragraph as exactly
+   `<p><br class="ProseMirror-trailingBreak"></p>` (verified on the live page),
+   which is the only hook available: there is no Placeholder extension in this
+   build, and adding one is a page-file plus dependency change — see the
+   handover note, `@tiptap/extension-placeholder` would replace this rule with a
+   `data-placeholder` attribute that is translatable and per-node.
+
+   Absolutely positioned and `pointer-events: none` so it takes no part in
+   layout and cannot be clicked, selected or caught by the caret — the same
+   mechanism that extension uses. `user-select: none` keeps it out of a
+   select-all, and being a pseudo-element it is already outside the
+   accessibility tree, so a screen reader is not told the document contains
+   words that it does not. */
+.ProseMirror > p:only-child:has(> br.ProseMirror-trailingBreak:only-child)::before {
+  content: "Start writing, or paste something in.";
+  position: absolute;
+  pointer-events: none;
+  user-select: none;
+  /* 4.6:1 on the page's #ffffff — a hint still has to be readable. */
+  color: #616b7d;
+}
+
 .ProseMirror > * + * {
   margin-top: 0.8em;
 }
@@ -2013,6 +2151,332 @@ input[type="color"]::-moz-color-swatch {
    library's chrome was outweighing the grid it wraps. */
 .spreadsheet-container .fortune-stat-area {
   display: none !important;
+}
+
+/* -------------------------------------------------------------------------
+   fortune-sheet's OWN toolbar, restyled into our ribbon.
+
+   Excel stacks two control rows: ours (39px: undo, redo, save, add sheet,
+   freeze, sort, find, insert/delete row+column, chart) and the library's (41px:
+   currency, percent, decimals, font, B/I/U, colours, borders, align, wrap,
+   merge, filter). They are NOT duplicates — that was checked control by control
+   — so both stay. What had to go is the seam: two typefaces' worth of icon,
+   two button sizes, two divider idioms, two greys, and in DARK MODE a #fafafc
+   band sitting between two panels of #131c29, which announced "different
+   product" from across the room.
+
+   EVERY selector here is prefixed with `.spreadsheet-container` on purpose.
+   `@fortune-sheet/react/dist/index.css` is imported inside ExcelWorkbook.tsx,
+   so Vite emits it as a LAZY chunk that is injected after `index.css`: a
+   single-class rule of ours loses the source-order tie to a single-class rule
+   of theirs. Two classes wins it without a single `!important` — except for
+   the one inline style called out below, which nothing else can beat.
+   ------------------------------------------------------------------------- */
+
+.spreadsheet-container .fortune-toolbar {
+  /* 4px + 30px control + 4px + 1px hairline = 39px, the same arithmetic as
+     `.toolbar-shell` + `--control-h`, so the two rows are the same height to
+     the pixel instead of 39 against 41. */
+  padding: var(--space-1) var(--space-3);
+  gap: 1px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--border);
+}
+
+.spreadsheet-container .fortune-toolbar-button,
+.spreadsheet-container .fortune-toolbar-combo {
+  min-width: var(--control-h);
+  height: var(--control-h);
+  margin: 0;
+  padding: 0;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  transition:
+    background var(--transition),
+    border-color var(--transition),
+    color var(--transition);
+}
+
+.spreadsheet-container .fortune-toolbar-button:hover,
+.spreadsheet-container .fortune-toolbar-combo:hover {
+  background: var(--surface-muted);
+}
+
+.spreadsheet-container .fortune-toolbar-button:active,
+.spreadsheet-container .fortune-toolbar-combo:active {
+  background: var(--surface-strong);
+}
+
+/* The arrow half of a split control (apply-last-colour vs open-the-picker) is a
+   separate target, so it keeps a separate hover — one step stronger than the
+   body's, which is how Office distinguishes the two halves. */
+.spreadsheet-container .fortune-toolbar-combo-arrow {
+  border-radius: var(--radius-xs);
+  transition: background var(--transition);
+}
+
+.spreadsheet-container .fortune-toolbar-combo-arrow:hover {
+  background: var(--surface-strong);
+}
+
+/* The pressed state is an INLINE `backgroundColor: "#E7E5EB"` written by the
+   library's Button component — there is no class to hook, and no `aria-pressed`
+   either (see the report: that half needs JS). React serialises it as
+   `background-color: rgb(231, 229, 235)`, which a substring attribute selector
+   can match; `!important` is then the only thing that outranks the style
+   attribute. Same tint-plus-hairline as `.toolbar-btn.active`, and the hairline
+   is again what carries SC 1.4.11's 3:1 — a 12%-alpha tint cannot. */
+.spreadsheet-container .fortune-toolbar-button[style*="rgb(231, 229, 235)"] {
+  background: var(--accent-soft) !important;
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* A hairline between groups, not a floating 20px tick: same height, colour and
+   rhythm as `.toolbar > .toolbar-group + .toolbar-group`'s border-left, which
+   spans the 30px control height and sits 8px clear of the controls on each
+   side. 7px + the row's 1px gap on either side reproduces that 8px. */
+.spreadsheet-container .fortune-toolbar-divider {
+  width: 1px;
+  height: var(--control-h);
+  margin: 0 calc(var(--space-2) - 1px);
+  background: var(--border);
+}
+
+/* The library sets `outline: none` on every toolbar button and wins the
+   source-order tie against our global `:focus-visible`, so a keyboard user got
+   NO ring at all on any of these 19 controls. The roving tabindex another pass
+   added is only half of SC 2.4.7 without this. */
+.spreadsheet-container .fortune-toolbar-button:focus-visible,
+.spreadsheet-container .fortune-toolbar-combo-button:focus-visible,
+.spreadsheet-container .fortune-toolbar-combo-arrow:focus-visible,
+.spreadsheet-container .fortune-sheettab-button:focus-visible,
+.spreadsheet-container .fortune-zoom-button:focus-visible,
+.spreadsheet-container .luckysheet-sheets-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -1px;
+  border-radius: var(--radius-xs);
+}
+
+/* Text inside a control ("Automatic", "10") on the ribbon's own type ramp. */
+.spreadsheet-container .fortune-toolbar-combo-button {
+  height: 100%;
+  padding-inline: var(--space-1);
+  font-size: var(--text-xs);
+  /* A combo shows a VALUE ("Automatic", "10"), not a heading. At 700 — the
+     library's inherited default here — these two were the heaviest marks on
+     either row, which is a strange thing for a font-size readout to be. */
+  font-weight: 500;
+}
+
+.spreadsheet-container .fortune-toolbar-combo-text {
+  margin: 0 2px;
+}
+
+/* --- icon sizing ---
+   The library's own icon set is not internally consistent: `bold`, `italic`,
+   `merge-all` and friends are drawn inside a 24-unit viewBox with ~20% padding,
+   while `currency-format` (16), `percentage-format`, `number-decrease`,
+   `number-increase`, `text-clip` and `filter` (1024) are full-bleed. Rendered
+   at one box size the second group reads a third larger than the first — which
+   is why `$` and `%` were the loudest things on the row. Sizing the <svg> box
+   scales its viewBox with it, so two sizes bring both families onto the same
+   optical weight as our 18px lucide glyphs.
+
+   `use[*|href]` because React writes the XLink-namespaced `xlink:href`; the
+   `*|` wildcard matches it without declaring a namespace. */
+.spreadsheet-container .fortune-toolbar-button > svg,
+.spreadsheet-container .fortune-toolbar-combo-button > svg {
+  width: 19px;
+  height: 19px;
+}
+
+.spreadsheet-container .fortune-toolbar svg:has(use[*|href="#currency-format"]),
+.spreadsheet-container .fortune-toolbar svg:has(use[*|href="#percentage-format"]),
+.spreadsheet-container .fortune-toolbar svg:has(use[*|href="#number-decrease"]),
+.spreadsheet-container .fortune-toolbar svg:has(use[*|href="#number-increase"]),
+.spreadsheet-container .fortune-toolbar svg:has(use[*|href="#text-clip"]),
+.spreadsheet-container .fortune-toolbar svg:has(use[*|href="#filter"]) {
+  width: 14px;
+  height: 14px;
+}
+
+/* -100..1224, i.e. 1024 of drawing with 8% padding — between the two families. */
+.spreadsheet-container .fortune-toolbar svg:has(use[*|href="#font-color"]),
+.spreadsheet-container .fortune-toolbar svg:has(use[*|href="#background"]) {
+  width: 17px;
+  height: 17px;
+}
+
+/* --- icon INK ---
+   The sprite is hardcoded #525C6F. That is not our --text (#0f172a), and it
+   cannot be recoloured the honest way: the glyphs are `<use>` instances of
+   `<symbol>`s whose paths carry `fill`/`stroke` as PRESENTATION ATTRIBUTES, and
+   CSS cannot select into a use-element shadow tree — proven on the live page,
+   `svg symbol * { fill: red !important }` changed nothing. A filter is
+   therefore the only instrument available.
+
+   `brightness()` rather than a flat recolour because these icons are TWO-TONE:
+   the border and alignment glyphs draw their inactive strokes in #CCCED2 and
+   their active ones in #525C6F, and that relationship has to survive. Scaling
+   both keeps it (#525C6F -> ~#2E333C, #CCCED2 -> ~#747577) while bringing the
+   primary ink to within a hair of --text. The dark theme inverts instead; see
+   styles/dark-mode.css, whose rule is more specific and replaces this one. */
+.spreadsheet-container .fortune-toolbar svg,
+.spreadsheet-container .luckysheet-sheet-area svg {
+  filter: brightness(0.57);
+}
+
+.spreadsheet-container .fortune-toolbar-combo-arrow > svg {
+  width: 10px;
+  height: 18px;
+}
+
+/* The library's overflow popover, given the same shape as
+   `.toolbar-overflow-panel` so "More" means the same thing on both rows. */
+.spreadsheet-container .fortune-toolbar-more-container {
+  top: calc(100% + 4px);
+  padding: var(--space-1);
+  gap: 1px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Dropdowns (font size, format, colour picker) on our popover shape too. */
+.spreadsheet-container .fortune-toolbar-select,
+.spreadsheet-container .fortune-toolbar-color-picker,
+.spreadsheet-container .toolbar-item-sub-menu {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+}
+
+.spreadsheet-container .fortune-toolbar-select-option {
+  font-size: var(--text-sm);
+  border-radius: var(--radius-xs);
+}
+
+.spreadsheet-container .fortune-toolbar-select-option:hover {
+  background: var(--surface-muted);
+}
+
+/* The library's tooltip is a #666 box with a 2px radius that appears next to
+   our own `title` tooltips. */
+.spreadsheet-container .fortune-tooltip {
+  top: calc(100% + 6px);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-xs);
+  background: #1f2937;
+  color: #ffffff;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  box-shadow: var(--shadow-md);
+}
+
+/* -------------------------------------------------------------------------
+   Sheet tabs + zoom — the strip between the grid and OUR status bar.
+   ------------------------------------------------------------------------- */
+
+.spreadsheet-container .luckysheet-sheet-area {
+  /* Border-box, so this is the library's own 31px budget with our hairline
+     folded into it rather than added on top — the grid loses nothing. */
+  height: 31px;
+  padding: 0 var(--space-3);
+  gap: var(--space-1);
+  background: var(--chrome);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* THE DEAD GAP. The library caps this container at `max-width: 54%` while
+   `.fortune-zoom-container` is pushed to the far right, so a workbook with one
+   sheet showed a lone tab, then ~1100px of empty band, then the zoom control —
+   and a workbook with nine sheets scrolled its tabs inside 54% of the width
+   while that same band stayed empty. There is nothing on this row that needs
+   protecting from the tabs: the zoom control is a flex sibling with its own
+   intrinsic width, so it cannot be pushed off. */
+.spreadsheet-container .fortune-sheettab-container {
+  max-width: 100%;
+}
+
+.spreadsheet-container .luckysheet-sheet-area div.luckysheet-sheets-item {
+  height: 24px;
+  line-height: 24px;
+  padding: 0 var(--space-3) 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.spreadsheet-container .luckysheet-sheet-area div.luckysheet-sheets-item:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+/* The selected sheet is the same tint-plus-hairline as `.toolbar-btn.active`
+   and `.workspace-switcher-tab.active`, so "which one is on" is signalled the
+   same way everywhere in the product. */
+.spreadsheet-container .luckysheet-sheet-area div.luckysheet-sheets-item-active,
+.spreadsheet-container .luckysheet-sheet-area div.luckysheet-sheets-item-active:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.spreadsheet-container .fortune-sheettab-button,
+.spreadsheet-container .fortune-zoom-button {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  transition: background var(--transition), color var(--transition);
+}
+
+.spreadsheet-container .fortune-sheettab-button:hover,
+.spreadsheet-container .fortune-zoom-button:hover,
+.spreadsheet-container .fortune-sheettab-scroll:hover,
+.spreadsheet-container .fortune-zoom-ratio-item:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.spreadsheet-container .fortune-sheettab-button > svg,
+.spreadsheet-container .fortune-zoom-button > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.spreadsheet-container .fortune-zoom-ratio {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.spreadsheet-container .fortune-zoom-ratio-menu {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+}
+
+/* The two scroll-affordance fades are a `#4445 -> transparent` gradient painted
+   over a hardcoded `background: rgb(255, 255, 255)`. That opaque white only
+   ever made sense over the library's own #fafafc; over our chrome it is a white
+   smudge, and over the dark theme a bright one. Dropping the fill and keeping
+   the gradient leaves a soft edge shadow that works on both themes — the
+   affordance survives, which matters because these only render when the tabs
+   actually overflow. */
+.spreadsheet-container .fortune-sheettab-container .boundary {
+  background-color: transparent;
 }
 
 .chart-modal {
@@ -2195,8 +2659,15 @@ input[type="color"]::-moz-color-swatch {
   box-shadow: var(--shadow-paper);
 }
 
+/* PowerPoint publishes `--notes-rail-w` on the aside itself (248px open, 52px
+   collapsed) rather than writing a `width`, so the value stays a page-file
+   decision while the PROPERTY stays here. The fallback is the old constant, so
+   any consumer that does not declare the custom property is unchanged.
+   The mobile `width: 100%` below is deliberately still CSS-only: a media query
+   is the one place that can respond to the viewport, and an inline width would
+   outrank it. */
 .notes-sidebar {
-  width: 288px;
+  width: var(--notes-rail-w, 288px);
   flex-shrink: 0;
   min-height: 0;
   padding: var(--space-4);
@@ -2305,10 +2776,8 @@ input[type="color"]::-moz-color-swatch {
    ========================================================================= */
 
 @media (max-width: 1080px) {
-  /* PowerPoint sets an inline width on the notes rail on desktop; this still
-     governs the mobile pane and the Word insight rail. */
   .notes-sidebar {
-    width: 264px;
+    width: var(--notes-rail-w, 264px);
   }
 
   .slide-sidebar {
@@ -2402,10 +2871,6 @@ input[type="color"]::-moz-color-swatch {
     grid-column: 1 / -1;
   }
 
-  .metric-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-
   /* --- Touch targets: nothing interactive below 44x44 on a phone/tablet. --- */
   .btn,
   .mobile-toolbar-toggle,
@@ -2430,6 +2895,39 @@ input[type="color"]::-moz-color-swatch {
     height: 44px;
   }
 
+  /* On a phone the LIBRARY's toolbar is the only ribbon Excel has — ours is
+     `display: none` here and lives behind the "Ribbon" launcher — so these 19
+     controls are the whole formatting surface and were 30x30 to a thumb (28x28
+     before this pass). Same 44px floor as `.toolbar-btn` above.
+     Costs 14px of grid; it is the primary control surface and worth it. */
+  .spreadsheet-container .fortune-toolbar-button,
+  .spreadsheet-container .fortune-toolbar-combo {
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .spreadsheet-container .fortune-toolbar-divider {
+    height: 44px;
+  }
+
+  /* The sheet-tab strip is a fixed 31px in the library and cannot grow without
+     taking that height from the grid on the shortest viewport in the product.
+     The free axis is width, so these take 44px there and the 30px the row
+     allows in height — comfortably past the 24x24 of SC 2.5.8, short of the
+     44x44 of 2.5.5. Called out in the handover as the one target that does not
+     reach 44 in both axes. */
+  .spreadsheet-container .fortune-sheettab-button,
+  .spreadsheet-container .fortune-zoom-button {
+    width: 44px;
+    height: 30px;
+  }
+
+  .spreadsheet-container .luckysheet-sheet-area div.luckysheet-sheets-item {
+    min-width: 44px;
+    height: 30px;
+    line-height: 30px;
+  }
+
   .suite-home-link {
     min-height: 44px;
     min-width: 44px;
@@ -2447,10 +2945,6 @@ input[type="color"]::-moz-color-swatch {
 
   .panel-card {
     padding: var(--space-4);
-  }
-
-  .metric-grid {
-    grid-template-columns: 1fr;
   }
 
   /* Brand + theme toggle on one row, the three create actions on the next.
@@ -2518,28 +3012,32 @@ input[type="color"]::-moz-color-swatch {
     width: 100%;
   }
 
-  /* The action cluster and the theme toggle share one row. Giving the cluster
-     `width: 100%` used to push the toggle onto a row of its own, so the header
-     ate three tall rows on a phone. */
-  .header-actions,
   .dialog-card__actions {
     width: 100%;
   }
 
+  /* `width: 100%` USED to live here too, and it was right when the cluster held
+     three labelled export buttons that could not share the filename's row. The
+     header now collapses those into a single `⋯` trigger, so the group is two
+     icon buttons wide and fits beside the filename with room to spare — while
+     the 100% basis was still reserving a whole ~50px row for it and leaving the
+     left 80% of that row blank. Measured on Word at 390x844: header 113px ->
+     63px, i.e. 50px of document back on the smallest viewport in the product.
+     844x390 is unaffected; it is governed by the `max-height` block below,
+     which already keeps everything on one row. */
   .header-actions {
-    margin-left: 0;
+    margin-left: auto;
+    flex: 0 1 auto;
     flex-wrap: nowrap;
   }
 
-  /* ONE scrollable row, not two wrapped ones. Three 44px export buttons could
-     never fit a 390px phone, and wrapping bought that at the price of a whole
-     52px header row on the narrowest screens in the product. The cluster is
-     already a scroll container with `justify-content: flex-start` (never
-     `flex-end` — see the note on the base rule), so it gives width back
-     instead, and every action stays reachable by swiping the row. */
+  /* Never a scroll container at this width any more — there is nothing left to
+     scroll past. `flex-start` is kept as the safe default for the day another
+     always-visible action is added (see the note on the base rule: `flex-end`
+     spills overflow out of the start edge, where scrollLeft cannot reach it). */
   .header-action-cluster {
     width: auto;
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     flex-wrap: nowrap;
     justify-content: flex-start;
   }
@@ -2578,6 +3076,24 @@ input[type="color"]::-moz-color-swatch {
   .formula-strip {
     padding-block: var(--space-1);
     gap: var(--space-1);
+  }
+}
+
+/* Below this the three create buttons share ~124px each, and even the SHORT
+   label rendered as "Docum…", "Spread…", "Present…" — the same truncation the
+   header's save pill had, and the same answer: a cut word is worse than no
+   word. The coloured chip is now what identifies each button, and the file list
+   directly beneath spells out "Document" / "Spreadsheet" / "Presentation"
+   beside those exact three chips, so the mapping is taught on the same screen.
+   Nothing is lost to assistive tech: the accessible name is `aria-label="New
+   document"` on the link itself, not this span. */
+@media (max-width: 460px) {
+  .dashboard-create__label--short {
+    display: none;
+  }
+
+  .dashboard-create__btn {
+    justify-content: center;
   }
 }
 
@@ -2734,9 +3250,21 @@ input[type="color"]::-moz-color-swatch {
   }
 
   .word-stage,
-  .presentation-stage,
   .document-stage {
     padding: var(--space-2);
+  }
+
+  /* The slide is the ONLY thing on this screen and it is fitted by
+     `fitCanvasToShell`, which subtracts this element's block padding from the
+     height it has to work with. 844x390 is the tightest viewport the product
+     supports and height is what binds there, so every pixel of vertical padding
+     comes straight off the slide: 8px block padding cost 8/540 = 0.0148 of
+     scale, and the canvas measured 0.350 where it used to be 0.365. Inline
+     padding is free here (width is not the binding axis at 844px, which offers
+     828px against the 960px the slide would need) so it keeps the full 8px and
+     the slide still does not touch the pane's edges. */
+  .presentation-stage {
+    padding: var(--space-1) var(--space-2);
   }
 
   .dashboard-topbar__inner {
@@ -2772,8 +3300,8 @@ input[type="color"]::-moz-color-swatch {
   }
 
   /* A transient save status must never outbid the document's own name for
-     width, so it truncates instead of holding its full nowrap width. The status
-     bar always spells the same state out in full. */
+     width. Where the pill still shows at all (it does not below — see the next
+     block) it truncates rather than holding its full nowrap width. */
   .status-pill {
     min-width: 0;
     flex: 0 1 auto;
@@ -2781,6 +3309,30 @@ input[type="color"]::-moz-color-swatch {
     overflow: hidden;
     text-overflow: ellipsis;
     line-height: 1.9;
+  }
+}
+
+/* =========================================================================
+   The header's save pill is DESKTOP-ONLY.
+
+   Measured at 390x844: `scrollWidth > clientWidth` on `.status-pill`, i.e. it
+   rendered as "Not sav…". A truncated status indicator is worse than no
+   indicator, because "Not sav…" is ambiguous where "Not saved yet" is not —
+   and it is not the only copy of the state. `.status-bar` carries the identical
+   string, uncut, at EVERY viewport in all three editors, so nothing is lost by
+   dropping the duplicate exactly where it stops fitting.
+
+   `display: none`, not `visibility`/`clip`: this is a redundant second copy of
+   information that is still on screen, so it should leave the accessibility
+   tree too rather than be read out twice. The element is never removed —
+   cross-tab.spec.ts and storage-resilience.spec.ts assert on its text for
+   "Save failed", "Saved to local backup only" and "Conflict detected", and
+   those specs run at 1280x900, above both of these breakpoints.
+   ========================================================================= */
+
+@media (max-width: 640px), (max-height: 560px) {
+  .status-pill {
+    display: none;
   }
 }
 
@@ -2800,8 +3352,13 @@ input[type="color"]::-moz-color-swatch {
      specific selector ([data-theme="dark"] .toolbar-btn.active), and an
      accessibility override must not be defeasible by a theme rule that knows
      nothing about the system palette. */
+  /* fortune-sheet's pressed button is an inline `background-color`, which the
+     OS palette drops like any other author colour — leaving Bold-on and
+     Bold-off identical. Same treatment, same reason. */
   .toolbar-btn.active,
   .workspace-switcher-tab.active,
+  .spreadsheet-container .fortune-toolbar-button[style*="rgb(231, 229, 235)"],
+  .spreadsheet-container .luckysheet-sheet-area div.luckysheet-sheets-item-active,
   .btn-primary {
     forced-color-adjust: none;
     background: Highlight !important;
@@ -2828,6 +3385,16 @@ input[type="color"]::-moz-color-swatch {
   .app-loading__card {
     border: 1px solid CanvasText;
   }
+
+  /* NOT FIXABLE FROM THIS FILE, recorded so the next pass does not retry it:
+     every fortune-sheet toolbar icon is a `<use>` of a `<symbol>` whose paths
+     carry `fill="#525C6F"` as a PRESENTATION ATTRIBUTE. Forced colours rewrite
+     `color`/`background-color`, not `fill`, and CSS cannot reach into a
+     use-element shadow tree to override the attribute — verified by screenshot
+     with `svg symbol * { fill: red !important }`, which changed nothing. A
+     `filter` would need to know whether Canvas is black or white, which no
+     media query exposes. The fix is to make the sprite use `currentColor`,
+     which is a change to the library or to a JS-side sprite override. */
 
   /* Two-tone rings and alpha halos collapse; keep one unambiguous indicator. */
   :focus-visible,

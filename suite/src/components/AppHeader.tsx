@@ -165,7 +165,7 @@ function statusTone(saveStatus: string) {
     return 'success';
   }
 
-  if (/fail|error|conflict|read-only/i.test(saveStatus)) {
+  if (/fail|error|conflict|read-only|deleted/i.test(saveStatus)) {
     return 'alert';
   }
 

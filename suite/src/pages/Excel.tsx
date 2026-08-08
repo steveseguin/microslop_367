@@ -673,7 +673,10 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
   const [workbookSeed, setWorkbookSeed] = useState<WorkbookData>(() => structuredClone(starterSheets) as WorkbookData);
   const [workbookKey, setWorkbookKey] = useState(0);
   const [sheetCount, setSheetCount] = useState(starterSheets.length);
-  const [saveStatus, setSaveStatus] = useState('Saved');
+  // Not 'Saved'. A workbook that has never been written must not claim it has:
+  // the header paints exactly 'Saved' as a green success pill, so starting there
+  // showed a brand-new workbook as safely stored with zero bytes on disk.
+  const [saveStatus, setSaveStatus] = useState('Not saved yet');
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [formulaValue, setFormulaValue] = useState('');
@@ -2630,6 +2633,10 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
         title="Replace the current workbook?"
         description="Importing a workbook will replace the sheets currently open in this editor."
         confirmLabel="Import workbook"
+        // Discarding the open workbook is destructive, so the dialog must not put
+        // initial focus on the confirm button -- a stray Enter carried over from
+        // the keypress that opened it would otherwise wipe the sheets.
+        tone="danger"
         onConfirm={() => {
           if (importCandidate) {
             importWorkbookFile(importCandidate);
