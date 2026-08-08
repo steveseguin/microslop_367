@@ -709,8 +709,11 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
     onContentError: ({ error }) => {
       contentErrorRef.current = error.message;
     },
-    content:
-      '<h1>Project Brief</h1><p>Use this space for structured writing, meeting notes, and polished copy.</p><p>Tip: open the ribbon on mobile to access formatting tools without losing space.</p>',
+    // A new document starts empty. The previous seed ("Project Brief", plus a tip about
+    // opening the ribbon on mobile) was instructional copy dressed as the user's own
+    // content: it counted towards the word count, exported into their .docx, and had to
+    // be selected and deleted before they could start writing.
+    content: '',
   });
 
   editorRef.current = editor;

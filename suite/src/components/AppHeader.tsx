@@ -153,6 +153,25 @@ interface AppHeaderProps {
   saveStatus?: string;
 }
 
+/**
+ * Only a state the user needs to act on gets the alert tone. Previously anything
+ * that was not exactly "Saved" or "Saving..." was painted amber, so a brand-new
+ * untouched document announced itself as a problem ("Not saved yet") before the
+ * user had typed a character. Failure and conflict still shout, because those are
+ * the states where work is genuinely at risk.
+ */
+function statusTone(saveStatus: string) {
+  if (saveStatus === 'Saved') {
+    return 'success';
+  }
+
+  if (/fail|error|conflict|read-only/i.test(saveStatus)) {
+    return 'alert';
+  }
+
+  return 'pending';
+}
+
 function getAppMeta(appName: AppHeaderProps['appName']) {
   if (appName === 'NinjaWord') {
     return { iconLetter: 'W', iconClass: 'word', suiteLabel: 'Documents' };
@@ -230,7 +249,7 @@ export function AppHeader({
         {saveStatus && (
           <span
             id={saveStatusId}
-            className={`status-pill status-pill--${saveStatus === 'Saved' ? 'success' : saveStatus === 'Saving...' ? 'pending' : 'alert'}`}
+            className={`status-pill status-pill--${statusTone(saveStatus)}`}
             role="status"
             aria-live="polite"
           >

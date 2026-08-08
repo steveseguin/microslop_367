@@ -454,6 +454,13 @@ body.dark-mode .btn-primary {
   padding: calc(var(--space-2) + env(safe-area-inset-top, 0px)) var(--space-3) var(--space-2);
   background: var(--chrome);
   border-bottom: 1px solid var(--border);
+  /* Load-bearing, not decoration. The header is the containing block for
+     `.header-overflow-panel`, which pins to `right: var(--space-3)` and is
+     nearly 100vw wide on a phone: anchored to the 44px trigger instead, its
+     left border landed at x = -4. It is also what activates the `z-index`
+     below — a static element has no stacking position, so the declaration was
+     inert and the panel rendered UNDER the ribbon's `z-index: 15`. */
+  position: relative;
   z-index: 20;
 }
 
@@ -840,10 +847,11 @@ body.dark-mode .btn-primary {
 
 /* --- controls the page files own and this file has to make presentable --- */
 
-/* Word renders a raw `<input type="color">` (a black rectangle with a chrome
-   bevel) and PowerPoint a 40px one. Both are page-file markup this pass may not
-   touch, so they are re-skinned here into a swatch that matches `.toolbar-btn`.
-   `!important` is required: both carry inline `style` / a fixed-size class. */
+/* A raw `<input type="color">` is a black rectangle in a chrome bevel, so it is
+   re-skinned into a swatch that matches `.toolbar-btn`. Word no longer renders
+   one in the ribbon at all — its colour control is a swatch BUTTON with the
+   native input parked outside `.toolbar` as `.sr-only` — so the sized rule
+   below now serves PowerPoint's `.slide-color-input` alone. */
 input[type="color"] {
   appearance: none;
   -webkit-appearance: none;
@@ -873,30 +881,56 @@ input[type="color"]::-moz-color-swatch {
   border-radius: 3px;
 }
 
-.toolbar input[type="color"],
+/* The `!important`s that used to be here are gone: they existed to beat an
+   inline `controlStyle` in Word.tsx that no longer exists, and a two-class
+   selector already outranks `.slide-color-input`'s own 40px rule. */
 .toolbar .slide-color-input {
-  width: var(--control-h) !important;
-  height: var(--control-h) !important;
-  max-width: var(--control-h) !important;
+  width: var(--control-h);
+  height: var(--control-h);
+  max-width: var(--control-h);
   /* Generous inset: the colour has to read as a chip inside a button, not as a
      solid black tile sitting in the middle of a row of line icons. */
-  padding: 5px !important;
-  border: 1px solid var(--border-strong) !important;
-  border-radius: var(--radius-xs) !important;
-  background: var(--surface-solid) !important;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: var(--surface-solid);
 }
 
-/* Word's `<select>`s carry an inline height/radius/border, so they need the
-   same treatment to sit on the ribbon's baseline. */
-.toolbar select {
-  height: var(--control-h) !important;
-  max-width: 8rem !important;
-  padding: 0 var(--space-1) 0 var(--space-2) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: var(--radius-xs) !important;
-  background: var(--surface-muted) !important;
+/* The ribbon's `<select>`s (Word's font family and size).
+   Styled by CLASS, not by `.toolbar select`: the same markup is re-parented
+   into `.toolbar-overflow-panel` and `.mobile-toolbar-sheet`, neither of which
+   has a `.toolbar` ancestor, so a descendant selector left both of those
+   rendering bare native selects. */
+.toolbar-select {
+  height: var(--control-h);
+  max-width: 8rem;
+  padding: 0 var(--space-1) 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface-muted);
   color: var(--text);
-  font-size: var(--text-xs) !important;
+  font-size: var(--text-xs);
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.toolbar-select:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-strong);
+}
+
+/* Font SIZE holds two digits; at 8rem it was a mostly-empty box beside the
+   family name and broke the row's rhythm. */
+.toolbar-select--narrow {
+  max-width: 5rem;
+}
+
+/* Outside the dense row — the overflow popover and the mobile sheet — the same
+   control has to clear 44px like everything else the thumb can reach. */
+.toolbar-overflow-panel .toolbar-select,
+.mobile-toolbar-sheet .toolbar-select {
+  height: 44px;
+  max-width: 12rem;
+  font-size: var(--text-sm);
 }
 
 /* A text button among icon buttons (Word's "Reset") reads as a mistake unless
