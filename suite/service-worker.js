@@ -40,6 +40,15 @@ const RUNTIME_CACHE = `officeninja-runtime-${VERSION}`;
  */
 const CACHE_PREFIX = 'officeninja-';
 
+/**
+ * Caches belonging to the pre-suite site (its worker used `officeninja-v1`).
+ *
+ * Their presence is the only reliable signal that the worker we are about to replace is the
+ * legacy one rather than an older build of this app, and it changes the update rules — see
+ * `install`. Nothing else writes a cache with this shape.
+ */
+const LEGACY_CACHE_PATTERN = /^officeninja-v\d+$/;
+
 /** Precached on install. Kept small on purpose; see the budget check in vite.config.ts. */
 const SHELL_ASSETS = __SW_SHELL__;
 
@@ -52,6 +61,26 @@ const SHELL_URLS = SHELL_ASSETS.map(toUrl);
 const WARM_URLS = WARM_ASSETS.map(toUrl);
 const MANAGED_URLS = new Set([...SHELL_URLS, ...WARM_URLS]);
 const INDEX_URL = toUrl('index.html');
+const ASSETS_URL_PREFIX = toUrl('assets/');
+
+/**
+ * How to fetch a file during precache.
+ *
+ * Everything under assets/ is content-hashed, so the HTTP cache cannot hold a wrong answer
+ * for those URLs no matter what max-age the host sends (GitHub Pages sends 600s, not
+ * `immutable`). `cache: 'default'` therefore lets the browser reuse the copy the page just
+ * downloaded instead of pulling ~440 kB down a second time on a first visit. Measured: with
+ * `'reload'` for everything, a cold visit re-fetched all 16 shell files; with this split it
+ * re-fetches one, index.html, at ~1 kB.
+ *
+ * Everything else (index.html above all) is served from an unhashed URL under a short
+ * max-age, and MUST bypass the HTTP cache. A minutes-old index.html would reference asset
+ * hashes from the previous deploy, which are not in this worker's manifest — precaching it
+ * would bake a broken shell into the cache permanently.
+ */
+function precacheRequest(url) {
+  return new Request(url, { cache: url.startsWith(ASSETS_URL_PREFIX) ? 'default' : 'reload' });
+}
 
 self.addEventListener('install', (event) => {
   /**
@@ -63,9 +92,28 @@ self.addEventListener('install', (event) => {
    * The page decides when to swap; see registerServiceWorker.ts.
    */
   event.waitUntil(
-    caches.open(SHELL_CACHE).then((cache) =>
-      cache.addAll(SHELL_URLS.map((url) => new Request(url, { cache: 'reload' }))),
-    ),
+    (async () => {
+      const cache = await caches.open(SHELL_CACHE);
+      await cache.addAll(SHELL_URLS.map(precacheRequest));
+
+      /**
+       * ONE EXCEPTION to "never skipWaiting": replacing the legacy worker.
+       *
+       * That worker is cache-first over `/`, `/word.html`, `/excel.html` and
+       * `/powerpoint.html` with scope `/`, so a client that still has it keeps being served
+       * the dead pre-suite app out of `officeninja-v1` — including the navigation that just
+       * installed this worker. Waiting politely means waiting for a page that will never
+       * appear to offer an update it cannot render, i.e. never. Measured, not assumed: with
+       * the normal wait-for-consent path, a legacy client sat on `officeninja-v1` forever.
+       *
+       * The reasons not to skipWaiting do not apply here. The page being replaced is a
+       * different application, not a running editor built against chunks this worker is
+       * about to evict, and everything the legacy editors held was already autosaved to
+       * localStorage, which a reload does not touch.
+       */
+      const keys = await caches.keys();
+      if (keys.some((key) => LEGACY_CACHE_PATTERN.test(key))) await self.skipWaiting();
+    })(),
   );
 });
 
@@ -73,6 +121,10 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       const keys = await caches.keys();
+      // Recomputed here rather than carried over from `install`: the worker can be killed
+      // between the two events, so module-scope state is not reliable.
+      const healingLegacy = keys.some((key) => LEGACY_CACHE_PATTERN.test(key));
+
       await Promise.all(
         keys
           .filter((key) => key.startsWith(CACHE_PREFIX) && key !== SHELL_CACHE && key !== RUNTIME_CACHE)
@@ -82,6 +134,26 @@ self.addEventListener('activate', (event) => {
       // second reload. Safe on update too: activation only happens once the page has
       // agreed to it (skipWaiting) or every tab has closed.
       await self.clients.claim();
+
+      if (healingLegacy) {
+        // Those windows are currently displaying the legacy app, painted from a cache that
+        // no longer exists. Leaving them there would strand the user on a dead page until
+        // they happened to reload by hand.
+        //
+        // DELIBERATELY NOT AWAITED. The navigation cannot complete until this worker has
+        // finished activating (it is the one that must answer the request), and activation
+        // cannot finish while `waitUntil` is still waiting on the navigation. Awaiting it
+        // deadlocks the worker in `activating` forever — verified, not theorised. Firing it
+        // and returning lets activation finish and the navigation resolve against it.
+        const windows = await self.clients.matchAll({ type: 'window' });
+        for (const client of windows) {
+          try {
+            client.navigate(client.url).catch(() => undefined);
+          } catch {
+            // Some clients (a client that has since navigated cross-origin) refuse.
+          }
+        }
+      }
     })(),
   );
 });
