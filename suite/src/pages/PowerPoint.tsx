@@ -1,11 +1,15 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import * as fabric from 'fabric';
 import {
+  AlertTriangle,
   BringToFront,
+  ChevronDown,
+  ChevronUp,
   Circle,
   Copy,
   Download,
+  GripVertical,
   Image as ImageIcon,
   MonitorPlay,
   Palette,
@@ -24,16 +28,56 @@ import { AppHeader } from '../components/AppHeader';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { StatusBar } from '../components/StatusBar';
 import { Toolbar, ToolbarButton, ToolbarGroup } from '../components/Toolbar';
-import { getCurrentClientId, loadDocument, saveDocument, subscribeToDocument } from '../utils/db';
+import {
+  BACKUP_SIZE_LIMIT_BYTES,
+  DocumentPersistenceError,
+  getCurrentClientId,
+  loadDocument,
+  saveDocument,
+  saveDocumentBackupNow,
+  subscribeToDocument,
+} from '../utils/db';
 
 interface PowerPointProps {
   toggleTheme: () => void;
   isDarkMode: boolean;
 }
 
+/**
+ * One fabric object as produced by `toObject()`. Only the fields this editor reads or
+ * exports are described; fabric emits more, which is why unknown keys are tolerated.
+ */
+interface FabricObjectJSON {
+  type?: string;
+  left?: number;
+  top?: number;
+  width?: number;
+  height?: number;
+  scaleX?: number;
+  scaleY?: number;
+  angle?: number;
+  originX?: string;
+  originY?: string;
+  radius?: number;
+  fill?: string;
+  stroke?: string;
+  text?: string;
+  fontSize?: number;
+  fontWeight?: string | number;
+  src?: string;
+}
+
+/** A whole slide as produced by `canvas.toJSON()`. */
+interface SlideCanvasJSON {
+  version?: string;
+  background?: string;
+  backgroundColor?: string;
+  objects?: FabricObjectJSON[];
+}
+
 interface Slide {
   id: string;
-  data: any;
+  data: SlideCanvasJSON | null;
   notes?: string;
   thumbnail?: string;
 }
@@ -42,24 +86,98 @@ interface BannerState {
   tone: 'success' | 'warning' | 'error';
   title: string;
   detail?: string;
+  action?: { label: string; onClick: () => void };
+}
+
+interface SlideCapture {
+  id: string;
+  data: SlideCanvasJSON;
+  thumbnail?: string;
 }
 
 const SLIDE_WIDTH = 960;
 const SLIDE_HEIGHT = 540;
+/**
+ * fabric v7 defaults originX/originY to 'center'. Every coordinate in this file (the
+ * templates, the PPTX importer's EMU offsets and the PPTX exporter's x/y math) treats
+ * left/top as the TOP-LEFT corner, so objects are pinned back to that origin.
+ */
+const TOP_LEFT_ORIGIN = { originX: 'left', originY: 'top' } as const;
+const THUMBNAIL_SCALE = 0.2;
+/** Thumbnails are persisted with the deck; JPEG keeps the saved payload small. */
+const THUMBNAIL_FORMAT = 'jpeg' as const;
+const THUMBNAIL_QUALITY = 0.6;
+const SAVE_DEBOUNCE_MS = 800;
+const HISTORY_DEBOUNCE_MS = 220;
+const THUMBNAIL_DEBOUNCE_MS = 450;
+const HISTORY_LIMIT = 40;
+const MIN_CANVAS_SCALE = 0.12;
+/**
+ * pptxgenjs' LAYOUT_WIDE is 13.333in x 7.5in. Mapping the 960x540 slide onto 10 x 5.625
+ * instead squeezed every deck into the top-left 75% of the page with a dead margin, which
+ * reads as deliberate design rather than a bug.
+ */
+const EXPORT_WIDTH_IN = 13.333;
+const EXPORT_HEIGHT_IN = 7.5;
+const EMU_PER_INCH = 914400;
+/**
+ * Floor for exported geometry: only there to keep a shape from being degenerate. The old
+ * 0.3in/0.4in floors were large enough to distort real content — a 14px accent bar came
+ * back 22px thick on every round trip.
+ */
+const MIN_EXPORT_SIZE_IN = 0.01;
+
+/**
+ * Serialized type tags are taken from the fabric classes themselves, so a fabric rename
+ * (v5 `i-text` -> v7 `IText`) can never silently stop matching again. The legacy v5 tags
+ * stay in the set so decks saved by an older build still export.
+ */
+const normalizeTypeTag = (value: string) => value.toLowerCase();
+
+const TEXT_TYPE_TAGS = new Set(
+  [fabric.IText.type, fabric.Textbox.type, fabric.FabricText.type, 'i-text'].map(normalizeTypeTag),
+);
+const RECT_TYPE_TAGS = new Set([fabric.Rect.type].map(normalizeTypeTag));
+const CIRCLE_TYPE_TAGS = new Set([fabric.Circle.type].map(normalizeTypeTag));
+const IMAGE_TYPE_TAGS = new Set([fabric.FabricImage.type].map(normalizeTypeTag));
+
+function createId(prefix: string) {
+  const cryptoRef = typeof globalThis === 'undefined' ? undefined : globalThis.crypto;
+  if (cryptoRef && typeof cryptoRef.randomUUID === 'function') {
+    return `${prefix}-${cryptoRef.randomUUID()}`;
+  }
+
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** The single place where fabric's loose serialization is narrowed to this file's model. */
+function serializeCanvas(canvas: fabric.StaticCanvas): SlideCanvasJSON {
+  return canvas.toJSON() as unknown as SlideCanvasJSON;
+}
 
 function createTextObject(text: string, options: Partial<fabric.ITextProps>) {
   return new fabric.IText(text, {
+    ...TOP_LEFT_ORIGIN,
     ...options,
     fontFamily: options.fontFamily ?? 'Aptos, Segoe UI, sans-serif',
     fill: options.fill ?? '#0f172a',
   });
 }
 
-function applySlideTemplate(canvas: fabric.Canvas, variant: 'cover' | 'content') {
+function makeThumbnail(canvas: fabric.StaticCanvas, zoom = 1) {
+  return canvas.toDataURL({
+    format: THUMBNAIL_FORMAT,
+    quality: THUMBNAIL_QUALITY,
+    multiplier: THUMBNAIL_SCALE / zoom,
+  });
+}
+
+function applySlideTemplate(canvas: fabric.StaticCanvas, variant: 'cover' | 'content') {
   canvas.clear();
   canvas.backgroundColor = '#ffffff';
 
   const accentBar = new fabric.Rect({
+    ...TOP_LEFT_ORIGIN,
     left: 0,
     top: 0,
     width: SLIDE_WIDTH,
@@ -121,17 +239,84 @@ function createSlideSnapshot(variant: 'cover' | 'content') {
     backgroundColor: '#ffffff',
   });
 
-  applySlideTemplate(tempCanvas as unknown as fabric.Canvas, variant);
+  applySlideTemplate(tempCanvas, variant);
   const snapshot = {
-    data: tempCanvas.toJSON(),
-    thumbnail: tempCanvas.toDataURL({ format: 'png', multiplier: 0.22 }),
+    data: serializeCanvas(tempCanvas),
+    thumbnail: makeThumbnail(tempCanvas),
   };
-  tempCanvas.dispose();
+  void tempCanvas.dispose();
   return snapshot;
 }
 
+/**
+ * fabric@7 changed the default originX/originY to CENTER and serializes them, and no build
+ * of this editor ever set them explicitly — so every deck saved by the shipped build has
+ * objects anchored at their centre while every coordinate in this file (templates, PPTX
+ * import offsets, PPTX export x/y) means the TOP-LEFT corner. On screen that pushes content
+ * off the canvas: the accent bar hangs half off the left edge and the title is clipped to
+ * "se...tle" with no way to reach it. Migrating on load repositions the objects so the
+ * stored geometry means what the rest of the app assumes.
+ *
+ * The offset is rotated by the object's own angle so a rotated object lands exactly where
+ * it was drawn rather than being nudged sideways.
+ */
+function migrateObjectOrigin(object: FabricObjectJSON): boolean {
+  const originX = object.originX;
+  const originY = object.originY;
+  if ((originX === undefined || originX === 'left') && (originY === undefined || originY === 'top')) {
+    return false;
+  }
+
+  const width = (object.width || 0) * (object.scaleX ?? 1);
+  const height = (object.height || 0) * (object.scaleY ?? 1);
+  const localX = originX === 'center' ? -width / 2 : originX === 'right' ? -width : 0;
+  const localY = originY === 'center' ? -height / 2 : originY === 'bottom' ? -height : 0;
+  const radians = ((object.angle || 0) * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+
+  object.left = (object.left || 0) + localX * cos - localY * sin;
+  object.top = (object.top || 0) + localX * sin + localY * cos;
+  object.originX = 'left';
+  object.originY = 'top';
+  return true;
+}
+
+function migrateSlides(slides: Slide[]): { slides: Slide[]; changed: boolean } {
+  let changed = false;
+
+  const migrated = slides.map((slide) => {
+    const objects = slide.data?.objects;
+    if (!objects?.length) {
+      return slide;
+    }
+
+    let slideChanged = false;
+    const nextObjects = objects.map((object) => {
+      const copy = { ...object };
+      if (migrateObjectOrigin(copy)) {
+        slideChanged = true;
+        return copy;
+      }
+
+      return object;
+    });
+
+    if (!slideChanged) {
+      return slide;
+    }
+
+    changed = true;
+    // The thumbnail was rendered from the broken geometry, so drop it; the next flush
+    // regenerates it from the repaired slide.
+    return { ...slide, data: { ...slide.data, objects: nextObjects }, thumbnail: undefined };
+  });
+
+  return { slides: migrated, changed };
+}
+
 function normalizeColor(value: string | undefined) {
-  if (!value) {
+  if (!value || typeof value !== 'string') {
     return '000000';
   }
 
@@ -181,24 +366,216 @@ function extractTextContent(container: ParentNode) {
   return paragraphs.filter(Boolean).join('\n');
 }
 
-function extractTransformMetrics(node: ParentNode | null) {
+/**
+ * EMU -> canvas pixels. The ratio is taken from the deck's OWN `p:sldSz` so a 16:9, a 4:3
+ * and this app's own export all map onto the 960x540 canvas correctly. A fixed 96px/inch
+ * was wrong for every one of them: the exporter writes a 13.333in page, so 960px spans
+ * 13.333in (72px/inch) and a hard-coded 96 inflated every imported object by 4/3.
+ */
+interface EmuScale {
+  x: number;
+  y: number;
+}
+
+const DEFAULT_EMU_SCALE: EmuScale = {
+  x: SLIDE_WIDTH / (EXPORT_WIDTH_IN * EMU_PER_INCH),
+  y: SLIDE_HEIGHT / (EXPORT_HEIGHT_IN * EMU_PER_INCH),
+};
+
+function readSlideEmuScale(presentationXml: string | undefined): EmuScale {
+  if (!presentationXml) {
+    return DEFAULT_EMU_SCALE;
+  }
+
+  const doc = new DOMParser().parseFromString(presentationXml, 'text/xml');
+  const size = doc.querySelector('p\\:sldSz, sldSz');
+  const cx = parseInt(size?.getAttribute('cx') || '0', 10);
+  const cy = parseInt(size?.getAttribute('cy') || '0', 10);
+
+  if (!cx || !cy) {
+    return DEFAULT_EMU_SCALE;
+  }
+
+  return { x: SLIDE_WIDTH / cx, y: SLIDE_HEIGHT / cy };
+}
+
+function extractTransformMetrics(node: ParentNode | null, scale: EmuScale) {
   const transform = node?.querySelector('a\\:xfrm, xfrm');
   const offset = transform?.querySelector('a\\:off, off');
   const extent = transform?.querySelector('a\\:ext, ext');
 
-  const left = ((parseInt(offset?.getAttribute('x') || '0', 10) || 0) / 914400) * 96;
-  const top = ((parseInt(offset?.getAttribute('y') || '0', 10) || 0) / 914400) * 96;
-  const width = ((parseInt(extent?.getAttribute('cx') || '0', 10) || 0) / 914400) * 96;
-  const height = ((parseInt(extent?.getAttribute('cy') || '0', 10) || 0) / 914400) * 96;
+  const left = (parseInt(offset?.getAttribute('x') || '0', 10) || 0) * scale.x;
+  const top = (parseInt(offset?.getAttribute('y') || '0', 10) || 0) * scale.y;
+  const width = (parseInt(extent?.getAttribute('cx') || '0', 10) || 0) * scale.x;
+  const height = (parseInt(extent?.getAttribute('cy') || '0', 10) || 0) * scale.y;
 
   return { left, top, width, height };
 }
+
+function isEditingText(object: fabric.FabricObject | undefined | null) {
+  return Boolean(object && 'isEditing' in object && (object as fabric.IText).isEditing);
+}
+
+const slideActionButtonStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: '1.75rem',
+  height: '1.75rem',
+  padding: 0,
+  borderRadius: '0.55rem',
+  border: '1px solid rgba(100, 116, 139, 0.32)',
+  background: 'rgba(148, 163, 184, 0.16)',
+  color: 'inherit',
+  cursor: 'pointer',
+};
+
+interface SlideCardProps {
+  slide: Slide;
+  index: number;
+  total: number;
+  isActive: boolean;
+  isDragging: boolean;
+  isDropTarget: boolean;
+  onSelect: (id: string) => void;
+  onMove: (fromIndex: number, toIndex: number) => void;
+  onDelete: (id: string) => void;
+  onReorderPointerDown: (event: React.PointerEvent<HTMLButtonElement>, index: number) => void;
+  onReorderPointerMove: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onReorderPointerUp: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onReorderPointerCancel: () => void;
+  registerCard: (index: number, element: HTMLElement | null) => void;
+}
+
+/**
+ * Memoized so a thumbnail refresh on the slide being edited re-renders ONE card, not the
+ * whole deck. With 60 slides that is the difference between a cheap edit and a janky one.
+ */
+const SlideCard = memo(function SlideCard({
+  slide,
+  index,
+  total,
+  isActive,
+  isDragging,
+  isDropTarget,
+  onSelect,
+  onMove,
+  onDelete,
+  onReorderPointerDown,
+  onReorderPointerMove,
+  onReorderPointerUp,
+  onReorderPointerCancel,
+  registerCard,
+}: SlideCardProps) {
+  return (
+    <article
+      ref={(element) => registerCard(index, element)}
+      className={`slide-card ${isActive ? 'slide-card--active' : ''}`}
+      style={{
+        opacity: isDragging ? 0.55 : 1,
+        outline: isDropTarget ? '2px dashed #2563eb' : undefined,
+        outlineOffset: '2px',
+      }}
+      onClick={() => onSelect(slide.id)}
+      onKeyDown={(event) => {
+        if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+          event.preventDefault();
+          onMove(index, event.key === 'ArrowUp' ? index - 1 : index + 1);
+          return;
+        }
+
+        // Only the card itself activates on Enter/Space. Without this the card would
+        // preventDefault the keydown of a nested button (move/delete) and the browser
+        // would never synthesize its click.
+        if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
+          event.preventDefault();
+          onSelect(slide.id);
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      aria-label={`Open slide ${index + 1}`}
+    >
+      <div className="slide-card__thumb">
+        {slide.thumbnail ? <img src={slide.thumbnail} alt={`Slide ${index + 1}`} /> : <span>Slide preview</span>}
+      </div>
+      <div className="slide-card__caption">
+        <span>Slide {index + 1}</span>
+        <span>{isActive ? 'Editing' : 'Open'}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.5rem' }}>
+        <button
+          type="button"
+          style={{ ...slideActionButtonStyle, opacity: index === 0 ? 0.4 : 1 }}
+          disabled={index === 0}
+          aria-label={`Move slide ${index + 1} up`}
+          title="Move slide up"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onMove(index, index - 1);
+          }}
+        >
+          <ChevronUp size={14} />
+        </button>
+        <button
+          type="button"
+          style={{ ...slideActionButtonStyle, opacity: index === total - 1 ? 0.4 : 1 }}
+          disabled={index === total - 1}
+          aria-label={`Move slide ${index + 1} down`}
+          title="Move slide down"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onMove(index, index + 1);
+          }}
+        >
+          <ChevronDown size={14} />
+        </button>
+        <span style={{ flex: 1 }} />
+        <button
+          type="button"
+          style={{ ...slideActionButtonStyle, cursor: 'grab', touchAction: 'none' }}
+          aria-label={`Drag to reorder slide ${index + 1}`}
+          title="Drag to reorder"
+          data-testid={`slide-drag-handle-${index}`}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onPointerDown={(event) => onReorderPointerDown(event, index)}
+          onPointerMove={onReorderPointerMove}
+          onPointerUp={onReorderPointerUp}
+          onPointerCancel={onReorderPointerCancel}
+        >
+          <GripVertical size={14} />
+        </button>
+      </div>
+      <button
+        className="slide-card__delete"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onDelete(slide.id);
+        }}
+        type="button"
+        aria-label={`Delete slide ${index + 1}`}
+      >
+        <X size={14} />
+      </button>
+    </article>
+  );
+});
 
 export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps) {
   const maxImportFileBytes = 30 * 1024 * 1024;
   const [searchParams, setSearchParams] = useSearchParams();
   const defaultFileName = 'Untitled Presentation';
-  const [docId] = useState(() => searchParams.get('id') || `powerpoint-${Date.now()}`);
+  // Derived from the URL on every render, NOT pinned at mount: hash-navigating from one
+  // deck to another used to keep editing the first document while the URL showed the
+  // second, so edits landed in the wrong deck and the second was never created.
+  const [generatedDocId] = useState(() => createId('powerpoint'));
+  const docId = searchParams.get('id') || generatedDocId;
   const [fileName, setFileName] = useState(defaultFileName);
   const [documentRevision, setDocumentRevision] = useState(0);
   const [fabricCanvas, setFabricCanvas] = useState<fabric.Canvas | null>(null);
@@ -207,18 +584,26 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   const [currentSlideId, setCurrentSlideId] = useState('slide-1');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isPresenterView, setIsPresenterView] = useState(false);
+  const [presentIndex, setPresentIndex] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [saveStatus, setSaveStatus] = useState('Saved');
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [currentColor, setCurrentColor] = useState('#2563eb');
-  const [history, setHistory] = useState<any[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const [banner, setBanner] = useState<BannerState | null>(null);
   const [pendingDeleteSlideId, setPendingDeleteSlideId] = useState<string | null>(null);
   const [importCandidate, setImportCandidate] = useState<File | null>(null);
   const [mobileWorkspaceView, setMobileWorkspaceView] = useState<'slides' | 'canvas' | 'notes'>('canvas');
   const [isDropTargetActive, setIsDropTargetActive] = useState(false);
+  const [dragSlideIndex, setDragSlideIndex] = useState<number | null>(null);
+  const [dropSlideIndex, setDropSlideIndex] = useState<number | null>(null);
+  const [slideLoadError, setSlideLoadError] = useState<{ slideId: string; index: number } | null>(null);
+  const [presentSlideFailed, setPresentSlideFailed] = useState(false);
+  // Persistent, not a toast: while true, an edit made inside the autosave window cannot be
+  // recovered after a crash, and the user has to be able to see that at any moment.
+  const [oversizeForBackup, setOversizeForBackup] = useState<number | null>(null);
   const mobileSectionId = useId();
   const slidesSectionId = `${mobileSectionId}-slides`;
   const canvasSectionId = `${mobileSectionId}-canvas`;
@@ -226,23 +611,487 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const stageWrapRef = useRef<HTMLDivElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const pptImportRef = useRef<HTMLInputElement | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
-  const isHistoryUpdate = useRef(false);
+  const thumbnailTimeoutRef = useRef<number | null>(null);
+  const historyTimeoutRef = useRef<number | null>(null);
   const dragDepthRef = useRef(0);
+  const docIdRef = useRef(docId);
   const documentRevisionRef = useRef(documentRevision);
-  const hasInitializedSaveRef = useRef(false);
+  const fileNameRef = useRef(fileName);
+  const isLoadedRef = useRef(false);
+
+  // ---- canvas <-> deck boundary ---------------------------------------------------
+  // The fabric canvas owns the slide that is on screen; React owns the deck. Data only
+  // crosses on an explicit slide switch, a flush, or a save.
+  const fabricCanvasRef = useRef<fabric.Canvas | null>(null);
+  const slidesRef = useRef<Slide[]>(slides);
+  const renderedSlideIdRef = useRef<string | null>(null);
+  // The last slide handed to the load queue. Distinct from renderedSlideIdRef, which is
+  // the last load that actually COMPLETED.
+  const pendingSlideIdRef = useRef<string | null>(null);
+  const currentSlideIdRef = useRef(currentSlideId);
+  const canvasDirtyRef = useRef(false);
+  const deckDirtyRef = useRef(false);
+  // A depth counter, not a boolean: slide loads are serialized but the counter keeps a
+  // nested load (history restore during a load) from clearing suppression too early.
+  const suppressDepthRef = useRef(0);
+  // Monotonic token + promise chain that serialize slide loads. See renderCurrentSlide.
+  const loadTokenRef = useRef(0);
+  const loadChainRef = useRef<Promise<void>>(Promise.resolve());
+  const canvasScaleRef = useRef(1);
+  const historyRef = useRef<{ stack: SlideCanvasJSON[]; index: number }>({ stack: [], index: -1 });
+  // The winner's revision from the last conflict. An EXPLICIT save adopts it so the user
+  // can actually overwrite; autosave never does, so a conflict is never resolved silently.
+  const conflictRevisionRef = useRef<number | null>(null);
+  const crashSafetyWarnedRef = useRef(false);
+  const saveInFlightRef = useRef(false);
+  const saveAgainRef = useRef(false);
+  const performSaveRef = useRef<((options?: { force?: boolean; allowResurrect?: boolean }) => Promise<void>) | null>(null);
+  const dragStateRef = useRef<{ index: number; pointerId: number } | null>(null);
+  const dropSlideIndexRef = useRef<number | null>(null);
+  const slideCardRefs = useRef<(HTMLElement | null)[]>([]);
+  const presentElementRef = useRef<HTMLCanvasElement | null>(null);
+  const presentCanvasRef = useRef<fabric.StaticCanvas | null>(null);
+  const presentRootRef = useRef<HTMLDivElement | null>(null);
+  const enteredFullscreenRef = useRef(false);
 
   useEffect(() => {
     documentRevisionRef.current = documentRevision;
   }, [documentRevision]);
 
   useEffect(() => {
+    fileNameRef.current = fileName;
+  }, [fileName]);
+
+  useEffect(() => {
+    isLoadedRef.current = isLoaded;
+  }, [isLoaded]);
+
+  useEffect(() => {
     if (!searchParams.get('id')) {
       setSearchParams({ id: docId }, { replace: true });
     }
   }, [docId, searchParams, setSearchParams]);
+
+  // Switching documents in place (hash navigation) tears the editor back down to a clean
+  // state. The outgoing deck is flushed FIRST, while docIdRef still names it.
+  useEffect(() => {
+    if (docIdRef.current === docId) {
+      return;
+    }
+
+    if (saveTimeoutRef.current) {
+      window.clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+
+    if (deckDirtyRef.current || canvasDirtyRef.current) {
+      // saveDocument's arguments are read synchronously, before any await, so this call
+      // captures the OUTGOING id even though docIdRef moves on the next line.
+      void performSaveRef.current?.().catch((error) => console.error('Save flush failed', error));
+    }
+
+    docIdRef.current = docId;
+    loadTokenRef.current += 1; // invalidate any queued slide load for the old deck
+    renderedSlideIdRef.current = null;
+    pendingSlideIdRef.current = null;
+    setSlideLoadError(null);
+    canvasDirtyRef.current = false;
+    deckDirtyRef.current = false;
+    historyRef.current = { stack: [], index: -1 };
+    setCanUndo(false);
+    setCanRedo(false);
+
+    const freshSlide: Slide = { id: createId('slide'), data: null, notes: '' };
+    slidesRef.current = [freshSlide];
+    setSlides([freshSlide]);
+    setCurrentSlideId(freshSlide.id);
+    currentSlideIdRef.current = freshSlide.id;
+    setFileName(defaultFileName);
+    fileNameRef.current = defaultFileName;
+    setDocumentRevision(0);
+    documentRevisionRef.current = 0;
+    conflictRevisionRef.current = null;
+    setLastSavedAt(null);
+    setSaveStatus('Saved');
+    setBanner(null);
+    setPresentIndex(null);
+    setIsLoaded(false);
+    isLoadedRef.current = false;
+  }, [docId]);
+
+  // Declared BEFORE the canvas-creation effect so its cleanup runs BEFORE the canvas is
+  // disposed: a pending autosave is flushed while the canvas can still be serialized.
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        window.clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+
+      if (deckDirtyRef.current || canvasDirtyRef.current) {
+        void performSaveRef.current?.().catch((error) => console.error('Save flush failed', error));
+      }
+    };
+  }, []);
+
+  const commitSlides = useCallback((updater: (previous: Slide[]) => Slide[]) => {
+    const next = updater(slidesRef.current);
+    slidesRef.current = next;
+    setSlides(next);
+    return next;
+  }, []);
+
+  const captureActiveSlide = useCallback((withThumbnail: boolean): SlideCapture | null => {
+    const canvas = fabricCanvasRef.current;
+    const renderedId = renderedSlideIdRef.current;
+    if (!canvas || !renderedId) {
+      return null;
+    }
+
+    try {
+      const zoom = canvas.getZoom() || 1;
+      return {
+        id: renderedId,
+        data: serializeCanvas(canvas),
+        // The backing store is scaled to fit the viewport, so the multiplier is divided by
+        // the zoom to keep every thumbnail identical regardless of window size.
+        thumbnail: withThumbnail
+          ? makeThumbnail(canvas, zoom)
+          : undefined,
+      };
+    } catch (error) {
+      console.warn('Slide could not be captured', error);
+      return null;
+    }
+  }, []);
+
+  /** Copies the live canvas into the deck. No-op when the canvas has no pending edits. */
+  const flushActiveSlide = useCallback(
+    (withThumbnail = true) => {
+      if (!canvasDirtyRef.current) {
+        return;
+      }
+
+      const captured = captureActiveSlide(withThumbnail);
+      if (!captured) {
+        return;
+      }
+
+      canvasDirtyRef.current = false;
+      commitSlides((previous) =>
+        previous.map((slide) =>
+          slide.id === captured.id
+            ? { ...slide, data: captured.data, thumbnail: captured.thumbnail ?? slide.thumbnail }
+            : slide,
+        ),
+      );
+    },
+    [captureActiveSlide, commitSlides],
+  );
+
+  const performSave = useCallback(async ({ force = false, allowResurrect = false }: { force?: boolean; allowResurrect?: boolean } = {}) => {
+    if (!isLoadedRef.current) {
+      return;
+    }
+
+    if (saveTimeoutRef.current) {
+      window.clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+
+    if (saveInFlightRef.current) {
+      saveAgainRef.current = true;
+      return;
+    }
+
+    if (!deckDirtyRef.current && !canvasDirtyRef.current && !force) {
+      return;
+    }
+
+    if (force && conflictRevisionRef.current !== null) {
+      // Explicit user intent to replace the other tab's version: adopt the winner's
+      // revision so this write is no longer stale. Without this the local revision stays
+      // behind for ever and EVERY later save conflicts, leaving no way to save at all.
+      documentRevisionRef.current = conflictRevisionRef.current;
+      conflictRevisionRef.current = null;
+    }
+
+    flushActiveSlide(false);
+    saveInFlightRef.current = true;
+    setSaveStatus('Saving...');
+
+    try {
+      // db.ts treats a falsy title as an unloadable record, so an empty name box must
+      // never reach storage.
+      const title = fileNameRef.current.trim() || defaultFileName;
+      const savingDocId = docIdRef.current;
+      const result = await saveDocument(
+        savingDocId,
+        title,
+        'powerpoint',
+        { slides: slidesRef.current },
+        { knownRevision: documentRevisionRef.current, allowResurrect },
+      );
+
+      if (docIdRef.current !== savingDocId) {
+        // The editor moved to another document while this write was in flight; its result
+        // says nothing about the deck now on screen.
+        return;
+      }
+
+      if (result.status === 'conflict') {
+        // Nothing was written: the local revision must NOT advance here, or the next
+        // autosave would silently overwrite the winner while claiming to be in sync.
+        conflictRevisionRef.current = result.record.revision;
+        setSaveStatus('Conflict detected');
+        setBanner({
+          tone: 'warning',
+          title: 'A newer presentation was saved in another tab.',
+          detail: `Your edits are still here and still unsaved. That tab is at revision ${result.record.revision}. Reload to review their version, or overwrite it with yours — autosave will keep reporting this conflict until you choose.`,
+          action: {
+            label: 'Overwrite with my version',
+            onClick: () => {
+              void performSaveRef.current?.({ force: true }).catch((error) => console.error('Force save failed', error));
+            },
+          },
+        });
+        return;
+      }
+
+      // Defence in depth: db.ts now THROWS on a total persistence failure (the catch below
+      // handles that), but 'failed' remains in the union and must never read as success.
+      if (result.status !== 'saved') {
+        setSaveStatus('Save failed');
+        setBanner({
+          tone: 'error',
+          title: 'Nothing was saved.',
+          detail: 'Browser storage rejected the write. Export the deck to PPTX before closing this tab.',
+        });
+        return;
+      }
+
+      // A deck over the backup cap cannot be snapshotted synchronously at unload, so a
+      // crash or a close inside the autosave window WILL lose the last edit. Measured once
+      // per save (not per edit). The result drives a PERSISTENT status-bar indicator: a
+      // one-shot banner was worse than useless here, because the next routine toast — often
+      // the very image insert that pushed the deck over the cap — wiped it.
+      const payloadBytes = JSON.stringify({ slides: slidesRef.current }).length;
+      const isOversize = payloadBytes > BACKUP_SIZE_LIMIT_BYTES;
+      oversizeForBackupRef.current = isOversize ? payloadBytes : null;
+      setOversizeForBackup(isOversize ? payloadBytes : null);
+
+      if (isOversize && !crashSafetyWarnedRef.current) {
+        crashSafetyWarnedRef.current = true;
+        setBanner({
+          tone: 'warning',
+          title: 'This deck is too large for crash recovery.',
+          detail: `At ${Math.round(payloadBytes / 1024)}KB it exceeds the ${Math.round(
+            BACKUP_SIZE_LIMIT_BYTES / 1024,
+          )}KB emergency-snapshot limit, so an edit made in the last second before a crash or a tab close can be lost. Autosave still runs every ${SAVE_DEBOUNCE_MS}ms — press Ctrl+S before closing, or export to PPTX.`,
+        });
+      } else if (!isOversize) {
+        // Back under the cap: re-arm so crossing it again is announced again.
+        crashSafetyWarnedRef.current = false;
+      }
+
+      documentRevisionRef.current = result.record.revision;
+      conflictRevisionRef.current = null;
+      setDocumentRevision(result.record.revision);
+      setLastSavedAt(result.record.updatedAt);
+      deckDirtyRef.current = false;
+      setSaveStatus('Saved');
+    } catch (error) {
+      // saveDocument throws for three very different reasons and they must not be reported
+      // as one. The deck stays dirty in every branch (deckDirtyRef is only cleared on a
+      // confirmed write), so whichever route the user takes, nothing is lost meanwhile.
+      console.error('Failed to save presentation', error);
+      const code = error instanceof DocumentPersistenceError ? error.code : 'storage-unavailable';
+
+      if (code === 'document-deleted') {
+        setSaveStatus('Deck was deleted');
+        setBanner({
+          tone: 'error',
+          title: 'This presentation was deleted in another tab.',
+          detail: 'Nothing was saved, and your edits are still open here. Restore it to save them back into this deck, or export to PPTX to keep them elsewhere.',
+          action: {
+            label: 'Restore this presentation',
+            onClick: () => {
+              void performSaveRef.current?.({ force: true, allowResurrect: true }).catch((restoreError) =>
+                console.error('Restore failed', restoreError),
+              );
+            },
+          },
+        });
+      } else if (code === 'conflict-unverifiable') {
+        // A conflict, NOT a write failure: another client moved the document on and the
+        // winning record could not be read back to show it.
+        setSaveStatus('Conflict detected');
+        setBanner({
+          tone: 'warning',
+          title: 'A newer presentation was saved elsewhere.',
+          detail: 'It could not be read back to show you, so nothing was written. Reload to review their version, or overwrite it with yours.',
+          action: {
+            label: 'Overwrite with my version',
+            onClick: () => {
+              void performSaveRef.current?.({ force: true }).catch((forceError) => console.error('Force save failed', forceError));
+            },
+          },
+        });
+      } else {
+        setSaveStatus('Save failed');
+        setBanner({
+          tone: 'error',
+          title: 'Nothing was saved.',
+          detail: 'Browser storage is unavailable. Your edits are still open here — export the deck to PPTX before closing this tab.',
+        });
+      }
+    } finally {
+      saveInFlightRef.current = false;
+      if (saveAgainRef.current) {
+        saveAgainRef.current = false;
+        window.setTimeout(() => {
+          void performSaveRef.current?.().catch((error) => console.error('Save flush failed', error));
+        }, 0);
+      }
+    }
+  }, [flushActiveSlide]);
+
+  useEffect(() => {
+    performSaveRef.current = performSave;
+  }, [performSave]);
+
+  const scheduleSave = useCallback(() => {
+    deckDirtyRef.current = true;
+    if (!isLoadedRef.current) {
+      return;
+    }
+
+    setSaveStatus('Saving...');
+    if (saveTimeoutRef.current) {
+      window.clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = window.setTimeout(() => {
+      saveTimeoutRef.current = null;
+      void performSaveRef.current?.().catch((error) => console.error('Save flush failed', error));
+    }, SAVE_DEBOUNCE_MS);
+  }, []);
+
+  const scheduleThumbnail = useCallback(() => {
+    if (thumbnailTimeoutRef.current) {
+      window.clearTimeout(thumbnailTimeoutRef.current);
+    }
+
+    thumbnailTimeoutRef.current = window.setTimeout(() => {
+      thumbnailTimeoutRef.current = null;
+      flushActiveSlide(true);
+    }, THUMBNAIL_DEBOUNCE_MS);
+  }, [flushActiveSlide]);
+
+  const syncHistoryFlags = useCallback(() => {
+    const { stack, index } = historyRef.current;
+    setCanUndo(index > 0);
+    setCanRedo(index >= 0 && index < stack.length - 1);
+  }, []);
+
+  const seedHistory = useCallback(
+    (snapshot: SlideCanvasJSON) => {
+      if (historyTimeoutRef.current) {
+        window.clearTimeout(historyTimeoutRef.current);
+        historyTimeoutRef.current = null;
+      }
+
+      historyRef.current = { stack: [snapshot], index: 0 };
+      syncHistoryFlags();
+    },
+    [syncHistoryFlags],
+  );
+
+  const commitHistorySnapshot = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const snapshot = serializeCanvas(canvas);
+    const { stack, index } = historyRef.current;
+    const truncated = stack.slice(0, index + 1);
+    const nextStack = [...truncated, snapshot].slice(-HISTORY_LIMIT);
+    historyRef.current = { stack: nextStack, index: nextStack.length - 1 };
+    syncHistoryFlags();
+  }, [syncHistoryFlags]);
+
+  /**
+   * Commits an edit that is still inside the debounce window. Undo MUST call this first:
+   * discarding the pending snapshot instead would make one undo jump back two edits, and
+   * the skipped edit would have no redo path at all.
+   */
+  const flushPendingHistory = useCallback(() => {
+    if (!historyTimeoutRef.current) {
+      return;
+    }
+
+    window.clearTimeout(historyTimeoutRef.current);
+    historyTimeoutRef.current = null;
+    commitHistorySnapshot();
+  }, [commitHistorySnapshot]);
+
+  const scheduleHistory = useCallback(() => {
+    if (historyTimeoutRef.current) {
+      window.clearTimeout(historyTimeoutRef.current);
+    }
+
+    historyTimeoutRef.current = window.setTimeout(() => {
+      historyTimeoutRef.current = null;
+      commitHistorySnapshot();
+    }, HISTORY_DEBOUNCE_MS);
+  }, [commitHistorySnapshot]);
+
+  /** Fits the 960x540 slide inside the shell so no part of it is ever off-screen. */
+  const fitCanvasToShell = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    const shell = stageRef.current;
+    const wrap = stageWrapRef.current;
+    if (!canvas || !shell || !wrap) {
+      return;
+    }
+
+    const shellStyles = window.getComputedStyle(shell);
+    const wrapStyles = window.getComputedStyle(wrap);
+    const shellPadX = parseFloat(shellStyles.paddingLeft) + parseFloat(shellStyles.paddingRight);
+    const shellPadY = parseFloat(shellStyles.paddingTop) + parseFloat(shellStyles.paddingBottom);
+    const wrapPadY = parseFloat(wrapStyles.paddingTop) + parseFloat(wrapStyles.paddingBottom);
+
+    const availableWidth = shell.clientWidth - shellPadX;
+    if (availableWidth <= 0) {
+      return;
+    }
+
+    // The stage is a bounded flex child (`flex:1; min-height:0; overflow:auto`), so its
+    // height is driven by the viewport and not by the canvas: no resize feedback loop.
+    const measuredHeight = wrap.clientHeight - wrapPadY - shellPadY;
+    const viewportHeight = window.innerHeight - wrap.getBoundingClientRect().top - 56 - wrapPadY - shellPadY;
+    const availableHeight = Math.max(measuredHeight, viewportHeight, 120);
+
+    const rawScale = Math.min(1, availableWidth / SLIDE_WIDTH, availableHeight / SLIDE_HEIGHT);
+    const width = Math.max(SLIDE_WIDTH * MIN_CANVAS_SCALE, Math.floor(SLIDE_WIDTH * rawScale));
+    const scale = width / SLIDE_WIDTH;
+
+    if (Math.abs(scale - canvasScaleRef.current) < 0.002) {
+      return;
+    }
+
+    canvasScaleRef.current = scale;
+    // Fabric zoom (not a CSS transform) keeps the backing store, the CSS box and pointer
+    // hit-testing in one coordinate system, so clicks still land on the right object.
+    canvas.setDimensions({ width, height: Math.round(SLIDE_HEIGHT * scale) });
+    canvas.setZoom(scale);
+    canvas.requestRenderAll();
+  }, []);
 
   useEffect(() => {
     if (!canvasRef.current) {
@@ -256,17 +1105,58 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       preserveObjectStacking: true,
     });
 
+    fabricCanvasRef.current = canvas;
+    canvasScaleRef.current = 1;
+    renderedSlideIdRef.current = null;
+    pendingSlideIdRef.current = null;
+    canvasDirtyRef.current = false;
     setFabricCanvas(canvas);
 
-    canvas.on('selection:created', () => setHasSelection(true));
-    canvas.on('selection:updated', () => setHasSelection(true));
+    const handleSelection = () => setHasSelection(canvas.getActiveObjects().length > 0);
+    const focusStage = () => {
+      // Keeps Delete/Backspace scoped to the canvas without stealing focus from an IText
+      // that is being edited (fabric owns a hidden textarea in that case).
+      if (isEditingText(canvas.getActiveObject())) {
+        return;
+      }
+
+      stageRef.current?.focus({ preventScroll: true });
+    };
+
+    canvas.on('selection:created', handleSelection);
+    canvas.on('selection:updated', handleSelection);
     canvas.on('selection:cleared', () => setHasSelection(false));
+    canvas.on('mouse:down', focusStage);
+
+    fitCanvasToShell();
 
     return () => {
-      canvas.dispose();
+      fabricCanvasRef.current = null;
+      renderedSlideIdRef.current = null;
+      pendingSlideIdRef.current = null;
+      void canvas.dispose();
       setFabricCanvas(null);
     };
-  }, []);
+  }, [fitCanvasToShell]);
+
+  useEffect(() => {
+    const wrap = stageWrapRef.current;
+    if (!wrap || typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', fitCanvasToShell);
+      return () => window.removeEventListener('resize', fitCanvasToShell);
+    }
+
+    const observer = new ResizeObserver(() => fitCanvasToShell());
+    observer.observe(wrap);
+    window.addEventListener('resize', fitCanvasToShell);
+    window.addEventListener('orientationchange', fitCanvasToShell);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', fitCanvasToShell);
+      window.removeEventListener('orientationchange', fitCanvasToShell);
+    };
+  }, [fitCanvasToShell, fabricCanvas]);
 
   useEffect(() => {
     if (!fabricCanvas || isLoaded) {
@@ -275,23 +1165,42 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
     loadDocument<{ slides?: Slide[] }>(docId)
       .then((doc) => {
+        let loadedSlides: Slide[] | null = null;
+
         if (doc && doc.type === 'powerpoint') {
           setFileName(doc.title);
+          fileNameRef.current = doc.title;
           if (doc.data?.slides?.length) {
-            setSlides(doc.data.slides);
-            setCurrentSlideId(doc.data.slides[0].id);
+            loadedSlides = doc.data.slides as Slide[];
           }
           setLastSavedAt(doc.updatedAt);
           setDocumentRevision(doc.revision);
+          documentRevisionRef.current = doc.revision;
           if (doc.source === 'backup') {
             setBanner({
               tone: 'warning',
-              title: 'Recovered the latest local backup.',
-              detail: 'This deck was restored from the browser backup cache after a storage mismatch.',
+              title: 'Recovered edits that had not reached storage.',
+              detail: 'This deck came back from the local backup cache — the last edits from the previous session are here. Saving now.',
             });
+            // The backup is not in IndexedDB yet; write it through.
+            deckDirtyRef.current = true;
           }
         }
+
+        if (loadedSlides?.length) {
+          const { slides: migratedSlides, changed } = migrateSlides(loadedSlides);
+          if (changed) {
+            deckDirtyRef.current = true;
+          }
+          commitSlides(() => migratedSlides);
+          setCurrentSlideId(migratedSlides[0].id);
+        }
+
         setIsLoaded(true);
+        isLoadedRef.current = true;
+        if (deckDirtyRef.current) {
+          scheduleSave();
+        }
       })
       .catch((error) => {
         console.error('Failed to load presentation', error);
@@ -301,99 +1210,202 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
           detail: 'A new slide deck was opened instead.',
         });
         setIsLoaded(true);
+        isLoadedRef.current = true;
       });
-  }, [docId, fabricCanvas, isLoaded]);
+  }, [commitSlides, docId, fabricCanvas, isLoaded, scheduleSave]);
 
-  const seedHistory = (snapshot: any) => {
-    setHistory([snapshot]);
-    setHistoryIndex(0);
-  };
-
-  const captureCurrentSlideSnapshot = () => {
-    if (!fabricCanvas) {
-      return null;
-    }
-
-    return {
-      data: fabricCanvas.toJSON(),
-      thumbnail: fabricCanvas.toDataURL({ format: 'png', multiplier: 0.22 }),
-    };
-  };
-
-  const persistCurrentSlide = () => {
-    const snapshot = captureCurrentSlideSnapshot();
-    if (!snapshot || isHistoryUpdate.current) {
-      return;
-    }
-
-    setSlides((previousSlides) =>
-      previousSlides.map((slide) =>
-        slide.id === currentSlideId ? { ...slide, data: snapshot.data, thumbnail: snapshot.thumbnail } : slide,
-      ),
-    );
-  };
-
-  const recordHistory = () => {
-    const snapshot = fabricCanvas?.toJSON();
-    if (!snapshot || isHistoryUpdate.current) {
-      return;
-    }
-
-    setHistory((previousHistory) => {
-      const truncated = previousHistory.slice(0, historyIndex + 1);
-      const nextHistory = [...truncated, snapshot].slice(-30);
-      setHistoryIndex(nextHistory.length - 1);
-      return nextHistory;
-    });
-  };
-
+  /**
+   * Rebuilds previews for slides that arrived without one — the unload snapshot drops
+   * thumbnails to fit under the backup size cap, and they are pure derived data. Runs off
+   * the main canvas, one slide at a time, yielding between slides.
+   */
   useEffect(() => {
-    if (!fabricCanvas || !isLoaded) {
+    if (!isLoaded) {
       return;
     }
 
-    const currentSlide = slides.find((slide) => slide.id === currentSlideId);
-    if (!currentSlide) {
-      return;
-    }
+    let cancelled = false;
 
-    isHistoryUpdate.current = true;
+    const rebuild = async () => {
+      const missing = slidesRef.current.filter((slide) => slide.data && !slide.thumbnail);
 
-    const loadSlide = async () => {
-      if (currentSlide.data) {
-        await fabricCanvas.loadFromJSON(currentSlide.data);
-        fabricCanvas.backgroundColor = '#ffffff';
-        fabricCanvas.renderAll();
-      } else {
-        applySlideTemplate(fabricCanvas, slides.length === 1 ? 'cover' : 'content');
-        const snapshot = captureCurrentSlideSnapshot();
-        setSlides((previousSlides) =>
-          previousSlides.map((slide) =>
-            slide.id === currentSlideId ? { ...slide, data: snapshot?.data, thumbnail: snapshot?.thumbnail } : slide,
-          ),
-        );
+      for (const slide of missing) {
+        if (cancelled || !slide.data) {
+          return;
+        }
+
+        const element = document.createElement('canvas');
+        element.width = SLIDE_WIDTH;
+        element.height = SLIDE_HEIGHT;
+        const temp = new fabric.StaticCanvas(element, {
+          width: SLIDE_WIDTH,
+          height: SLIDE_HEIGHT,
+          backgroundColor: '#ffffff',
+        });
+
+        try {
+          await temp.loadFromJSON(slide.data);
+          temp.backgroundColor = '#ffffff';
+          temp.renderAll();
+          const thumbnail = makeThumbnail(temp);
+          if (!cancelled) {
+            commitSlides((previous) =>
+              previous.map((entry) => (entry.id === slide.id ? { ...entry, thumbnail } : entry)),
+            );
+          }
+        } catch (error) {
+          console.warn('Thumbnail could not be rebuilt', error);
+        } finally {
+          void temp.dispose();
+        }
+
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
       }
-
-      setHasSelection(false);
-      seedHistory(fabricCanvas.toJSON());
-      isHistoryUpdate.current = false;
     };
 
-    void loadSlide();
-  }, [currentSlideId, fabricCanvas, isLoaded, slides]);
+    void rebuild();
 
-  useEffect(() => {
-    if (!fabricCanvas || !isLoaded) {
+    return () => {
+      cancelled = true;
+    };
+  }, [commitSlides, isLoaded]);
+
+  /**
+   * Renders whatever slide is current into the canvas.
+   *
+   * Slide loads are SERIALIZED through a promise chain and stamped with a monotonic token.
+   * This matters because fabric's `loadFromJSON` clears the canvas and adds the new objects
+   * BEFORE the await resumes: a "was I cancelled?" check after the await can skip the
+   * bookkeeping but cannot undo the mutation. Two overlapping loads would therefore leave
+   * slide A's objects on screen while the bookkeeping claimed slide B, and the next flush
+   * would write A's content onto B — silent, permanent, un-undoable corruption. The window
+   * is as wide as the slowest enliven (images, throttled CPU), not a few milliseconds.
+   *
+   * With the queue, a superseded load is skipped BEFORE it touches the canvas. A load that
+   * is superseded WHILE in flight disowns the canvas (`renderedSlideIdRef = null`) and
+   * drops any dirty flag, so the already-queued newer load is what defines the canvas.
+   *
+   * The early return compares against `pendingSlideIdRef` — the last QUEUED target — and
+   * never against `renderedSlideIdRef`, which names the last COMPLETED load. Navigating
+   * A -> B -> A while A is still loading would otherwise find `renderedSlideIdRef` still
+   * equal to A, return without queueing anything and without bumping the token, and leave
+   * the in-flight load of A unsupersededered: the canvas would end up showing A while the
+   * sidebar, the notes pane and `currentSlideId` all said B.
+   */
+  const renderCurrentSlide = useCallback((force = false) => {
+    if (!fabricCanvasRef.current || !isLoadedRef.current) {
       return;
     }
 
-    const handleCanvasMutation = () => {
-      if (isHistoryUpdate.current) {
+    const targetId = currentSlideIdRef.current;
+    if (!force && pendingSlideIdRef.current === targetId) {
+      return;
+    }
+
+    // Bumping the token invalidates every queued-but-not-yet-started load.
+    pendingSlideIdRef.current = targetId;
+    const token = (loadTokenRef.current += 1);
+
+    loadChainRef.current = loadChainRef.current.then(async () => {
+      const canvas = fabricCanvasRef.current;
+      if (!canvas || loadTokenRef.current !== token) {
         return;
       }
 
-      persistCurrentSlide();
-      recordHistory();
+      if (renderedSlideIdRef.current === targetId) {
+        return; // already on screen and nothing newer is queued: nothing to do
+      }
+
+      const slide = slidesRef.current.find((entry) => entry.id === targetId);
+      if (!slide) {
+        return;
+      }
+
+      suppressDepthRef.current += 1;
+      try {
+        const isNewSlide = !slide.data;
+        if (slide.data) {
+          await canvas.loadFromJSON(slide.data);
+        } else {
+          applySlideTemplate(canvas, slidesRef.current.length === 1 ? 'cover' : 'content');
+        }
+
+        canvas.backgroundColor = '#ffffff';
+        canvasScaleRef.current = 0;
+        fitCanvasToShell();
+        canvas.renderAll();
+
+        if (loadTokenRef.current !== token) {
+          // Superseded mid-load. The canvas holds objects the user is not looking at, so it
+          // must not be claimed for ANY slide and must never be flushed. A newer load is
+          // already queued (the token only moves in this function, which always queues).
+          renderedSlideIdRef.current = null;
+          canvasDirtyRef.current = false;
+          return;
+        }
+
+        renderedSlideIdRef.current = targetId;
+        setSlideLoadError(null);
+        setHasSelection(false);
+        seedHistory(serializeCanvas(canvas));
+
+        if (isNewSlide) {
+          canvasDirtyRef.current = true;
+          flushActiveSlide(true);
+          scheduleSave();
+        }
+      } catch (error) {
+        // The slide's stored content could not be rebuilt. Disowning the canvas keeps the
+        // damage contained (no edit can flush onto another slide), but the user must not be
+        // left looking at some other slide's content believing it is this one.
+        console.error('Slide failed to render', error);
+        renderedSlideIdRef.current = null;
+        pendingSlideIdRef.current = null;
+        canvasDirtyRef.current = false;
+        try {
+          canvas.clear();
+          canvas.backgroundColor = '#ffffff';
+          canvas.renderAll();
+        } catch (clearError) {
+          console.error('Canvas could not be cleared', clearError);
+        }
+        const failedIndex = slidesRef.current.findIndex((entry) => entry.id === targetId);
+        setSlideLoadError({ slideId: targetId, index: failedIndex });
+        setBanner({
+          tone: 'error',
+          title: `Slide ${failedIndex + 1} could not be opened.`,
+          detail:
+            'Its stored content could not be rebuilt, so the canvas is blank and edits here will not be saved. The rest of the deck is untouched — open another slide, or delete this one.',
+        });
+      } finally {
+        suppressDepthRef.current = Math.max(0, suppressDepthRef.current - 1);
+      }
+    });
+
+    void loadChainRef.current.catch((error) => console.error('Slide load chain failed', error));
+  }, [fitCanvasToShell, flushActiveSlide, scheduleSave, seedHistory]);
+
+  useEffect(() => {
+    currentSlideIdRef.current = currentSlideId;
+    renderCurrentSlide();
+  }, [currentSlideId, fabricCanvas, isLoaded, renderCurrentSlide]);
+
+  useEffect(() => {
+    if (!fabricCanvas || !isLoaded) {
+      return;
+    }
+
+    // Per edit this only marks a flag and resets three timers: no deck serialization and
+    // no thumbnail work on the keystroke path.
+    const handleCanvasMutation = () => {
+      if (suppressDepthRef.current > 0) {
+        return;
+      }
+
+      canvasDirtyRef.current = true;
+      scheduleHistory();
+      scheduleThumbnail();
+      scheduleSave();
     };
 
     fabricCanvas.on('object:modified', handleCanvasMutation);
@@ -407,62 +1419,117 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       fabricCanvas.off('object:removed', handleCanvasMutation);
       fabricCanvas.off('text:changed', handleCanvasMutation);
     };
-  }, [currentSlideId, fabricCanvas, historyIndex, isLoaded]);
+  }, [fabricCanvas, isLoaded, scheduleHistory, scheduleSave, scheduleThumbnail]);
 
-  useEffect(() => {
-    if (!isLoaded) {
-      return;
-    }
+  const oversizeForBackupRef = useRef<number | null>(null);
 
-    if (!hasInitializedSaveRef.current) {
-      hasInitializedSaveRef.current = true;
-      return;
-    }
-
-    setSaveStatus('Saving...');
-    if (saveTimeoutRef.current) {
-      window.clearTimeout(saveTimeoutRef.current);
-    }
-
-    saveTimeoutRef.current = window.setTimeout(async () => {
-      try {
-        const currentSnapshot = captureCurrentSlideSnapshot();
-        const slidesToSave = slides.map((slide) =>
-          slide.id === currentSlideId && currentSnapshot ? { ...slide, data: currentSnapshot.data, thumbnail: currentSnapshot.thumbnail } : slide,
-        );
-
-        const result = await saveDocument(docId, fileName, 'powerpoint', { slides: slidesToSave }, { knownRevision: documentRevisionRef.current });
-        setDocumentRevision(result.record.revision);
-
-        if (result.status === 'conflict') {
-          setSaveStatus('Conflict detected');
-          setBanner({
-            tone: 'warning',
-            title: 'A newer presentation was saved in another tab.',
-            detail: 'Your latest slide edits are still cached locally. Save again from this tab to replace the newer version, or reload to review it first.',
-          });
-          return;
-        }
-
-        setSaveStatus('Saved');
-        setLastSavedAt(result.record.updatedAt);
-      } catch (error) {
-        console.error('Failed to save presentation', error);
-        setSaveStatus('Save error');
-        setBanner({
-          tone: 'error',
-          title: 'Autosave failed.',
-          detail: 'The deck stayed open, but local persistence did not complete.',
-        });
+  /**
+   * Synchronous emergency snapshot. `saveDocument` awaits `getDB()` before it touches
+   * anything, so it cannot run in an unload handler — the page dies during that first
+   * await and nothing lands. This is the only path that completes there.
+   *
+   * `saveDocumentBackupNow` performs a real conflict check and REFUSES when another tab is
+   * ahead, so `false` no longer means only "too big". Inside `pagehide` a refusal is
+   * correct and unactionable (no UI is possible), so it is ignored. Anywhere the page is
+   * still alive, a refusal is reported — silently discarding this tab's edits is exactly
+   * the outcome the check exists to prevent.
+   */
+  const takeUnloadSnapshot = useCallback(
+    ({ reportRefusal }: { reportRefusal: boolean }) => {
+      if (!deckDirtyRef.current && !canvasDirtyRef.current) {
+        return true;
       }
-    }, 800);
+
+      flushActiveSlide(false);
+
+      // Thumbnails are the only derived part of the payload, so an over-cap deck sheds them
+      // BEFORE the call rather than retrying on a refusal: retrying a conflict refusal with
+      // a smaller payload would be meaningless, and the two cases are indistinguishable
+      // from the boolean.
+      const slides =
+        oversizeForBackupRef.current !== null
+          ? slidesRef.current.map((slide) => ({ ...slide, thumbnail: undefined }))
+          : slidesRef.current;
+
+      // knownRevision MUST be a real revision here. Passing null would disable the conflict
+      // check and let this tab overwrite one that legitimately saved. (Force-saving through
+      // `saveDocument` has different rules; that pattern must not migrate to this call.)
+      const accepted = saveDocumentBackupNow(
+        docIdRef.current,
+        fileNameRef.current.trim() || defaultFileName,
+        'powerpoint',
+        { slides },
+        { knownRevision: documentRevisionRef.current },
+      );
+
+      if (accepted || !reportRefusal) {
+        return accepted;
+      }
+
+      if (oversizeForBackupRef.current !== null) {
+        // Already disclosed by the persistent status-bar indicator; do not misreport a size
+        // refusal as a conflict.
+        return accepted;
+      }
+
+      setSaveStatus('Conflict detected');
+      setBanner({
+        tone: 'warning',
+        title: 'Another tab is ahead of this one.',
+        detail:
+          'This deck was saved elsewhere after this tab last loaded it, so nothing from this tab was written — including the emergency copy. Closing this tab now would discard these edits. Overwrite with your version, or export to PPTX first.',
+        action: {
+          label: 'Overwrite with my version',
+          onClick: () => {
+            void performSaveRef.current?.({ force: true }).catch((error) => console.error('Force save failed', error));
+          },
+        },
+      });
+
+      return accepted;
+    },
+    [flushActiveSlide],
+  );
+
+  // Pending autosave must survive a tab close, a bfcache freeze and a background switch.
+  useEffect(() => {
+    const onPageHide = () => {
+      takeUnloadSnapshot({ reportRefusal: false });
+    };
+
+    // Backgrounding: the page stays alive, so the real save is the durable path. The
+    // snapshot is only taken if that save did NOT land, which also keeps a stale backup
+    // from shadowing a save that succeeded.
+    const handleVisibility = () => {
+      if (document.visibilityState !== 'hidden') {
+        return;
+      }
+
+      if (!deckDirtyRef.current && !canvasDirtyRef.current) {
+        return;
+      }
+
+      void performSaveRef.current?.()
+        .then(() => {
+          if (deckDirtyRef.current || canvasDirtyRef.current) {
+            takeUnloadSnapshot({ reportRefusal: true });
+          }
+        })
+        .catch((error) => console.error('Save flush failed', error));
+    };
+
+    // `pagehide` is the reliable one; `beforeunload` is registered as well because it is
+    // harmless (the snapshot is idempotent) and it covers teardown paths that fire only it.
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('beforeunload', onPageHide);
+    document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
-      if (saveTimeoutRef.current) {
-        window.clearTimeout(saveTimeoutRef.current);
-      }
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('beforeunload', onPageHide);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [currentSlideId, docId, fileName, isLoaded, slides]);
+  }, [takeUnloadSnapshot]);
 
   useEffect(() => {
     if (!isLoaded) {
@@ -474,10 +1541,23 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         return;
       }
 
+      // While this tab is dirty, being behind is not just informational: its emergency
+      // snapshot will now be refused, so closing it would discard these edits silently.
+      const hasUnsavedWork = deckDirtyRef.current || canvasDirtyRef.current;
       setBanner({
         tone: 'warning',
-        title: 'A newer presentation is available from another tab.',
-        detail: 'Reload this deck if you want the latest saved version from that session.',
+        title: 'A newer presentation was saved in another tab.',
+        detail: hasUnsavedWork
+          ? 'This tab is now behind, so its edits can no longer be saved or emergency-snapshotted without overwriting that version. Overwrite with yours, export to PPTX, or reload to take theirs.'
+          : 'Reload this deck if you want the latest saved version from that session.',
+        action: hasUnsavedWork
+          ? {
+              label: 'Overwrite with my version',
+              onClick: () => {
+                void performSaveRef.current?.({ force: true }).catch((error) => console.error('Force save failed', error));
+              },
+            }
+          : undefined,
       });
     });
   }, [docId, documentRevision, isLoaded]);
@@ -485,6 +1565,10 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(Boolean(document.fullscreenElement));
+      if (enteredFullscreenRef.current && !document.fullscreenElement) {
+        enteredFullscreenRef.current = false;
+        setPresentIndex(null);
+      }
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
@@ -503,28 +1587,6 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     return () => window.clearInterval(intervalId);
   }, [isPresenterView]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest('input, textarea, [contenteditable="true"]')) {
-        return;
-      }
-
-      if (event.key !== 'Delete' && event.key !== 'Backspace') {
-        return;
-      }
-
-      if ((fabricCanvas?.getActiveObject() as any)?.isEditing) {
-        return;
-      }
-
-      deleteSelected();
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [fabricCanvas]);
-
   const currentSlideIndex = slides.findIndex((slide) => slide.id === currentSlideId);
   const currentSlide = slides[currentSlideIndex];
 
@@ -535,75 +1597,75 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
   const slideCountLabel = `${currentSlideIndex + 1} / ${slides.length}`;
 
-  const switchSlide = (nextSlideId: string) => {
-    if (nextSlideId === currentSlideId) {
-      return;
-    }
+  const handleFileNameChange = useCallback(
+    (nextName: string) => {
+      setFileName(nextName);
+      fileNameRef.current = nextName;
+      scheduleSave();
+    },
+    [scheduleSave],
+  );
 
-    const snapshot = captureCurrentSlideSnapshot();
-    if (snapshot) {
-      setSlides((previousSlides) =>
-        previousSlides.map((slide) =>
-          slide.id === currentSlideId ? { ...slide, data: snapshot.data, thumbnail: snapshot.thumbnail } : slide,
-        ),
-      );
-    }
+  const switchSlide = useCallback(
+    (nextSlideId: string) => {
+      if (nextSlideId === currentSlideId) {
+        // Clicking the already-selected slide is also the user's way out if the canvas is
+        // showing something else (a load that failed, or one that lost its claim): force a
+        // re-render instead of doing nothing.
+        if (renderedSlideIdRef.current !== nextSlideId) {
+          renderCurrentSlide(true);
+        }
 
-    setCurrentSlideId(nextSlideId);
-    setMobileWorkspaceView('canvas');
-  };
+        return;
+      }
+
+      flushActiveSlide(true);
+      setCurrentSlideId(nextSlideId);
+      setMobileWorkspaceView('canvas');
+    },
+    [currentSlideId, flushActiveSlide, renderCurrentSlide],
+  );
 
   const addSlide = (variant: 'cover' | 'content' = 'content') => {
-    const newId = `slide-${Date.now()}`;
+    flushActiveSlide(true);
+    const newId = createId('slide');
     const template = createSlideSnapshot(variant);
-    const snapshot = captureCurrentSlideSnapshot();
 
-    setSlides((previousSlides) => {
-      const withSavedCurrent = snapshot
-        ? previousSlides.map((slide) =>
-            slide.id === currentSlideId ? { ...slide, data: snapshot.data, thumbnail: snapshot.thumbnail } : slide,
-          )
-        : previousSlides;
-
-      const insertIndex = Math.max(currentSlideIndex, 0) + 1;
-      const nextSlides = [...withSavedCurrent];
+    commitSlides((previous) => {
+      const insertIndex = Math.max(previous.findIndex((slide) => slide.id === currentSlideId), 0) + 1;
+      const nextSlides = [...previous];
       nextSlides.splice(insertIndex, 0, { id: newId, data: template.data, notes: '', thumbnail: template.thumbnail });
       return nextSlides;
     });
 
     setCurrentSlideId(newId);
     setMobileWorkspaceView('canvas');
+    scheduleSave();
   };
 
   const duplicateSlide = () => {
-    const sourceSlide = slides[currentSlideIndex];
-    const snapshot = captureCurrentSlideSnapshot();
-    const duplicatedData = snapshot?.data ?? sourceSlide?.data;
-
-    if (!duplicatedData) {
+    flushActiveSlide(true);
+    const sourceSlide = slidesRef.current.find((slide) => slide.id === currentSlideId);
+    if (!sourceSlide?.data) {
       return;
     }
 
-    const newId = `slide-${Date.now()}`;
-    setSlides((previousSlides) => {
-      const withSavedCurrent = snapshot
-        ? previousSlides.map((slide) =>
-            slide.id === currentSlideId ? { ...slide, data: snapshot.data, thumbnail: snapshot.thumbnail } : slide,
-          )
-        : previousSlides;
-
-      const nextSlides = [...withSavedCurrent];
-      nextSlides.splice(currentSlideIndex + 1, 0, {
+    const newId = createId('slide');
+    commitSlides((previous) => {
+      const sourceIndex = previous.findIndex((slide) => slide.id === currentSlideId);
+      const nextSlides = [...previous];
+      nextSlides.splice(sourceIndex + 1, 0, {
         id: newId,
-        data: JSON.parse(JSON.stringify(duplicatedData)),
-        notes: sourceSlide?.notes ?? '',
-        thumbnail: snapshot?.thumbnail ?? sourceSlide?.thumbnail,
+        data: JSON.parse(JSON.stringify(sourceSlide.data)) as SlideCanvasJSON,
+        notes: sourceSlide.notes ?? '',
+        thumbnail: sourceSlide.thumbnail,
       });
       return nextSlides;
     });
 
     setCurrentSlideId(newId);
     setMobileWorkspaceView('canvas');
+    scheduleSave();
   };
 
   const deleteSlide = () => {
@@ -611,7 +1673,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       return;
     }
 
-    if (slides.length <= 1) {
+    if (slidesRef.current.length <= 1) {
       setBanner({
         tone: 'warning',
         title: 'A presentation needs at least one slide.',
@@ -620,15 +1682,145 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       return;
     }
 
-    const nextSlides = slides.filter((slide) => slide.id !== pendingDeleteSlideId);
-    setSlides(nextSlides);
+    const removedIndex = slidesRef.current.findIndex((slide) => slide.id === pendingDeleteSlideId);
+    if (pendingDeleteSlideId === renderedSlideIdRef.current) {
+      canvasDirtyRef.current = false;
+    } else {
+      flushActiveSlide(true);
+    }
+
+    const nextSlides = commitSlides((previous) => previous.filter((slide) => slide.id !== pendingDeleteSlideId));
 
     if (currentSlideId === pendingDeleteSlideId) {
-      setCurrentSlideId(nextSlides[Math.max(0, currentSlideIndex - 1)]?.id ?? nextSlides[0].id);
+      setCurrentSlideId(nextSlides[Math.max(0, removedIndex - 1)]?.id ?? nextSlides[0].id);
     }
 
     setPendingDeleteSlideId(null);
+    scheduleSave();
   };
+
+  const moveSlide = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      const total = slidesRef.current.length;
+      if (fromIndex < 0 || fromIndex >= total || toIndex < 0 || toIndex >= total || fromIndex === toIndex) {
+        return;
+      }
+
+      flushActiveSlide(true);
+      commitSlides((previous) => {
+        const nextSlides = [...previous];
+        const [moved] = nextSlides.splice(fromIndex, 1);
+        nextSlides.splice(toIndex, 0, moved);
+        return nextSlides;
+      });
+      scheduleSave();
+    },
+    [commitSlides, flushActiveSlide, scheduleSave],
+  );
+
+  const findSlideIndexAtPoint = useCallback((clientX: number, clientY: number) => {
+    let bestIndex: number | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    slideCardRefs.current.forEach((element, index) => {
+      if (!element || !element.isConnected) {
+        return;
+      }
+
+      const rect = element.getBoundingClientRect();
+      if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+        bestIndex = index;
+        bestDistance = -1;
+        return;
+      }
+
+      if (bestDistance === -1) {
+        return;
+      }
+
+      const dx = clientX - (rect.left + rect.width / 2);
+      const dy = clientY - (rect.top + rect.height / 2);
+      const distance = Math.hypot(dx, dy);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    });
+
+    return bestIndex;
+  }, []);
+
+  const registerSlideCard = useCallback((index: number, element: HTMLElement | null) => {
+    slideCardRefs.current[index] = element;
+  }, []);
+
+  const handleReorderPointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>, index: number) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Synthetic pointers (tests, some touch stacks) cannot be captured; the drag still
+      // works because the events keep bubbling from the handle.
+    }
+
+    dragStateRef.current = { index, pointerId: event.pointerId };
+    dropSlideIndexRef.current = index;
+    setDragSlideIndex(index);
+    setDropSlideIndex(index);
+  }, []);
+
+  const handleReorderPointerMove = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    const state = dragStateRef.current;
+    if (!state || state.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    const target = findSlideIndexAtPoint(event.clientX, event.clientY);
+    if (target !== null && target !== dropSlideIndexRef.current) {
+      dropSlideIndexRef.current = target;
+      setDropSlideIndex(target);
+    }
+  }, [findSlideIndexAtPoint]);
+
+  const handleReorderPointerUp = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    const state = dragStateRef.current;
+    if (!state) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    dragStateRef.current = null;
+
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // See handleReorderPointerDown.
+    }
+
+    const target = dropSlideIndexRef.current;
+    dropSlideIndexRef.current = null;
+    setDragSlideIndex(null);
+    setDropSlideIndex(null);
+
+    if (target !== null) {
+      moveSlide(state.index, target);
+    }
+  }, [moveSlide]);
+
+  const handleReorderPointerCancel = useCallback(() => {
+    dragStateRef.current = null;
+    dropSlideIndexRef.current = null;
+    setDragSlideIndex(null);
+    setDropSlideIndex(null);
+  }, []);
 
   const addText = () => {
     if (!fabricCanvas) {
@@ -643,6 +1835,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
     fabricCanvas.add(text);
     fabricCanvas.setActiveObject(text);
+    setHasSelection(true);
   };
 
   const addRect = () => {
@@ -651,6 +1844,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     }
 
     const shape = new fabric.Rect({
+      ...TOP_LEFT_ORIGIN,
       left: 120,
       top: 140,
       width: 180,
@@ -662,6 +1856,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
     fabricCanvas.add(shape);
     fabricCanvas.setActiveObject(shape);
+    setHasSelection(true);
   };
 
   const addCircle = () => {
@@ -670,6 +1865,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     }
 
     const shape = new fabric.Circle({
+      ...TOP_LEFT_ORIGIN,
       left: 160,
       top: 150,
       radius: 62,
@@ -678,9 +1874,48 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
     fabricCanvas.add(shape);
     fabricCanvas.setActiveObject(shape);
+    setHasSelection(true);
   };
 
-  const deleteSelected = () => {
+  const deleteSelected = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const activeObjects = canvas.getActiveObjects();
+    if (!activeObjects.length) {
+      return;
+    }
+
+    activeObjects.forEach((object) => canvas.remove(object));
+    canvas.discardActiveObject();
+    canvas.requestRenderAll();
+    setHasSelection(false);
+  }, []);
+
+  // Scoped to the canvas shell: a focused slide thumbnail must never lose an object to
+  // Backspace, and Backspace must never navigate the browser back.
+  const handleStageKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Delete' && event.key !== 'Backspace') {
+      return;
+    }
+
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('input, textarea, [contenteditable="true"]')) {
+      return;
+    }
+
+    if (isEditingText(fabricCanvasRef.current?.getActiveObject())) {
+      return;
+    }
+
+    event.preventDefault();
+    deleteSelected();
+  };
+
+  const applyColor = (color: string) => {
+    setCurrentColor(color);
     if (!fabricCanvas) {
       return;
     }
@@ -690,21 +1925,11 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       return;
     }
 
-    activeObjects.forEach((object) => fabricCanvas.remove(object));
-    fabricCanvas.discardActiveObject();
-    fabricCanvas.requestRenderAll();
-  };
-
-  const applyColor = (color: string) => {
-    setCurrentColor(color);
-    if (!fabricCanvas) {
-      return;
-    }
-
-    fabricCanvas.getActiveObjects().forEach((object) => {
+    activeObjects.forEach((object) => {
       object.set('fill', color);
     });
     fabricCanvas.requestRenderAll();
+    fabricCanvas.fire('object:modified', { target: activeObjects[0] });
   };
 
   const bringForward = () => {
@@ -712,6 +1937,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     if (fabricCanvas && activeObject) {
       fabricCanvas.bringObjectForward(activeObject);
       fabricCanvas.requestRenderAll();
+      fabricCanvas.fire('object:modified', { target: activeObject });
     }
   };
 
@@ -720,38 +1946,62 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     if (fabricCanvas && activeObject) {
       fabricCanvas.sendObjectBackwards(activeObject);
       fabricCanvas.requestRenderAll();
+      fabricCanvas.fire('object:modified', { target: activeObject });
     }
   };
 
-  const undo = async () => {
-    if (!fabricCanvas || historyIndex <= 0) {
+  const applyHistorySnapshot = useCallback(
+    async (nextIndex: number) => {
+      const canvas = fabricCanvasRef.current;
+      const snapshot = historyRef.current.stack[nextIndex];
+      if (!canvas || !snapshot) {
+        return;
+      }
+
+      if (historyTimeoutRef.current) {
+        window.clearTimeout(historyTimeoutRef.current);
+        historyTimeoutRef.current = null;
+      }
+
+      suppressDepthRef.current += 1;
+      try {
+        await canvas.loadFromJSON(snapshot);
+        canvas.backgroundColor = '#ffffff';
+        canvas.setZoom(canvasScaleRef.current);
+        canvas.renderAll();
+        historyRef.current = { ...historyRef.current, index: nextIndex };
+        setHasSelection(false);
+        syncHistoryFlags();
+      } finally {
+        suppressDepthRef.current = Math.max(0, suppressDepthRef.current - 1);
+      }
+
+      canvasDirtyRef.current = true;
+      flushActiveSlide(true);
+      scheduleSave();
+    },
+    [flushActiveSlide, scheduleSave, syncHistoryFlags],
+  );
+
+  const undo = useCallback(async () => {
+    // An edit still inside the 220ms debounce is committed first, so undo always steps
+    // back exactly one edit and the edit it stepped over stays reachable through redo.
+    flushPendingHistory();
+    if (historyRef.current.index <= 0) {
       return;
     }
 
-    isHistoryUpdate.current = true;
-    const nextIndex = historyIndex - 1;
-    setHistoryIndex(nextIndex);
-    await fabricCanvas.loadFromJSON(history[nextIndex]);
-    fabricCanvas.backgroundColor = '#ffffff';
-    fabricCanvas.renderAll();
-    isHistoryUpdate.current = false;
-    persistCurrentSlide();
-  };
+    await applyHistorySnapshot(historyRef.current.index - 1);
+  }, [applyHistorySnapshot, flushPendingHistory]);
 
-  const redo = async () => {
-    if (!fabricCanvas || historyIndex >= history.length - 1) {
+  const redo = useCallback(async () => {
+    flushPendingHistory();
+    if (historyRef.current.index >= historyRef.current.stack.length - 1) {
       return;
     }
 
-    isHistoryUpdate.current = true;
-    const nextIndex = historyIndex + 1;
-    setHistoryIndex(nextIndex);
-    await fabricCanvas.loadFromJSON(history[nextIndex]);
-    fabricCanvas.backgroundColor = '#ffffff';
-    fabricCanvas.renderAll();
-    isHistoryUpdate.current = false;
-    persistCurrentSlide();
-  };
+    await applyHistorySnapshot(historyRef.current.index + 1);
+  }, [applyHistorySnapshot, flushPendingHistory]);
 
   const insertImageFile = async (file: File) => {
     if (!file || !fabricCanvas) {
@@ -766,6 +2016,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       const scale = Math.min(1, 320 / baseWidth, 220 / baseHeight);
 
       image.set({
+        ...TOP_LEFT_ORIGIN,
         left: 120,
         top: 120,
         scaleX: scale,
@@ -774,8 +2025,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       fabricCanvas.add(image);
       fabricCanvas.setActiveObject(image);
       fabricCanvas.requestRenderAll();
-      fabricCanvas.fire('selection:created', { selected: [image], target: image } as never);
-      window.requestAnimationFrame(() => setHasSelection(fabricCanvas.getActiveObjects().length > 0));
+      setHasSelection(true);
       setMobileWorkspaceView('canvas');
       setBanner({
         tone: 'success',
@@ -843,21 +2093,26 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     await insertImageFile(imageFile);
   };
 
-  const toggleFullscreen = async () => {
-    if (!stageRef.current) {
-      return;
+  const startPresenting = () => {
+    flushActiveSlide(true);
+    setPresentSlideFailed(false);
+    setPresentIndex(Math.max(0, currentSlideIndex));
+  };
+
+  const stopPresenting = useCallback(() => {
+    const index = presentIndex;
+    setPresentIndex(null);
+    setPresentSlideFailed(false);
+    enteredFullscreenRef.current = false;
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
     }
 
-    try {
-      if (!document.fullscreenElement) {
-        await stageRef.current.requestFullscreen();
-      } else {
-        await document.exitFullscreen();
-      }
-    } catch (error) {
-      console.error('Fullscreen error', error);
+    const slideAtIndex = index === null ? undefined : slidesRef.current[index];
+    if (slideAtIndex) {
+      switchSlide(slideAtIndex.id);
     }
-  };
+  }, [presentIndex, switchSlide]);
 
   const togglePresenterView = () => {
     setIsPresenterView((previous) => !previous);
@@ -865,7 +2120,8 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   };
 
   const updateNotes = (notes: string) => {
-    setSlides((previousSlides) => previousSlides.map((slide) => (slide.id === currentSlideId ? { ...slide, notes } : slide)));
+    commitSlides((previous) => previous.map((slide) => (slide.id === currentSlideId ? { ...slide, notes } : slide)));
+    scheduleSave();
   };
 
   const formatTime = (seconds: number) => {
@@ -882,7 +2138,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     }
 
     const handlePaste = async (event: ClipboardEvent) => {
-      if (isPresenterView) {
+      if (isPresenterView || presentIndex !== null) {
         return;
       }
 
@@ -897,7 +2153,25 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [fabricCanvas, isPresenterView]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fabricCanvas, isPresenterView, presentIndex]);
+
+  // Ctrl/Cmd+S saves the deck instead of opening the browser's "Save Page As" dialog.
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's' || event.shiftKey || event.altKey) {
+        return;
+      }
+
+      event.preventDefault();
+      deckDirtyRef.current = deckDirtyRef.current || canvasDirtyRef.current;
+      // An explicit Ctrl/Cmd+S is the user asserting "this version wins".
+      void performSaveRef.current?.({ force: true }).catch((error) => console.error('Save flush failed', error));
+    };
+
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, []);
 
   const importPptxFile = async (file: File) => {
     if (file.size > maxImportFileBytes) {
@@ -911,12 +2185,14 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
     setSaveStatus('Importing...');
     setFileName(file.name.replace(/\.[^/.]+$/, ''));
+    fileNameRef.current = file.name.replace(/\.[^/.]+$/, '');
 
     try {
       const { default: JSZip } = await import('jszip');
       const arrayBuffer = await file.arrayBuffer();
       const zip = await JSZip.loadAsync(arrayBuffer);
       const relationshipsXml = await zip.file('ppt/_rels/presentation.xml.rels')?.async('string');
+      const emuScale = readSlideEmuScale(await zip.file('ppt/presentation.xml')?.async('string'));
       const slideRefs: string[] = [];
 
       if (relationshipsXml) {
@@ -924,7 +2200,9 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         relsDoc.querySelectorAll('Relationship').forEach((relationship) => {
           const type = relationship.getAttribute('Type');
           const target = relationship.getAttribute('Target');
-          if (!type?.includes('slide') || !target) {
+          // `includes('slide')` also matches slideMaster/slideLayout relationships, which
+          // imported as an extra phantom slide on every single import.
+          if (!type?.endsWith('/slide') || !target) {
             return;
           }
 
@@ -982,23 +2260,56 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
         slideDoc.querySelectorAll('p\\:sp, sp').forEach((shape) => {
           const textBody = shape.querySelector('p\\:txBody, txBody');
-          if (!textBody) {
+          const textContent = textBody ? extractTextContent(textBody) : '';
+          const metrics = extractTransformMetrics(shape, emuScale);
+
+          if (textContent) {
+            tempCanvas.add(
+              createTextObject(textContent, {
+                left: Math.max(40, metrics.left || 90),
+                top: Math.max(40, metrics.top || 110),
+                fontSize: 24,
+                width: Math.max(220, metrics.width || 720),
+              }),
+            );
             return;
           }
 
-          const textContent = extractTextContent(textBody);
-          if (!textContent) {
+          // Textless autoshapes were skipped entirely, so the app could not reopen its own
+          // export: every rectangle and ellipse it wrote came back as nothing.
+          const geometry = shape.querySelector('a\\:prstGeom, prstGeom')?.getAttribute('prst');
+          if (!geometry || !metrics.width || !metrics.height) {
             return;
           }
 
-          const metrics = extractTransformMetrics(shape);
+          const fillColor = shape.querySelector('a\\:solidFill a\\:srgbClr, solidFill srgbClr')?.getAttribute('val');
+          const fill = `#${fillColor || '2563eb'}`;
+
+          if (geometry === 'ellipse') {
+            const radius = metrics.width / 2;
+            tempCanvas.add(
+              new fabric.Circle({
+                ...TOP_LEFT_ORIGIN,
+                left: metrics.left,
+                top: metrics.top,
+                radius,
+                scaleY: radius > 0 ? metrics.height / metrics.width : 1,
+                fill,
+              }),
+            );
+            return;
+          }
 
           tempCanvas.add(
-            createTextObject(textContent, {
-              left: Math.max(40, metrics.left || 90),
-              top: Math.max(40, metrics.top || 110),
-              fontSize: 24,
-              width: Math.max(220, metrics.width || 720),
+            new fabric.Rect({
+              ...TOP_LEFT_ORIGIN,
+              left: metrics.left,
+              top: metrics.top,
+              width: metrics.width,
+              height: metrics.height,
+              rx: geometry === 'roundRect' ? 16 : 0,
+              ry: geometry === 'roundRect' ? 16 : 0,
+              fill,
             }),
           );
         });
@@ -1023,11 +2334,12 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
           const imageDataUrl = await readBlobAsDataUrl(imageBlob);
           const image = await fabric.Image.fromURL(imageDataUrl);
-          const metrics = extractTransformMetrics(picture);
+          const metrics = extractTransformMetrics(picture, emuScale);
           const width = Math.max(120, metrics.width || image.width || 260);
           const height = Math.max(90, metrics.height || image.height || 180);
 
           image.set({
+            ...TOP_LEFT_ORIGIN,
             left: Math.max(40, metrics.left || 90),
             top: Math.max(40, metrics.top || 120),
             scaleX: width / (image.width || width),
@@ -1050,32 +2362,34 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         }
 
         if (tempCanvas.getObjects().length === 0) {
-          applySlideTemplate(tempCanvas as unknown as fabric.Canvas, importedSlides.length === 0 ? 'cover' : 'content');
+          applySlideTemplate(tempCanvas, importedSlides.length === 0 ? 'cover' : 'content');
         }
 
         importedSlides.push({
-          id: `slide-${Date.now()}-${importedSlides.length}`,
-          data: tempCanvas.toJSON(),
+          id: createId('slide'),
+          data: serializeCanvas(tempCanvas),
           notes: notesText,
-          thumbnail: tempCanvas.toDataURL({ format: 'png', multiplier: 0.22 }),
+          thumbnail: makeThumbnail(tempCanvas),
         });
 
-        tempCanvas.dispose();
+        void tempCanvas.dispose();
       }
 
       if (!importedSlides.length) {
         throw new Error('No slides were imported');
       }
 
-      setSlides(importedSlides);
+      // The whole deck is replaced, so any unflushed canvas edit is intentionally dropped.
+      canvasDirtyRef.current = false;
+      commitSlides(() => importedSlides);
       setCurrentSlideId(importedSlides[0].id);
       setMobileWorkspaceView('canvas');
-      setSaveStatus('Saved');
       setBanner({
         tone: 'success',
         title: 'Presentation imported.',
         detail: `${importedSlides.length} slide${importedSlides.length === 1 ? '' : 's'} loaded from PPTX.`,
       });
+      scheduleSave();
     } catch (error) {
       console.error('PPTX import error', error);
       setSaveStatus('Import error');
@@ -1088,10 +2402,8 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   };
 
   const exportPptx = async () => {
-    const currentSnapshot = captureCurrentSlideSnapshot();
-    const exportSlides = slides.map((slide) =>
-      slide.id === currentSlideId && currentSnapshot ? { ...slide, data: currentSnapshot.data } : slide,
-    );
+    flushActiveSlide(false);
+    const exportSlides = slidesRef.current;
 
     const { default: PptxGenJS } = await import('pptxgenjs');
     const presentation = new PptxGenJS();
@@ -1105,58 +2417,75 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       if (slideData.notes?.trim()) {
         slide.addNotes(slideData.notes);
       }
-      const objects = Array.isArray(slideData.data?.objects) ? slideData.data.objects : [];
 
-      if (!objects.length) {
-        slide.addText('Untitled slide', { x: 1, y: 1, w: 8, h: 1, fontSize: 24, color: '334155' });
-        return;
-      }
+      const objects = slideData.data?.objects ?? [];
+      let emitted = 0;
 
-      objects.forEach((object: any) => {
-        const x = ((object.left || 0) / SLIDE_WIDTH) * 10;
-        const y = ((object.top || 0) / SLIDE_HEIGHT) * 5.625;
-        const w = (((object.width || 0) * (object.scaleX || 1)) / SLIDE_WIDTH) * 10;
-        const h = (((object.height || 0) * (object.scaleY || 1)) / SLIDE_HEIGHT) * 5.625;
+      objects.forEach((object) => {
+        const kind = normalizeTypeTag(String(object.type ?? ''));
+        const x = ((object.left || 0) / SLIDE_WIDTH) * EXPORT_WIDTH_IN;
+        const y = ((object.top || 0) / SLIDE_HEIGHT) * EXPORT_HEIGHT_IN;
+        const w = (((object.width || 0) * (object.scaleX || 1)) / SLIDE_WIDTH) * EXPORT_WIDTH_IN;
+        const h = (((object.height || 0) * (object.scaleY || 1)) / SLIDE_HEIGHT) * EXPORT_HEIGHT_IN;
 
-        if (object.type === 'i-text' || object.type === 'textbox' || object.type === 'text') {
+        if (TEXT_TYPE_TAGS.has(kind)) {
           slide.addText(object.text || '', {
             x,
             y,
-            w: Math.max(1, w),
-            h: Math.max(0.4, h),
+            w: Math.max(MIN_EXPORT_SIZE_IN, w),
+            h: Math.max(MIN_EXPORT_SIZE_IN, h),
             fontFace: 'Aptos',
             fontSize: Math.max(14, (object.fontSize || 24) * 0.75),
             color: normalizeColor(object.fill),
             bold: object.fontWeight === '700' || object.fontWeight === 700,
           });
-        } else if (object.type === 'rect') {
-          slide.addShape(PptxGenJS.ShapeType.roundRect, {
+          emitted += 1;
+          return;
+        }
+
+        if (RECT_TYPE_TAGS.has(kind)) {
+          slide.addShape(presentation.ShapeType.roundRect, {
             x,
             y,
-            w: Math.max(0.3, w),
-            h: Math.max(0.3, h),
+            w: Math.max(MIN_EXPORT_SIZE_IN, w),
+            h: Math.max(MIN_EXPORT_SIZE_IN, h),
             fill: { color: normalizeColor(object.fill) },
             line: { color: normalizeColor(object.stroke || object.fill) },
           });
-        } else if (object.type === 'circle') {
-          slide.addShape(PptxGenJS.ShapeType.ellipse, {
+          emitted += 1;
+          return;
+        }
+
+        if (CIRCLE_TYPE_TAGS.has(kind)) {
+          slide.addShape(presentation.ShapeType.ellipse, {
             x,
             y,
-            w: Math.max(0.3, w),
-            h: Math.max(0.3, h),
+            w: Math.max(MIN_EXPORT_SIZE_IN, w),
+            h: Math.max(MIN_EXPORT_SIZE_IN, h),
             fill: { color: normalizeColor(object.fill) },
             line: { color: normalizeColor(object.stroke || object.fill) },
           });
-        } else if (object.type === 'image' && object.src) {
+          emitted += 1;
+          return;
+        }
+
+        if (IMAGE_TYPE_TAGS.has(kind) && object.src) {
           slide.addImage({
             data: object.src,
             x,
             y,
-            w: Math.max(0.4, w),
-            h: Math.max(0.4, h),
+            w: Math.max(MIN_EXPORT_SIZE_IN, w),
+            h: Math.max(MIN_EXPORT_SIZE_IN, h),
           });
+          emitted += 1;
         }
       });
+
+      // The fallback keys off what was actually EMITTED, so an unrecognised object type
+      // can never produce a silently blank slide again.
+      if (emitted === 0) {
+        slide.addText('Untitled slide', { x: 1, y: 1, w: EXPORT_WIDTH_IN - 2, h: 1, fontSize: 24, color: '334155' });
+      }
     });
 
     await presentation.writeFile({ fileName: `${fileName}.pptx` });
@@ -1191,7 +2520,137 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
     window.addEventListener('keydown', handlePresenterKeyDown);
     return () => window.removeEventListener('keydown', handlePresenterKeyDown);
-  }, [currentSlideId, isPresenterView, nextSlideId, previousSlideId]);
+  }, [isPresenterView, nextSlideId, previousSlideId, switchSlide]);
+
+  // ---- present mode ---------------------------------------------------------------
+  const isPresenting = presentIndex !== null;
+
+  useEffect(() => {
+    if (!isPresenting || !presentElementRef.current) {
+      return;
+    }
+
+    const canvas = new fabric.StaticCanvas(presentElementRef.current, {
+      width: SLIDE_WIDTH,
+      height: SLIDE_HEIGHT,
+      backgroundColor: '#ffffff',
+    });
+    presentCanvasRef.current = canvas;
+
+    const fit = () => {
+      const scale = Math.max(
+        0.05,
+        Math.min(window.innerWidth / SLIDE_WIDTH, (window.innerHeight - 72) / SLIDE_HEIGHT),
+      );
+      canvas.setDimensions({ width: Math.round(SLIDE_WIDTH * scale), height: Math.round(SLIDE_HEIGHT * scale) });
+      canvas.setZoom(scale);
+      canvas.renderAll();
+    };
+
+    fit();
+    window.addEventListener('resize', fit);
+
+    presentRootRef.current?.focus({ preventScroll: true });
+    const requestFullscreen = presentRootRef.current?.requestFullscreen?.bind(presentRootRef.current);
+    if (requestFullscreen) {
+      void requestFullscreen()
+        .then(() => {
+          enteredFullscreenRef.current = true;
+        })
+        .catch(() => undefined);
+    }
+
+    return () => {
+      window.removeEventListener('resize', fit);
+      presentCanvasRef.current = null;
+      void canvas.dispose();
+    };
+  }, [isPresenting]);
+
+  useEffect(() => {
+    const canvas = presentCanvasRef.current;
+    if (!isPresenting || !canvas || presentIndex === null) {
+      return;
+    }
+
+    const slide = slidesRef.current[presentIndex];
+    let cancelled = false;
+
+    const render = async () => {
+      const zoom = canvas.getZoom();
+
+      const paintBlank = () => {
+        canvas.clear();
+        canvas.backgroundColor = '#ffffff';
+        canvas.setZoom(zoom);
+        canvas.renderAll();
+      };
+
+      try {
+        if (slide?.data) {
+          await canvas.loadFromJSON(slide.data);
+        } else {
+          canvas.clear();
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        canvas.backgroundColor = '#ffffff';
+        canvas.setZoom(zoom);
+        canvas.renderAll();
+        setPresentSlideFailed(false);
+      } catch (error) {
+        // fabric's loadFromJSON only calls clear() AFTER enliven resolves, so a slide that
+        // cannot be rebuilt leaves the PREVIOUS slide on screen: the counter says 2 while
+        // the audience is still looking at slide 1. Blank it and say so instead.
+        console.error('Slide could not be presented', error);
+        if (cancelled) {
+          return;
+        }
+
+        paintBlank();
+        setPresentSlideFailed(true);
+      }
+    };
+
+    void render();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isPresenting, presentIndex]);
+
+  useEffect(() => {
+    if (!isPresenting) {
+      return;
+    }
+
+    const handlePresentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        stopPresenting();
+        return;
+      }
+
+      if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Spacebar', 'Enter'].includes(event.key)) {
+        event.preventDefault();
+        setPresentIndex((previous) =>
+          previous === null ? previous : Math.min(slidesRef.current.length - 1, previous + 1),
+        );
+        return;
+      }
+
+      if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(event.key)) {
+        event.preventDefault();
+        setPresentIndex((previous) => (previous === null ? previous : Math.max(0, previous - 1)));
+      }
+    };
+
+    window.addEventListener('keydown', handlePresentKeyDown);
+    return () => window.removeEventListener('keydown', handlePresentKeyDown);
+  }, [isPresenting, stopPresenting]);
 
   const notesPanel = (
     <div className="panel-stack">
@@ -1226,7 +2685,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       <AppHeader
         appName="NinjaSlides"
         fileName={fileName}
-        setFileName={setFileName}
+        setFileName={handleFileNameChange}
         defaultFileName={defaultFileName}
         toggleTheme={toggleTheme}
         isDarkMode={isDarkMode}
@@ -1263,8 +2722,8 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         </ToolbarGroup>
 
         <ToolbarGroup label="History">
-          <ToolbarButton icon={Undo} onClick={() => void undo()} isDisabled={historyIndex <= 0} title="Undo" />
-          <ToolbarButton icon={Redo} onClick={() => void redo()} isDisabled={historyIndex >= history.length - 1} title="Redo" />
+          <ToolbarButton icon={Undo} onClick={() => void undo()} isDisabled={!canUndo} title="Undo" />
+          <ToolbarButton icon={Redo} onClick={() => void redo()} isDisabled={!canRedo} title="Redo" />
         </ToolbarGroup>
 
         <ToolbarGroup label="Insert">
@@ -1292,7 +2751,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
               aria-label="Slide object fill color"
             />
           </div>
-          <ToolbarButton icon={Play} onClick={() => void toggleFullscreen()} title={isFullscreen ? 'Exit fullscreen' : 'Present fullscreen'} />
+          <ToolbarButton icon={Play} onClick={startPresenting} title="Start presentation" />
           <ToolbarButton icon={MonitorPlay} onClick={togglePresenterView} isActive={isPresenterView} title="Presenter view" />
         </ToolbarGroup>
       </Toolbar>
@@ -1307,9 +2766,24 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
             <div className="editor-banner__text">{banner.title}</div>
             {banner.detail && <div className="editor-banner__hint">{banner.detail}</div>}
           </div>
-          <button className="btn btn-secondary btn-icon" onClick={() => setBanner(null)} type="button" aria-label="Dismiss message">
-            <X size={16} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {banner.action && (
+              <button
+                className="btn btn-secondary"
+                onClick={() => {
+                  const run = banner.action?.onClick;
+                  setBanner(null);
+                  run?.();
+                }}
+                type="button"
+              >
+                {banner.action.label}
+              </button>
+            )}
+            <button className="btn btn-secondary btn-icon" onClick={() => setBanner(null)} type="button" aria-label="Dismiss message">
+              <X size={16} />
+            </button>
+          </div>
         </div>
       )}
 
@@ -1357,7 +2831,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
               <div>
                 <h3 style={{ margin: 0 }}>Slides</h3>
                 <p className="panel-note" style={{ margin: '0.25rem 0 0' }}>
-                  Tap a thumbnail to move through the deck.
+                  Tap a thumbnail to move through the deck. Drag the grip, or use the arrows, to reorder.
                 </p>
               </div>
               <button
@@ -1372,40 +2846,23 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
             <div className="slide-list" role="list" aria-label="Slides">
               {slides.map((slide, index) => (
-                <article
+                <SlideCard
                   key={slide.id}
-                  className={`slide-card ${slide.id === currentSlideId ? 'slide-card--active' : ''}`}
-                  onClick={() => switchSlide(slide.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      switchSlide(slide.id);
-                    }
-                  }}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Open slide ${index + 1}`}
-                >
-                  <div className="slide-card__thumb">
-                    {slide.thumbnail ? <img src={slide.thumbnail} alt={`Slide ${index + 1}`} /> : <span>Slide preview</span>}
-                  </div>
-                  <div className="slide-card__caption">
-                    <span>Slide {index + 1}</span>
-                    <span>{slide.id === currentSlideId ? 'Editing' : 'Open'}</span>
-                  </div>
-                  <button
-                    className="slide-card__delete"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setPendingDeleteSlideId(slide.id);
-                    }}
-                    type="button"
-                    aria-label={`Delete slide ${index + 1}`}
-                  >
-                    <X size={14} />
-                  </button>
-                </article>
+                  slide={slide}
+                  index={index}
+                  total={slides.length}
+                  isActive={slide.id === currentSlideId}
+                  isDragging={dragSlideIndex === index}
+                  isDropTarget={dragSlideIndex !== null && dropSlideIndex === index && dropSlideIndex !== dragSlideIndex}
+                  onSelect={switchSlide}
+                  onMove={moveSlide}
+                  onDelete={setPendingDeleteSlideId}
+                  onReorderPointerDown={handleReorderPointerDown}
+                  onReorderPointerMove={handleReorderPointerMove}
+                  onReorderPointerUp={handleReorderPointerUp}
+                  onReorderPointerCancel={handleReorderPointerCancel}
+                  registerCard={registerSlideCard}
+                />
               ))}
             </div>
           </aside>
@@ -1413,6 +2870,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
         <div
           id={canvasSectionId}
+          ref={stageWrapRef}
           className={`${isPresenterView ? 'presenter-stage' : 'presentation-stage'} ${!isPresenterView && mobileWorkspaceView !== 'canvas' ? 'workspace-pane--hidden-mobile' : ''}`}
           onClick={() => {
             if (!isPresenterView) {
@@ -1437,13 +2895,64 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
             role="region"
             tabIndex={0}
             aria-label="Slide canvas"
+            onKeyDown={handleStageKeyDown}
             onDragEnter={handleDragEnter}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={(event) => void handleDrop(event)}
           >
+            {/*
+              fabric REPARENTS this canvas into a wrapper div of its own as soon as it
+              initialises. If the canvas were a direct child of the shell, React's fiber for
+              it would point at a node that is no longer a child here, and rendering any
+              sibling before it would make React call insertBefore against a foreign node —
+              NotFoundError, and the whole editor unmounts into the error boundary.
+
+              Giving it its own React-owned host div makes that impossible instead of merely
+              avoided: fabric only ever moves things INSIDE this div, so every sibling below
+              is positioned against nodes React still owns, in any order, forever.
+            */}
+            <div style={{ display: 'flex', justifyContent: 'center', lineHeight: 0 }}>
+              <canvas ref={canvasRef} />
+            </div>
             {isDropTargetActive && <div className="canvas-drop-target-hint">Drop an image to add it to this slide.</div>}
-            <canvas ref={canvasRef} />
+            {slideLoadError && (
+              <div
+                role="alert"
+                style={{
+                  position: 'absolute',
+                  inset: '1rem',
+                  zIndex: 5,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  textAlign: 'center',
+                  padding: '1rem',
+                  borderRadius: '1rem',
+                  background: 'rgba(15, 23, 42, 0.82)',
+                  color: '#f8fafc',
+                }}
+              >
+                <strong>Slide {slideLoadError.index + 1} could not be opened.</strong>
+                <span style={{ maxWidth: '32rem', fontSize: '0.9rem' }}>
+                  Its stored content could not be rebuilt. This canvas is blank and nothing typed here will be
+                  saved, so the rest of the deck stays safe.
+                </span>
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSlideLoadError(null);
+                    renderCurrentSlide(true);
+                  }}
+                >
+                  Try again
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1477,7 +2986,128 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         </aside>
       </div>
 
-      <StatusBar leftContent={<span>Slide {slideCountLabel} | {saveSummary}</span>} rightContent={<span>{isFullscreen ? 'Fullscreen presentation' : 'Editing canvas'}</span>} />
+      <StatusBar
+        leftContent={<span>Slide {slideCountLabel} | {saveSummary}</span>}
+        rightContent={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.75rem' }}>
+            {oversizeForBackup !== null && (
+              <span
+                role="status"
+                title={`This deck is ${Math.round(oversizeForBackup / 1024)}KB, over the ${Math.round(
+                  BACKUP_SIZE_LIMIT_BYTES / 1024,
+                )}KB emergency-snapshot limit. Autosave still runs every ${SAVE_DEBOUNCE_MS}ms, but an edit made in the last moment before a crash or tab close cannot be recovered. Press Ctrl+S before closing, or export to PPTX.`}
+                // This chip is the only durable signal that data loss is possible, so its
+                // contrast is picked per theme rather than inherited: the single amber that
+                // passed on the light status bar measured 3.3:1 on the dark one.
+                // Measured here: 6.1:1 light (#92400e) and 9.8:1 dark (#fcd34d), both AA at
+                // any size, against the chip's own translucent background.
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  padding: '0.15rem 0.6rem',
+                  borderRadius: '999px',
+                  border: `1px solid ${isDarkMode ? 'rgba(252, 211, 77, 0.55)' : 'rgba(146, 64, 14, 0.45)'}`,
+                  background: isDarkMode ? 'rgba(217, 119, 6, 0.22)' : 'rgba(217, 119, 6, 0.14)',
+                  color: isDarkMode ? '#fcd34d' : '#92400e',
+                  fontWeight: 600,
+                }}
+              >
+                <AlertTriangle size={13} aria-hidden="true" />
+                No crash recovery ({Math.round(oversizeForBackup / 1024)}KB)
+              </span>
+            )}
+            <span>{isPresenting ? 'Presenting' : isFullscreen ? 'Fullscreen presentation' : 'Editing canvas'}</span>
+          </span>
+        }
+      />
+
+      {isPresenting && presentIndex !== null && (
+        <div
+          ref={presentRootRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Presenting slide ${presentIndex + 1} of ${slides.length}`}
+          tabIndex={-1}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 2000,
+            background: '#000000',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.75rem',
+            outline: 'none',
+          }}
+          onClick={(event) => {
+            if ((event.target as HTMLElement).closest('button')) {
+              return;
+            }
+
+            setPresentIndex((previous) =>
+              previous === null ? previous : Math.min(slidesRef.current.length - 1, previous + 1),
+            );
+          }}
+        >
+          <div style={{ position: 'relative', display: 'flex' }}>
+            <canvas ref={presentElementRef} style={{ display: 'block', boxShadow: '0 24px 60px rgba(0,0,0,0.6)' }} />
+            {presentSlideFailed && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '2rem',
+                  textAlign: 'center',
+                  color: '#64748b',
+                  font: '600 1.1rem/1.5 Aptos, Segoe UI, sans-serif',
+                }}
+              >
+                Slide {presentIndex + 1} is unavailable.
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: '#e2e8f0', fontSize: '0.85rem' }}>
+            <button
+              type="button"
+              style={{ ...slideActionButtonStyle, width: 'auto', padding: '0 0.7rem', color: '#e2e8f0' }}
+              onClick={() => setPresentIndex((previous) => (previous === null ? previous : Math.max(0, previous - 1)))}
+              disabled={presentIndex === 0}
+              aria-label="Previous slide"
+            >
+              Prev
+            </button>
+            <span data-testid="present-counter">
+              {presentIndex + 1} / {slides.length}
+            </span>
+            <button
+              type="button"
+              style={{ ...slideActionButtonStyle, width: 'auto', padding: '0 0.7rem', color: '#e2e8f0' }}
+              onClick={() =>
+                setPresentIndex((previous) =>
+                  previous === null ? previous : Math.min(slidesRef.current.length - 1, previous + 1),
+                )
+              }
+              disabled={presentIndex === slides.length - 1}
+              aria-label="Next slide"
+            >
+              Next
+            </button>
+            <button
+              type="button"
+              style={{ ...slideActionButtonStyle, width: 'auto', padding: '0 0.7rem', color: '#e2e8f0' }}
+              onClick={stopPresenting}
+              aria-label="Exit presentation"
+            >
+              Exit
+            </button>
+          </div>
+        </div>
+      )}
 
       <ConfirmDialog
         open={Boolean(pendingDeleteSlideId)}
