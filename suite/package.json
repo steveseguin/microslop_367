@@ -8,7 +8,14 @@
     "build": "tsc -b && vite build",
     "build:pages": "npm run build && node scripts/publish-pages.mjs",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "playwright test",
+    "test:typecheck": "tsc -p tests/tsconfig.json",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "test:report": "playwright show-report",
+    "test:install": "playwright install --with-deps chromium"
   },
   "dependencies": {
     "@fortune-sheet/react": "^1.0.4",
@@ -18,6 +25,7 @@
     "@tiptap/extension-table-header": "^3.20.0",
     "@tiptap/extension-table-row": "^3.20.0",
     "@tiptap/extension-text-align": "^3.20.0",
+    "@tiptap/extension-text-style": "^3.29.2",
     "@tiptap/react": "^3.20.0",
     "@tiptap/starter-kit": "^3.20.0",
     "chart.js": "^4.5.1",
@@ -39,7 +47,6 @@
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@playwright/test": "^1.58.2",
-    "@rollup/rollup-win32-x64-msvc": "^4.59.0",
     "@types/fabric": "^5.3.11",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",
