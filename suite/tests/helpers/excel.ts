@@ -43,12 +43,13 @@ export function activeCellLabel(page: Page) {
 }
 
 export function selectionLabel(page: Page) {
-  return page.locator('.selection-summary strong').first();
+  return page.locator('.status-selection');
 }
 
-/** { filled, numbers, sum, average } as the app currently reports them. */
+/** { filled, numbers, sum, average } as the app currently reports them.
+ *  Below 640px only Sum is rendered, so this is a desktop-width helper. */
 export async function selectionStats(page: Page) {
-  const values = await page.locator('.selection-summary__stats div strong').allTextContents();
+  const values = await page.locator('.status-stats .status-stat strong').allTextContents();
   return {
     filled: Number(values[0]),
     numbers: Number(values[1]),

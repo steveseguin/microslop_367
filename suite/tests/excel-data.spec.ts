@@ -164,8 +164,8 @@ test.describe('Excel data operations', () => {
       makeSheet('Inputs', [[10], [20], [30]], { status: 0 }),
     ]);
 
-    await expect(page.locator('.panel-list')).toContainText('Total sheets: 2');
-    await expect(page.locator('.panel-list')).toContainText('Open sheet: Summary');
+    await expect(page.locator('.status-sheet-count')).toContainText('2 sheets');
+    await expect(page.locator('.status-sheet')).toContainText('Summary');
 
     await setCell(page, 1, 1, '=SUM(Inputs!A1:A3)');
     await expectStored(
@@ -265,7 +265,7 @@ test.describe('Excel data operations', () => {
     await openExcel(page, id);
 
     await ribbon(page).getByRole('button', { name: 'Add sheet' }).click();
-    await expect(page.locator('.panel-list')).toContainText('Total sheets: 2');
+    await expect(page.locator('.status-sheet-count')).toContainText('2 sheets');
 
     await commitFormulaBar(page, 'on the new sheet');
     await expect(activeCellLabel(page)).toHaveText(/^[A-Z]+\d+$/);

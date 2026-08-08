@@ -92,7 +92,8 @@ export async function waitForExcelReady(page: Page) {
   await expect(page.getByLabel('Formula input')).toBeVisible();
   // The grid paints to canvas; wait for the canvas element itself, not for a timeout.
   await expect(page.locator('canvas.fortune-sheet-canvas').first()).toBeVisible();
-  await expect(page.locator('.panel-list')).toContainText('Total sheets:');
+  // Sheet/selection state moved from the removed Insights sidebar into the status bar.
+  await expect(page.locator('.status-selection')).toHaveText(/^[A-Z]+\d+/);
   // The workbook reports its selection only after `onReady` has run one animation frame.
   await expect(page.locator('.formula-coordinate')).toHaveText(/^[A-Z]+\d+$/);
 }

@@ -237,26 +237,17 @@ test.describe('Slide canvas and presentation', () => {
     );
   });
 
-  test('presenter view opens, steps through slides with the keyboard, and closes', async ({ page }) => {
-    await openSlides(page, makeId('slides-presenter'));
+  test('the status bar tracks the current slide as the deck is navigated', async ({ page }) => {
+    await openSlides(page, makeId('slides-status'));
 
     await ribbon(page).getByRole('button', { name: 'Duplicate slide' }).click();
     await expect(slideCards(page)).toHaveCount(2);
+
     await slideCards(page).first().click();
+    await expect(page.locator('.status-bar')).toContainText('Slide 1 / 2');
 
-    await ribbon(page).getByRole('button', { name: 'Presenter view' }).click();
-    const exit = page.getByRole('button', { name: 'Exit presenter view' });
-    await expect(exit).toBeVisible();
-    await expect(page.locator('.presenter-clock')).toBeVisible();
-    await expect(page.locator('.panel-list')).toContainText('Current slide: 1 / 2');
-
-    await page.getByRole('button', { name: 'Next' }).click();
-    await expect(page.locator('.panel-list')).toContainText('Current slide: 2 / 2');
-    await page.getByRole('button', { name: 'Previous' }).click();
-    await expect(page.locator('.panel-list')).toContainText('Current slide: 1 / 2');
-
-    await exit.click();
-    await expect(exit).toBeHidden();
+    await slideCards(page).nth(1).click();
+    await expect(page.locator('.status-bar')).toContainText('Slide 2 / 2');
   });
 
   test('full-screen presentation advances and exits with the keyboard', async ({ page }) => {

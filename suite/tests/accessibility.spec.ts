@@ -127,27 +127,13 @@ test.describe('Mobile layout and controls', () => {
     await expect.poll(async () => page.evaluate(() => document.body.style.overflow || 'auto')).toBe('auto');
   });
 
-  test('workspace switchers expose their controlled regions in every editor', async ({ page }) => {
-    await page.goto(editorPath('word', makeId('mobile-word')));
-    await waitForWordReady(page);
-
-    const wordSwitcher = page.locator('.workspace-mobile-switcher');
-    await expect(wordSwitcher.getByRole('button', { name: 'Editor', exact: true })).toHaveAttribute('aria-expanded', 'true');
-    await wordSwitcher.getByRole('button', { name: 'Insights', exact: true }).click();
-    await expect(wordSwitcher.getByRole('button', { name: 'Insights', exact: true })).toHaveAttribute('aria-expanded', 'true');
-    await expect(wordSwitcher.getByRole('button', { name: 'Editor', exact: true })).toHaveAttribute('aria-expanded', 'false');
-
-    const controlled = await wordSwitcher.getByRole('button', { name: 'Insights', exact: true }).getAttribute('aria-controls');
-    expect(controlled).toBeTruthy();
-    await expect(page.locator(`#${controlled}`)).toHaveAttribute('aria-label', 'Word insights');
-
-    await page.goto(editorPath('excel', makeId('mobile-excel')));
-    await waitForExcelReady(page);
-    const excelSwitcher = page.locator('.workspace-mobile-switcher');
-    await expect(excelSwitcher.getByRole('button', { name: 'Sheet', exact: true })).toHaveAttribute('aria-expanded', 'true');
-    const sheetRegion = await excelSwitcher.getByRole('button', { name: 'Sheet', exact: true }).getAttribute('aria-controls');
-    await expect(page.locator(`#${sheetRegion}`)).toHaveAttribute('aria-label', 'Spreadsheet workspace');
-
+  /**
+   * Word and Excel no longer have a switcher: their Insights panes were removed,
+   * so the editor and the grid own the whole mobile viewport and there is nothing
+   * to switch between. PowerPoint still has one, because Slides / Canvas / Notes
+   * are three genuinely different surfaces.
+   */
+  test('the slides workspace switcher exposes the region it controls', async ({ page }) => {
     await page.goto(editorPath('powerpoint', makeId('mobile-slides')));
     await expect(page.locator('.canvas-shell canvas').first()).toBeVisible();
     const slidesSwitcher = page.locator('.workspace-mobile-switcher');

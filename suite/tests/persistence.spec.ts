@@ -247,8 +247,9 @@ test.describe('Persistence survives a real reload', () => {
     );
 
     await reloadEditor(page, 'excel');
-    await expect(page.locator('.panel-list')).toContainText('Open sheet: Sheet1');
-    await expect(page.locator('.panel-list')).toContainText('Total sheets: 1');
+    await expect(page.locator('.status-sheet')).toContainText('Sheet1');
+    // The sheet count only renders when there is more than one sheet.
+    await expect(page.locator('.status-sheet-count')).toHaveCount(0);
   });
 
   test('a rename from the Dashboard reaches storage without touching the document body', async ({ page }) => {
