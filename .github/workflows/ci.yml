@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to main should cancel the first: the only run that matters is
+# the one for the current tip.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: suite
+
+jobs:
+  verify:
+    name: typecheck, lint, build, tests
+    runs-on: ubuntu-latest
+    # The Playwright suite builds the app and drives Chromium through every
+    # editor; 2.5 minutes locally, with headroom for a cold cache here.
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: suite/package-lock.json
+
+      # `npm ci`, not `npm install`: CI must fail on a lockfile that has drifted
+      # from package.json rather than quietly resolving something else.
+      - name: Install dependencies
+        run: npm ci
+
+      # Cached by version so a Playwright bump invalidates it automatically.
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('suite/package-lock.json') }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # `npm run build` only typechecks src/. The specs have their own tsconfig
+      # and were previously uncovered entirely.
+      - name: Typecheck tests
+        run: npm run test:typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      # playwright.config.ts starts its own server against a production build,
+      # so this needs no separate serve step.
+      - name: Test
+        run: npm test
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: suite/playwright-report/
+          retention-days: 7
+
+  audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: suite/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      # Advisory, not blocking. image-size has two high-severity advisories with
+      # no patched release upstream; they are mitigated by an input allowlist
+      # (see commit 34f7d3b) and dismissed on the alerts page. Failing the build
+      # on them would train everyone to ignore this step.
+      - name: Audit
+        run: npm audit --audit-level=high || true
