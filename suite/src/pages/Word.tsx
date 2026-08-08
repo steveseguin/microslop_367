@@ -37,6 +37,7 @@ import {
   List,
   ListOrdered,
   Mic,
+  Printer,
   Redo,
   RotateCcw,
   Rows3,
@@ -237,6 +238,12 @@ const FindHighlight = Extension.create({
 
               decorations.push(
                 Decoration.inline(match.from, match.to, {
+                  // The class carries no screen styling — the inline `style` below still
+                  // does all of that. It exists so the PRINT stylesheet has something to
+                  // aim at: a search highlight is editor furniture and must not be baked
+                  // into a PDF, and an inline `style` can only be beaten by `!important`
+                  // if there is a selector that matches in the first place.
+                  class: 'word-find-match',
                   style:
                     index === value.active
                       ? 'background-color:#f97316;color:#0b1220;border-radius:2px;'
@@ -1620,6 +1627,16 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
           saveNowRef.current?.();
           return;
         }
+
+        if (key === 'p') {
+          // Without this the browser prints the app: header, ribbon, status bar and a
+          // single viewport-high slice of the document. `window.print()` re-enters here
+          // through the same shortcut only if the user presses it again, so there is no
+          // recursion to guard against.
+          event.preventDefault();
+          window.print();
+          return;
+        }
       }
 
       if (event.key === 'Escape') {
@@ -2377,6 +2394,22 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
             >
               <Upload size={16} />
               Import DOCX
+            </button>
+            {/*
+              Print is the only route out of this product that is not a download, and it
+              is also how "Save as PDF" is reached — every desktop browser offers a PDF
+              destination in its own print dialog, so one control serves both. It stays
+              enabled while the document is locked read-only: printing reads nothing but
+              the DOM already on screen and cannot write over the stored copy.
+            */}
+            <button
+              className="btn btn-secondary"
+              onClick={() => window.print()}
+              type="button"
+              title="Print or save as PDF (Ctrl/Cmd+P)"
+            >
+              <Printer size={16} />
+              Print
             </button>
             <button
               className="btn btn-secondary"
