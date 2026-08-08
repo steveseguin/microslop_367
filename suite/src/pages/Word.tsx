@@ -419,41 +419,142 @@ function readBlobAsDataUrl(blob: Blob) {
   });
 }
 
-function getImageMimeType(source: string, currentMimeType: string) {
-  if (currentMimeType.startsWith('image/')) {
-    return currentMimeType;
-  }
+/*
+ * ---------------------------------------------------------------------------------
+ * Image format allowlist
+ * ---------------------------------------------------------------------------------
+ *
+ * Every entry point used to accept `image/*`, which let through formats this app has
+ * never handled. `getImageMimeType` mapped only these six, and `inferDocxImageType`
+ * narrows further still, so anything else was already destined to render broken — but it
+ * also reached the export path, and that is the part that bites:
+ *
+ *   `image-size@2.0.2` (pulled in by `pptxgenjs`) carries two unpatched high-severity
+ *   advisories, both `<=2.0.2` with NO fixed release: its ICNS parser and its JXL/HEIF
+ *   parsers each allow denial of service through an infinite loop. A crafted image that
+ *   reaches the exporter hangs the user's own tab.
+ *
+ * The decisive detail is that `image-size` dispatches on MAGIC BYTES, not on the file
+ * name and not on the MIME type the browser reports. Verified against 2.0.2: a HEIF
+ * renamed to `.png` arrives as `image/png` and is still routed to the HEIF parser, while
+ * a PNG renamed to `.heic` is parsed as a PNG. So filtering on the declared type cannot
+ * close the hole, and the `accept` attribute — which drag-and-drop and paste ignore
+ * entirely — is pure decoration. The bytes are what we trust here.
+ *
+ * This block is deliberately duplicated in `PowerPoint.tsx` rather than shared: the two
+ * editors already diverge in how they take images (TipTap data URLs vs a fabric canvas),
+ * and two small local copies cost less than a new shared import surface.
+ */
 
-  const normalizedSource = source.toLowerCase().split(/[?#]/, 1)[0];
-  if (normalizedSource.endsWith('.png')) {
+const SUPPORTED_IMAGE_MIME_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/bmp',
+  'image/svg+xml',
+] as const;
+
+/** Only a hint for the OS picker. Drag-and-drop and paste never consult it. */
+const SUPPORTED_IMAGE_ACCEPT = SUPPORTED_IMAGE_MIME_TYPES.join(',');
+
+const SUPPORTED_IMAGE_LABEL = 'PNG, JPEG, GIF, WEBP, BMP and SVG';
+
+/** How much of the file the signature check reads. SVG is text, so it needs a window. */
+const IMAGE_SNIFF_BYTES = 4096;
+
+/** Every DIB header version in real use; a genuine BMP declares one of these at byte 14. */
+const BMP_HEADER_SIZES = new Set([12, 16, 40, 52, 56, 64, 108, 124]);
+
+/** Distinguishes "we refuse this format" from "this file could not be read". */
+class UnsupportedImageFormatError extends Error {}
+
+function isSupportedImageMimeType(type: string) {
+  const normalized = type.split(';', 1)[0].trim().toLowerCase();
+  return (SUPPORTED_IMAGE_MIME_TYPES as readonly string[]).includes(normalized);
+}
+
+/**
+ * Whether a dragged or pasted file is plausibly an image the user wants to insert.
+ *
+ * Intentionally wider than the allowlist: an unsupported type still has to reach our
+ * handler so we can SAY it was refused, and an empty type (what the browser reports for
+ * an extension it does not know, `.jxl` among them) must not be a way to slip past. The
+ * narrowing is done by the byte check, not here.
+ */
+function isImageInsertCandidate(type: string) {
+  return type === '' || type.toLowerCase().startsWith('image/');
+}
+
+/** An SVG is text, so it gets a syntactic check rather than a magic number. */
+function looksLikeSvg(bytes: Uint8Array) {
+  const text = new TextDecoder('utf-8', { fatal: false })
+    .decode(bytes.subarray(0, IMAGE_SNIFF_BYTES))
+    .replace(/^\uFEFF/, '')
+    .trimStart();
+
+  // Markup from its very first character, and an actual <svg> root: prose that merely
+  // mentions "<svg" is not an image, and must not be treated as one.
+  return text.startsWith('<') && /<svg[\s/>]/i.test(text);
+}
+
+/**
+ * The allowlisted MIME type these BYTES actually are, or `null` for anything else.
+ *
+ * Extends the BMP/GIF/JPEG signature check `inferDocxImageType` already does with PNG and
+ * WEBP. It is an allowlist, not a blocklist of the formats named in the advisories: a
+ * format nobody has heard of yet is refused by default rather than waved through.
+ */
+function sniffSupportedImageMimeType(header: ArrayBuffer): string | null {
+  const bytes = new Uint8Array(header);
+  const at = (offset: number, ...signature: number[]) =>
+    signature.every((byte, index) => bytes[offset + index] === byte);
+
+  if (at(0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) {
     return 'image/png';
   }
-  if (normalizedSource.endsWith('.jpg') || normalizedSource.endsWith('.jpeg')) {
+  if (at(0, 0xff, 0xd8, 0xff)) {
     return 'image/jpeg';
   }
-  if (normalizedSource.endsWith('.gif')) {
+  if (at(0, 0x47, 0x49, 0x46, 0x38)) {
     return 'image/gif';
   }
-  if (normalizedSource.endsWith('.webp')) {
+  // RIFF....WEBP — the four size bytes in between are not part of the signature.
+  if (at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) {
     return 'image/webp';
   }
-  if (normalizedSource.endsWith('.bmp')) {
+  if (at(0, 0x42, 0x4d) && bytes.length >= 18 && BMP_HEADER_SIZES.has(new DataView(header).getUint32(14, true))) {
     return 'image/bmp';
   }
-  if (normalizedSource.endsWith('.svg')) {
+  if (looksLikeSvg(bytes)) {
     return 'image/svg+xml';
   }
 
-  return currentMimeType;
+  return null;
 }
 
-function prepareEmbeddableImageBlob(blob: Blob, source: string) {
-  const mimeType = getImageMimeType(source, blob.type);
-  const normalizedBlob = mimeType && mimeType !== blob.type ? blob.slice(0, blob.size, mimeType) : blob;
+/**
+ * Resolves to the blob RETYPED to whatever its content actually is, or throws.
+ *
+ * Retyping matters as much as refusing: a real PNG that arrived named `.heic` carries
+ * `image/heic`, and embedding it under that type would produce a data URL no browser
+ * renders. The bytes decide both questions.
+ */
+async function requireSupportedImageBlob(blob: Blob, label: string) {
+  const header = await blob.slice(0, IMAGE_SNIFF_BYTES).arrayBuffer();
+  const sniffedMimeType = sniffSupportedImageMimeType(header);
 
-  if (normalizedBlob.type && !normalizedBlob.type.startsWith('image/')) {
-    throw new Error('The selected asset is not a supported image file');
+  if (!sniffedMimeType) {
+    throw new UnsupportedImageFormatError(
+      `${label || 'That file'} is not a supported image. Only ${SUPPORTED_IMAGE_LABEL} can be inserted, and this file's contents are none of those — renaming a file does not change its format.`,
+    );
   }
+
+  return sniffedMimeType === blob.type ? blob : blob.slice(0, blob.size, sniffedMimeType);
+}
+
+async function prepareEmbeddableImageBlob(blob: Blob, source: string) {
+  const normalizedBlob = await requireSupportedImageBlob(blob, source);
 
   if (normalizedBlob.size > MAX_EMBEDDED_IMAGE_BYTES) {
     throw new Error(`Images larger than ${formatFileSize(MAX_EMBEDDED_IMAGE_BYTES)} cannot be embedded locally yet`);
@@ -471,7 +572,48 @@ async function loadImageBinary(source: string) {
   return response.arrayBuffer();
 }
 
-function inferDocxImageType(source: string, data: ArrayBuffer): 'png' | 'jpg' | 'gif' | 'bmp' {
+/**
+ * Renders SVG source to PNG bytes at `width` x `height` device pixels.
+ *
+ * `docx` can carry a real `<svgBlip>`, but the format REQUIRES a raster fallback next to
+ * it for renderers that predate SVG support, so a rasterised copy has to exist either
+ * way. Drawn through a blob URL, which is same-origin and therefore does not taint the
+ * canvas; an `<img>` is also a passive context, so nothing inside the SVG executes.
+ */
+async function rasterizeSvgToPng(data: ArrayBuffer, width: number, height: number) {
+  const url = URL.createObjectURL(new Blob([data], { type: 'image/svg+xml' }));
+
+  try {
+    const image = new Image();
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('SVG could not be rendered'));
+      image.src = url;
+    });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(width));
+    canvas.height = Math.max(1, Math.round(height));
+
+    const context = canvas.getContext('2d');
+    if (!context) {
+      throw new Error('SVG could not be rasterised: no 2D canvas');
+    }
+
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (!png) {
+      throw new Error('SVG could not be rasterised');
+    }
+
+    return await png.arrayBuffer();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function inferDocxImageType(source: string, data: ArrayBuffer): 'png' | 'jpg' | 'gif' | 'bmp' | 'svg' {
   const mimeMatch = source.match(/^data:image\/([a-zA-Z0-9.+-]+);/);
   const extensionMatch = source.match(/\.([a-zA-Z0-9]+)(?:\?|#|$)/);
   const hint = (mimeMatch?.[1] ?? extensionMatch?.[1] ?? '').toLowerCase();
@@ -488,6 +630,12 @@ function inferDocxImageType(source: string, data: ArrayBuffer): 'png' | 'jpg' | 
   if (hint === 'png') {
     return 'png';
   }
+  // Without this, an SVG matched nothing above, fell past the raster signatures below and
+  // returned the 'png' default — so the export wrote SVG SOURCE into `word/media/*.png`,
+  // a file Word cannot render, handed over under a name that promised it could.
+  if (hint === 'svg+xml' || hint === 'svg') {
+    return 'svg';
+  }
 
   const bytes = new Uint8Array(data);
   if (bytes[0] === 0x42 && bytes[1] === 0x4d) {
@@ -498,6 +646,10 @@ function inferDocxImageType(source: string, data: ArrayBuffer): 'png' | 'jpg' | 
   }
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
     return 'jpg';
+  }
+  // The name lied or said nothing, so ask the bytes — the same rule the entry points use.
+  if (sniffSupportedImageMimeType(data) === 'image/svg+xml') {
+    return 'svg';
   }
 
   return 'png';
@@ -512,8 +664,24 @@ function validateRemoteImage(source: string) {
   });
 }
 
-function dataTransferHasImageFile(dataTransfer: DataTransfer) {
-  return [...dataTransfer.items].some((item) => item.kind === 'file' && item.type.startsWith('image/'));
+/**
+ * A dragged file we are willing to CLAIM the drop for — including formats we will then
+ * refuse, so that the refusal can be explained instead of happening silently.
+ */
+function dataTransferHasImageCandidate(dataTransfer: DataTransfer) {
+  return [...dataTransfer.items].some((item) => item.kind === 'file' && isImageInsertCandidate(item.type));
+}
+
+/**
+ * A dragged file we can actually embed. This is what lights the drop target up, so a user
+ * dragging a HEIF is told BEFORE letting go that nothing is going to happen.
+ *
+ * Only the declared type is available mid-drag — `DataTransferItem` exposes no bytes
+ * until the drop — so this is a best-effort signal, and the byte check on drop is what
+ * actually decides.
+ */
+function dataTransferHasSupportedImageFile(dataTransfer: DataTransfer) {
+  return [...dataTransfer.items].some((item) => item.kind === 'file' && isSupportedImageMimeType(item.type));
 }
 
 function readPixelAttribute(node: RichTextNode, key: 'width' | 'height') {
@@ -1349,7 +1517,7 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
         return;
       }
 
-      const embeddableBlob = prepareEmbeddableImageBlob(blob, options.source);
+      const embeddableBlob = await prepareEmbeddableImageBlob(blob, options.source);
       const dataUrl = await readBlobAsDataUrl(embeddableBlob);
 
       /*
@@ -1409,7 +1577,10 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
         return;
       }
 
-      const imageFile = [...(event.clipboardData?.files ?? [])].find((file) => file.type.startsWith('image/'));
+      // Candidates, not just supported types: a pasted HEIF has to reach `insertImageFile`
+      // to be refused out loud. Files the clipboard reports as something other than an
+      // image (a PDF, a .docx) still fall through to ProseMirror's default handling.
+      const imageFile = [...(event.clipboardData?.files ?? [])].find((file) => isImageInsertCandidate(file.type));
       if (!imageFile) {
         return;
       }
@@ -1638,11 +1809,32 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
           const parsedHeight = readPixelAttribute(node, 'height');
           const width = Math.max(160, Math.min(520, parsedWidth || 420));
           const height = Math.max(120, Math.min(420, parsedHeight || Math.round(width * 0.6)));
+          const imageType = inferDocxImageType(src, data);
+
+          /*
+           * An SVG is embedded as an SVG, with the raster fallback the format requires.
+           * Word draws the vector; anything older draws the PNG. If rasterising fails
+           * there is no legal way to write this image, so it falls through to the catch
+           * below and is reported by name rather than written as a broken part.
+           */
+          if (imageType === 'svg') {
+            return new docx.Paragraph({
+              children: [
+                new docx.ImageRun({
+                  type: 'svg',
+                  data,
+                  // 2x so the fallback is not visibly soft next to the vector.
+                  fallback: { type: 'png', data: await rasterizeSvgToPng(data, width * 2, height * 2) },
+                  transformation: { width, height },
+                }),
+              ],
+            });
+          }
 
           return new docx.Paragraph({
             children: [
               new docx.ImageRun({
-                type: inferDocxImageType(src, data),
+                type: imageType,
                 data,
                 transformation: { width, height },
               }),
@@ -1966,6 +2158,16 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
     } catch (error) {
       console.error('Image URL insert failed', error);
 
+      /*
+       * A refused FORMAT is not a failed fetch. Falling through to the hot-link fallback
+       * would report "check the URL", which is wrong and sends the user round in circles;
+       * worse, it would leave a live <img> pointing at the very format we just declined.
+       */
+      if (error instanceof UnsupportedImageFormatError) {
+        setBanner({ tone: 'error', title: 'Image could not be inserted.', detail: error.message });
+        return;
+      }
+
       try {
         await validateRemoteImage(trimmedUrl);
         editor.chain().focus().setImage({ src: trimmedUrl }).run();
@@ -2009,18 +2211,28 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
     setIsImagePanelDropTargetActive(false);
   };
 
+  /*
+   * Claiming the drop for a format we will refuse is deliberate.
+   *
+   * Without `preventDefault` the browser performs its own default drop and NAVIGATES THE
+   * TAB to the dropped file, discarding the editing session and telling the user nothing.
+   * `dropEffect = 'none'` is no better: per the drag-and-drop model it cancels the drop,
+   * so no `drop` event fires and we could not report anything. So we take the drop and
+   * explain it, and withhold only the highlight, which is the one pre-drop signal we can
+   * give honestly.
+   */
   const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasImageFile(event.dataTransfer)) {
+    if (!dataTransferHasImageCandidate(event.dataTransfer)) {
       return;
     }
 
     event.preventDefault();
     dragDepthRef.current += 1;
-    setIsDropTargetActive(true);
+    setIsDropTargetActive(dataTransferHasSupportedImageFile(event.dataTransfer));
   };
 
   const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasImageFile(event.dataTransfer)) {
+    if (!dataTransferHasImageCandidate(event.dataTransfer)) {
       return;
     }
 
@@ -2037,7 +2249,7 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
 
   const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    const imageFile = [...event.dataTransfer.files].find((file) => file.type.startsWith('image/'));
+    const imageFile = [...event.dataTransfer.files].find((file) => isImageInsertCandidate(file.type));
     resetDropTarget();
 
     if (!imageFile) {
@@ -2048,17 +2260,17 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
   };
 
   const handleImagePanelDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasImageFile(event.dataTransfer)) {
+    if (!dataTransferHasImageCandidate(event.dataTransfer)) {
       return;
     }
 
     event.preventDefault();
     dragDepthRef.current += 1;
-    setIsImagePanelDropTargetActive(true);
+    setIsImagePanelDropTargetActive(dataTransferHasSupportedImageFile(event.dataTransfer));
   };
 
   const handleImagePanelDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasImageFile(event.dataTransfer)) {
+    if (!dataTransferHasImageCandidate(event.dataTransfer)) {
       return;
     }
 
@@ -2075,7 +2287,7 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
 
   const handleImagePanelDrop = async (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    const imageFile = [...event.dataTransfer.files].find((file) => file.type.startsWith('image/'));
+    const imageFile = [...event.dataTransfer.files].find((file) => isImageInsertCandidate(file.type));
     resetImagePanelDropTarget();
 
     if (!imageFile) {
@@ -2116,7 +2328,13 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
         force-sizes `.toolbar input[type="color"]`, which would fight `.sr-only`.
       */}
       <input ref={importInputRef} type="file" accept=".docx" hidden onChange={handleFileSelected} />
-      <input ref={imageInputRef} type="file" accept="image/*" hidden onChange={(event) => void handleImageUpload(event)} />
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept={SUPPORTED_IMAGE_ACCEPT}
+        hidden
+        onChange={(event) => void handleImageUpload(event)}
+      />
       <input
         ref={colorInputRef}
         type="color"

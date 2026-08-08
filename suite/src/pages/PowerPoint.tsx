@@ -374,6 +374,158 @@ function normalizeColor(value: string | undefined) {
   return value.replace('#', '');
 }
 
+/*
+ * ---------------------------------------------------------------------------------
+ * Image format allowlist
+ * ---------------------------------------------------------------------------------
+ *
+ * This is the editor the advisory actually points at. `exportPptx` hands every image
+ * object's data URL to `pptxgenjs`, which calls `image-size@2.0.2` to size it — and that
+ * version carries two unpatched high-severity advisories, both `<=2.0.2` with NO fixed
+ * release: its ICNS parser and its JXL/HEIF parsers each allow denial of service through
+ * an infinite loop. Insert a crafted image, hit Export, hang your own tab.
+ *
+ * `image-size` dispatches on MAGIC BYTES, not on the file name or the MIME type the
+ * browser reports. Verified against 2.0.2: a HEIF renamed to `.png` is still routed to
+ * the HEIF parser. So the `accept` attribute (which drag-and-drop and paste ignore
+ * anyway) and the declared type cannot close this — the bytes are what we trust.
+ *
+ * Chromium happens to refuse to DECODE HEIF/JXL/ICNS, so `fabric.Image.fromURL` used to
+ * reject them by accident and report "could not be read in this browser session". That is
+ * the browser's decoder doing our job for us, on one engine, with a misleading message.
+ * Safari decodes HEIC natively, where the same file sails onto the canvas and into the
+ * export. The gate below is app policy and does not depend on which decoder is present.
+ *
+ * Deliberately duplicated from `Word.tsx` rather than shared: the two editors already
+ * diverge in how they take images, and two small local copies cost less than a new
+ * shared import surface.
+ */
+
+const SUPPORTED_IMAGE_MIME_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/bmp',
+  'image/svg+xml',
+] as const;
+
+/** Only a hint for the OS picker. Drag-and-drop and paste never consult it. */
+const SUPPORTED_IMAGE_ACCEPT = SUPPORTED_IMAGE_MIME_TYPES.join(',');
+
+const SUPPORTED_IMAGE_LABEL = 'PNG, JPEG, GIF, WEBP, BMP and SVG';
+
+/** How much of the file the signature check reads. SVG is text, so it needs a window. */
+const IMAGE_SNIFF_BYTES = 4096;
+
+/** Every DIB header version in real use; a genuine BMP declares one of these at byte 14. */
+const BMP_HEADER_SIZES = new Set([12, 16, 40, 52, 56, 64, 108, 124]);
+
+/** Distinguishes "we refuse this format" from "this file could not be read". */
+class UnsupportedImageFormatError extends Error {}
+
+function isSupportedImageMimeType(type: string) {
+  const normalized = type.split(';', 1)[0].trim().toLowerCase();
+  return (SUPPORTED_IMAGE_MIME_TYPES as readonly string[]).includes(normalized);
+}
+
+/**
+ * Whether a dragged or pasted file is plausibly an image the user wants to insert.
+ *
+ * Intentionally wider than the allowlist: an unsupported type still has to reach our
+ * handler so we can SAY it was refused, and an empty type (what the browser reports for
+ * an extension it does not know, `.jxl` among them) must not be a way to slip past. The
+ * narrowing is done by the byte check, not here.
+ */
+function isImageInsertCandidate(type: string) {
+  return type === '' || type.toLowerCase().startsWith('image/');
+}
+
+/** An SVG is text, so it gets a syntactic check rather than a magic number. */
+function looksLikeSvg(bytes: Uint8Array) {
+  const text = new TextDecoder('utf-8', { fatal: false })
+    .decode(bytes.subarray(0, IMAGE_SNIFF_BYTES))
+    .replace(/^\uFEFF/, '')
+    .trimStart();
+
+  // Markup from its very first character, and an actual <svg> root: prose that merely
+  // mentions "<svg" is not an image, and must not be treated as one.
+  return text.startsWith('<') && /<svg[\s/>]/i.test(text);
+}
+
+/**
+ * The allowlisted MIME type these BYTES actually are, or `null` for anything else.
+ *
+ * It is an allowlist, not a blocklist of the formats named in the advisories: a format
+ * nobody has heard of yet is refused by default rather than waved through.
+ */
+function sniffSupportedImageMimeType(header: ArrayBuffer): string | null {
+  const bytes = new Uint8Array(header);
+  const at = (offset: number, ...signature: number[]) =>
+    signature.every((byte, index) => bytes[offset + index] === byte);
+
+  if (at(0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) {
+    return 'image/png';
+  }
+  if (at(0, 0xff, 0xd8, 0xff)) {
+    return 'image/jpeg';
+  }
+  if (at(0, 0x47, 0x49, 0x46, 0x38)) {
+    return 'image/gif';
+  }
+  // RIFF....WEBP — the four size bytes in between are not part of the signature.
+  if (at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) {
+    return 'image/webp';
+  }
+  if (at(0, 0x42, 0x4d) && bytes.length >= 18 && BMP_HEADER_SIZES.has(new DataView(header).getUint32(14, true))) {
+    return 'image/bmp';
+  }
+  if (looksLikeSvg(bytes)) {
+    return 'image/svg+xml';
+  }
+
+  return null;
+}
+
+/**
+ * Resolves to the blob RETYPED to whatever its content actually is, or throws.
+ *
+ * Retyping matters as much as refusing: a real PNG that arrived named `.heic` carries
+ * `image/heic`, and a data URL under that type is one fabric cannot decode. The bytes
+ * decide both questions.
+ */
+async function requireSupportedImageBlob(blob: Blob, label: string) {
+  const header = await blob.slice(0, IMAGE_SNIFF_BYTES).arrayBuffer();
+  const sniffedMimeType = sniffSupportedImageMimeType(header);
+
+  if (!sniffedMimeType) {
+    throw new UnsupportedImageFormatError(
+      `${label || 'That file'} is not a supported image. Only ${SUPPORTED_IMAGE_LABEL} can be added to a slide, and this file's contents are none of those — renaming a file does not change its format.`,
+    );
+  }
+
+  return sniffedMimeType === blob.type ? blob : blob.slice(0, blob.size, sniffedMimeType);
+}
+
+/**
+ * A dragged file we are willing to CLAIM the drop for — including formats we will then
+ * refuse, so that the refusal can be explained instead of happening silently.
+ */
+function dataTransferHasImageCandidate(dataTransfer: DataTransfer) {
+  return [...dataTransfer.items].some((item) => item.kind === 'file' && isImageInsertCandidate(item.type));
+}
+
+/**
+ * A dragged file we can actually add to a slide. This is what lights the drop target up,
+ * so a user dragging a HEIF is told BEFORE letting go that nothing is going to happen.
+ *
+ * Only the declared type is available mid-drag — `DataTransferItem` exposes no bytes
+ * until the drop — so this is a best-effort signal, and the byte check on drop decides.
+ */
+function dataTransferHasSupportedImageFile(dataTransfer: DataTransfer) {
+  return [...dataTransfer.items].some((item) => item.kind === 'file' && isSupportedImageMimeType(item.type));
+}
+
 function readBlobAsDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -2200,7 +2352,11 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     }
 
     try {
-      const dataUrl = await readBlobAsDataUrl(file);
+      // The byte check runs before anything else touches the file, and the data URL is
+      // built from the SNIFFED type rather than the one the browser guessed from the
+      // extension — otherwise a real PNG named `.heic` would be encoded as `image/heic`
+      // and fabric would fail to decode a file we had just decided was fine.
+      const dataUrl = await readBlobAsDataUrl(await requireSupportedImageBlob(file, file.name));
       const image = await fabric.Image.fromURL(dataUrl);
       const baseWidth = image.width || 320;
       const baseHeight = image.height || 240;
@@ -2228,7 +2384,12 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       setBanner({
         tone: 'error',
         title: 'Image could not be inserted.',
-        detail: 'The selected file could not be read in this browser session.',
+        // A refused format is not an unreadable file, and saying so is the difference
+        // between "try a PNG" and "try again in another browser".
+        detail:
+          error instanceof UnsupportedImageFormatError
+            ? error.message
+            : 'The selected file could not be read in this browser session.',
       });
     }
   };
@@ -2244,20 +2405,28 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     setIsDropTargetActive(false);
   };
 
+  /*
+   * Claiming the drop for a format we will refuse is deliberate.
+   *
+   * Without `preventDefault` the browser performs its own default drop and NAVIGATES THE
+   * TAB to the dropped file, discarding the deck being edited and telling the user
+   * nothing. `dropEffect = 'none'` is no better: per the drag-and-drop model it cancels
+   * the drop, so no `drop` event fires and we could not report anything. So we take the
+   * drop and explain it, and withhold only the highlight, which is the one pre-drop
+   * signal we can give honestly.
+   */
   const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
-    const hasImageFile = [...event.dataTransfer.items].some((item) => item.kind === 'file' && item.type.startsWith('image/'));
-    if (!hasImageFile) {
+    if (!dataTransferHasImageCandidate(event.dataTransfer)) {
       return;
     }
 
     event.preventDefault();
     dragDepthRef.current += 1;
-    setIsDropTargetActive(true);
+    setIsDropTargetActive(dataTransferHasSupportedImageFile(event.dataTransfer));
   };
 
   const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    const hasImageFile = [...event.dataTransfer.items].some((item) => item.kind === 'file' && item.type.startsWith('image/'));
-    if (!hasImageFile) {
+    if (!dataTransferHasImageCandidate(event.dataTransfer)) {
       return;
     }
 
@@ -2274,7 +2443,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
   const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    const imageFile = [...event.dataTransfer.files].find((file) => file.type.startsWith('image/'));
+    const imageFile = [...event.dataTransfer.files].find((file) => isImageInsertCandidate(file.type));
     resetDropTarget();
 
     if (!imageFile) {
@@ -2320,7 +2489,10 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         return;
       }
 
-      const imageFile = [...(event.clipboardData?.files ?? [])].find((file) => file.type.startsWith('image/'));
+      // Candidates, not just supported types: a pasted HEIF has to reach `insertImageFile`
+      // to be refused out loud. Files the clipboard reports as something other than an
+      // image (a PDF, a .pptx) are left alone, exactly as before.
+      const imageFile = [...(event.clipboardData?.files ?? [])].find((file) => isImageInsertCandidate(file.type));
       if (!imageFile) {
         return;
       }
@@ -2399,6 +2571,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       });
 
       const importedSlides: Slide[] = [];
+      const skippedImages: { slide: number; name: string; reason: string }[] = [];
 
       for (const slideRef of slideRefs) {
         const slidePath = `ppt/${slideRef}`;
@@ -2510,8 +2683,47 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
             continue;
           }
 
-          const imageDataUrl = await readBlobAsDataUrl(imageBlob);
-          const image = await fabric.Image.fromURL(imageDataUrl);
+          /*
+           * Media out of the zip is untrusted input and gets the same byte check as an
+           * image the user picks, drops or pastes.
+           *
+           * This was the last way a crafted ICNS/JXL/HEIF could reach `image-size` during
+           * a later PPTX export: nothing here consulted the allowlist, and the only thing
+           * stopping it was Chromium declining to DECODE those formats a line later. A
+           * browser's decoder is not a control — Safari decodes HEIC natively, and there
+           * the file would have gone straight onto the canvas.
+           *
+           * One bad picture must not cost the user the whole deck, so it is skipped and
+           * named, and the import carries on.
+           */
+          const imageName = imagePath.split('/').pop() || imagePath;
+          let embeddableBlob: Blob;
+
+          try {
+            embeddableBlob = await requireSupportedImageBlob(imageBlob, imageName);
+          } catch (error) {
+            console.warn('Skipping unsupported image during PPTX import', imagePath, error);
+            skippedImages.push({
+              slide: importedSlides.length + 1,
+              name: imageName,
+              reason: 'unsupported format',
+            });
+            continue;
+          }
+
+          const imageDataUrl = await readBlobAsDataUrl(embeddableBlob);
+          let image: fabric.Image;
+
+          try {
+            image = await fabric.Image.fromURL(imageDataUrl);
+          } catch (error) {
+            // An allowlisted but corrupt image used to throw out of the whole import and
+            // land in "Import failed", losing every other slide with it.
+            console.warn('Skipping undecodable image during PPTX import', imagePath, error);
+            skippedImages.push({ slide: importedSlides.length + 1, name: imageName, reason: 'could not be decoded' });
+            continue;
+          }
+
           const metrics = extractTransformMetrics(picture, emuScale);
           const width = Math.max(120, metrics.width || image.width || 260);
           const height = Math.max(90, metrics.height || image.height || 180);
@@ -2562,11 +2774,27 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       commitSlides(() => importedSlides);
       setCurrentSlideId(importedSlides[0].id);
       setMobileWorkspaceView('canvas');
-      setBanner({
-        tone: 'success',
-        title: 'Presentation imported.',
-        detail: `${importedSlides.length} slide${importedSlides.length === 1 ? '' : 's'} loaded from PPTX.`,
-      });
+      const slideSummary = `${importedSlides.length} slide${importedSlides.length === 1 ? '' : 's'} loaded from PPTX.`;
+
+      /*
+       * A partial import is reported as a partial import. Silently dropping pictures is
+       * how a deck quietly loses content, and failing the whole file over one bad picture
+       * throws away every slide that was fine — so the deck lands, and the banner says
+       * exactly which slide lost what.
+       */
+      setBanner(
+        skippedImages.length === 0
+          ? { tone: 'success', title: 'Presentation imported.', detail: slideSummary }
+          : {
+              tone: 'warning',
+              title: `Imported without ${skippedImages.length} image${skippedImages.length === 1 ? '' : 's'}.`,
+              detail: `${slideSummary} Only ${SUPPORTED_IMAGE_LABEL} can be placed on a slide, so ${
+                skippedImages.length === 1 ? 'this picture was' : 'these pictures were'
+              } left out: ${skippedImages
+                .map((skipped) => `slide ${skipped.slide} — ${skipped.name} (${skipped.reason})`)
+                .join('; ')}.`,
+            },
+      );
       scheduleSave();
     } catch (error) {
       console.error('PPTX import error', error);
@@ -2872,7 +3100,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
                 event.target.value = '';
               }}
             />
-            <input ref={imageInputRef} type="file" accept="image/*" hidden onChange={handleImageUpload} />
+            <input ref={imageInputRef} type="file" accept={SUPPORTED_IMAGE_ACCEPT} hidden onChange={handleImageUpload} />
             <button className="btn btn-secondary" onClick={() => pptImportRef.current?.click()} type="button">
               <Upload size={16} />
               Import PPTX
