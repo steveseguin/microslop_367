@@ -1,12 +1,24 @@
 import type { LucideProps } from 'lucide-react';
-import React, { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
-import { Settings2, X } from 'lucide-react';
+import React, {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import { MoreHorizontal, Settings2, X } from 'lucide-react';
 import { trapFocus } from '../../utils/focusTrap';
 
 /** Must stay in step with the `max-width: 900px` breakpoint in index.css. */
 const COMPACT_QUERY = '(max-width: 900px)';
 
 const ARROW_KEYS = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Home', 'End'];
+
+/** Width the "More" trigger needs, including its divider and padding. Measured
+ *  from the rendered control; a few px of slack is deliberate. */
+const OVERFLOW_TRIGGER_WIDTH = 78;
 
 interface ToolbarButtonProps {
   icon: React.ComponentType<LucideProps>;
@@ -37,6 +49,14 @@ export function ToolbarButton({ icon: Icon, onClick, isActive, isDisabled, title
   );
 }
 
+/**
+ * The `label` stays part of the public API — the three page files pass it and
+ * are owned by other agents — but it is no longer painted as a caption above a
+ * bordered card on the desktop ribbon. `aria-label` on the group is what
+ * actually carried it to assistive tech all along; the visible `<span>` is
+ * hidden by CSS inside `.toolbar` and still shown in the mobile sheet and the
+ * overflow menu, where a stacked list genuinely needs headings.
+ */
 export function ToolbarGroup({ children, label }: ToolbarGroupProps) {
   return (
     <section className="toolbar-group" role="group" aria-label={label}>
@@ -129,6 +149,186 @@ function useRovingToolbar(ref: React.RefObject<HTMLDivElement | null>) {
   return { onKeyDown: handleKeyDown, onFocus: sync };
 }
 
+/**
+ * The desktop ribbon is ONE row and is never allowed to wrap: groups that do
+ * not fit are moved into an overflow menu instead. (Wrapping is what turned
+ * this bar into 192px of chrome at 1440px, on a job Office does in ~44.)
+ *
+ * A group is rendered in exactly one place at a time — inline OR in the menu,
+ * never both — so no control is ever duplicated in the tab order or in the
+ * accessibility tree.
+ *
+ * That makes natural widths unmeasurable from the live row, so they come from a
+ * hidden mirror: `inert` + `aria-hidden` + `visibility: hidden`, laid out at
+ * `width: max-content`. Two ResizeObservers drive everything from there — one
+ * on the real row (how much space there IS) and one on the mirror (how much
+ * space the controls WANT). The mirror observer is what makes this survive a
+ * late-arriving webfont, a disabled button changing width, or a page adding a
+ * control, with no polling and no re-measure pass that could flash.
+ */
+function DesktopRibbon({ children }: { children: React.ReactNode }) {
+  const groups = React.Children.toArray(children);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const mirrorRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const roving = useRovingToolbar(toolbarRef);
+  const panelId = useId();
+
+  const total = groups.length;
+  const [visibleCount, setVisibleCount] = useState(total);
+  const [isOverflowOpen, setIsOverflowOpen] = useState(false);
+
+  useLayoutEffect(() => {
+    const root = toolbarRef.current;
+    const mirror = mirrorRef.current;
+    if (!root || !mirror || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const fit = () => {
+      const widths = [...mirror.children].map((child) => child.getBoundingClientRect().width);
+      const available = root.clientWidth;
+      const wanted = widths.reduce((sum, width) => sum + width, 0);
+
+      let count = widths.length;
+      if (wanted > available + 0.5) {
+        let used = 0;
+        count = 0;
+        for (const width of widths) {
+          if (used + width + OVERFLOW_TRIGGER_WIDTH > available) {
+            break;
+          }
+          used += width;
+          count += 1;
+        }
+      }
+
+      // Only ever a no-op or a real change: hiding a group does not resize
+      // either observed box, so this cannot feed itself a second callback.
+      setVisibleCount((current) => (current === count ? current : count));
+    };
+
+    const observer = new ResizeObserver(fit);
+    observer.observe(root);
+    observer.observe(mirror);
+    return () => observer.disconnect();
+  }, []);
+
+  // An overflow menu that is open while its contents move back inline would be
+  // an empty popover pinned to a button that no longer exists.
+  const overflowCount = total - Math.min(visibleCount, total);
+  const [lastOverflowCount, setLastOverflowCount] = useState(overflowCount);
+  if (lastOverflowCount !== overflowCount) {
+    setLastOverflowCount(overflowCount);
+    if (overflowCount === 0) {
+      setIsOverflowOpen(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!isOverflowOpen) {
+      return;
+    }
+
+    const closeAndRestore = () => {
+      setIsOverflowOpen(false);
+      triggerRef.current?.focus();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        // Same contract as the mobile sheet: capture phase and
+        // `stopImmediatePropagation`, so one Escape closes the menu and NOT the
+        // find-and-replace bar or present mode underneath it.
+        event.stopImmediatePropagation();
+        event.preventDefault();
+        closeAndRestore();
+      }
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (panelRef.current?.contains(target) || triggerRef.current?.contains(target)) {
+        return;
+      }
+      setIsOverflowOpen(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('pointerdown', handlePointerDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('pointerdown', handlePointerDown, true);
+    };
+  }, [isOverflowOpen]);
+
+  const overflowed = groups.slice(visibleCount);
+
+  return (
+    <div className="toolbar-shell">
+      {/* Measurement only. `inert` keeps every copy out of the tab order and the
+          accessibility tree, so the duplication is invisible to users and to
+          assistive tech alike. */}
+      <div className="toolbar toolbar--mirror" ref={mirrorRef} aria-hidden="true" inert>
+        {groups}
+      </div>
+
+      <div
+        ref={toolbarRef}
+        className="toolbar"
+        role="toolbar"
+        aria-label="Editing tools"
+        aria-orientation="horizontal"
+        onKeyDown={roving.onKeyDown}
+        onFocus={roving.onFocus}
+      >
+        {groups.slice(0, visibleCount)}
+
+        {overflowed.length > 0 && (
+          <div className="toolbar-overflow-trigger">
+            <button
+              ref={triggerRef}
+              className="toolbar-btn toolbar-more"
+              type="button"
+              onClick={() => setIsOverflowOpen((open) => !open)}
+              aria-haspopup="true"
+              aria-expanded={isOverflowOpen}
+              aria-controls={isOverflowOpen ? panelId : undefined}
+              aria-label={`More tools (${overflowed.length} groups hidden)`}
+              title="More tools"
+            >
+              <MoreHorizontal size={18} />
+              <span className="toolbar-more__label" aria-hidden="true">
+                More
+              </span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {isOverflowOpen && overflowed.length > 0 && (
+        <div
+          ref={panelRef}
+          id={panelId}
+          className="toolbar-overflow-panel"
+          role="group"
+          aria-label="More editing tools"
+          // Same reason as the mobile sheet: several of these tools open a panel
+          // that this menu would otherwise cover.
+          onClick={(event) => {
+            if ((event.target as HTMLElement).closest('button')) {
+              setIsOverflowOpen(false);
+            }
+          }}
+        >
+          {overflowed}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Toolbar({ children }: { children: React.ReactNode }) {
   const isCompact = useIsCompact();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
@@ -137,8 +337,6 @@ export function Toolbar({ children }: { children: React.ReactNode }) {
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
-  const toolbarRef = useRef<HTMLDivElement | null>(null);
-  const roving = useRovingToolbar(toolbarRef);
   // Restoring focus to the Ribbon toggle is right when the sheet is dismissed,
   // but wrong when a tool was activated: that tool usually opens a panel and
   // focuses its own field, and a late restore would steal focus back.
@@ -200,21 +398,7 @@ export function Toolbar({ children }: { children: React.ReactNode }) {
   // both the desktop ribbon and the mobile sheet duplicated every aria-label and
   // put a hidden copy of every control into the tab order.
   if (!isCompact) {
-    return (
-      <div className="toolbar-shell">
-        <div
-          ref={toolbarRef}
-          className="toolbar"
-          role="toolbar"
-          aria-label="Editing tools"
-          aria-orientation="horizontal"
-          onKeyDown={roving.onKeyDown}
-          onFocus={roving.onFocus}
-        >
-          {children}
-        </div>
-      </div>
-    );
+    return <DesktopRibbon>{children}</DesktopRibbon>;
   }
 
   return (

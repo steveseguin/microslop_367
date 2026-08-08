@@ -114,6 +114,20 @@ const THUMBNAIL_DEBOUNCE_MS = 450;
 const HISTORY_LIMIT = 40;
 const MIN_CANVAS_SCALE = 0.12;
 /**
+ * Ceiling on the fit scale. This used to be a hard 1, which meant the slide could never be
+ * drawn larger than its 960x540 design size no matter how much room the stage had: on a
+ * 1920x1080 display the slide sat at a third of the stage inside a field of grey, and no
+ * amount of trimming the rails could change it.
+ *
+ * Growing past 1 is safe because the fit is applied as a fabric ZOOM, not a CSS transform:
+ * the backing store is resized to match, so text and vector shapes are re-rasterised at the
+ * new resolution and stay sharp — only inserted bitmap images soften, exactly as they would
+ * in any editor zoomed past 100%. 2 is the ceiling because height binds well before it on
+ * every desktop size (1.55 at 1920x1080), so it never actually governs there; it only stops
+ * a very tall or 4K viewport from allocating a needlessly large backing store.
+ */
+const MAX_CANVAS_SCALE = 2;
+/**
  * pptxgenjs' LAYOUT_WIDE is 13.333in x 7.5in. Mapping the 960x540 slide onto 10 x 5.625
  * instead squeezed every deck into the top-left 75% of the page with a dead margin, which
  * reads as deliberate design rather than a bug.
@@ -498,14 +512,28 @@ const SlideCard = memo(function SlideCard({
   onReorderPointerCancel,
   registerCard,
 }: SlideCardProps) {
-  // Delete used to be a filled dark disc pinned over the thumbnail: permanently visible and
-  // the highest-contrast thing in the rail, so the easiest target on the card was the one
-  // that destroys a slide. It now sits with the other card controls and only materialises
-  // for a pointer that is on the card, for keyboard focus anywhere inside it, or on the
-  // slide being edited (the only reveal a touch device can produce).
+  /**
+   * At rest a card shows ONE control — the drag grip. Move-up, move-down and delete fade in
+   * for a pointer that is on the card, for keyboard focus anywhere inside it, or on the slide
+   * being edited (the only reveal a touch device can produce, and the card a touch user has
+   * just tapped). Alt+ArrowUp/Down on the card reorders without any button at all.
+   *
+   * The hidden state is `opacity: 0` and NOTHING else. It deliberately does NOT set
+   * `pointer-events: none`, which is what broke `slides.spec.ts`: with it, `elementFromPoint`
+   * at the button's own centre resolves to the wrapping row instead, so every hit test —
+   * Playwright's actionability check, and any assistive tech that drives a synthetic click —
+   * reported "<div> intercepts pointer events" and the only route to deleting a slide became
+   * unreachable. A real pointer cannot reach these buttons without first entering the card,
+   * which reveals them, so `pointer-events: none` was defending against nothing and costing
+   * the feature its testability. Deletion is still gated by the confirm dialog.
+   */
   const [isPointerOver, setIsPointerOver] = useState(false);
   const [isFocusWithin, setIsFocusWithin] = useState(false);
-  const showDelete = isPointerOver || isFocusWithin || isActive;
+  const showControls = isPointerOver || isFocusWithin || isActive;
+  const revealStyle = (disabled = false): React.CSSProperties => ({
+    opacity: showControls ? (disabled ? 0.4 : 1) : 0,
+    transition: 'opacity 140ms ease',
+  });
 
   return (
     <article
@@ -550,7 +578,7 @@ const SlideCard = memo(function SlideCard({
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.5rem' }}>
         <button
           type="button"
-          style={{ ...slideActionButtonStyle, opacity: index === 0 ? 0.4 : 1 }}
+          style={{ ...slideActionButtonStyle, ...revealStyle(index === 0) }}
           disabled={index === 0}
           aria-label={`Move slide ${index + 1} up`}
           title="Move slide up"
@@ -564,7 +592,7 @@ const SlideCard = memo(function SlideCard({
         </button>
         <button
           type="button"
-          style={{ ...slideActionButtonStyle, opacity: index === total - 1 ? 0.4 : 1 }}
+          style={{ ...slideActionButtonStyle, ...revealStyle(index === total - 1) }}
           disabled={index === total - 1}
           aria-label={`Move slide ${index + 1} down`}
           title="Move slide down"
@@ -577,6 +605,8 @@ const SlideCard = memo(function SlideCard({
           <ChevronDown size={14} />
         </button>
         <span style={{ flex: 1 }} />
+        {/* The grip is the one control that stays at rest: it is the affordance that tells
+            you the rail reorders at all, and it replaces the prose that used to say so. */}
         <button
           type="button"
           style={{ ...slideActionButtonStyle, cursor: 'grab', touchAction: 'none' }}
@@ -596,17 +626,12 @@ const SlideCard = memo(function SlideCard({
         </button>
         <button
           type="button"
-          // opacity + pointer-events rather than `visibility`/`display`: a hidden-by-either
-          // of those leaves the tab order, and this is the ONLY way to delete a slide.
-          // Tabbing to it fires focus on the card, which reveals it before it is activated.
           style={{
             ...slideActionButtonStyle,
             borderColor: 'rgba(239, 68, 68, 0.4)',
             background: 'rgba(239, 68, 68, 0.14)',
             color: '#ef4444',
-            opacity: showDelete ? 1 : 0,
-            pointerEvents: showDelete ? 'auto' : 'none',
-            transition: 'opacity 140ms ease',
+            ...revealStyle(),
           }}
           onClick={(event) => {
             event.preventDefault();
@@ -1154,7 +1179,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     const viewportHeight = window.innerHeight - wrap.getBoundingClientRect().top - 56 - wrapPadY - shellPadY;
     const availableHeight = Math.max(measuredHeight, viewportHeight, 120);
 
-    const rawScale = Math.min(1, availableWidth / SLIDE_WIDTH, availableHeight / SLIDE_HEIGHT);
+    const rawScale = Math.min(MAX_CANVAS_SCALE, availableWidth / SLIDE_WIDTH, availableHeight / SLIDE_HEIGHT);
     const width = Math.max(SLIDE_WIDTH * MIN_CANVAS_SCALE, Math.floor(SLIDE_WIDTH * rawScale));
     const scale = width / SLIDE_WIDTH;
 
@@ -2675,6 +2700,21 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
   const hasNotesOnCurrentSlide = Boolean(currentSlide?.notes?.trim());
 
+  /**
+   * The rail's width is published as `--notes-rail-w` rather than written straight onto the
+   * element, so index.css owns the value the moment it wants to: a `.notes-sidebar { width:
+   * var(--notes-rail-w, 288px) }` rule there makes the inline `width` below redundant and it
+   * can be deleted in one line. Until that rule exists the property is also consumed here so
+   * the rail is actually the width it declares. Nothing is set below the stacking breakpoint
+   * — the mobile `width: 100%` stays entirely in CSS, which is where it can respond.
+   */
+  const notesRailStyle = (desktop: React.CSSProperties): React.CSSProperties => {
+    const declared = typeof desktop.width === 'number' ? `${desktop.width}px` : String(desktop.width ?? 'auto');
+    const railWidth = { '--notes-rail-w': declared } as React.CSSProperties;
+
+    return isCompactLayout ? railWidth : { ...railWidth, ...desktop, width: 'var(--notes-rail-w)' };
+  };
+
   // The "Deck status" card that used to sit under this one is gone: current slide, selection
   // and autosave were all duplicates of the status bar, restated in a panel that cost the
   // slide 288px of width to display them a second time.
@@ -2861,13 +2901,14 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
           aria-label="Slide thumbnails"
           role="region"
         >
+          {/*
+            No instructional prose. Three lines telling you that clicking a thumbnail opens a
+            slide is furniture that never stops being read while it stops being useful after
+            the first second; the grip icon carries `title="Drag to reorder"` and the move
+            buttons carry theirs, which is where that guidance belongs.
+          */}
           <div className="slide-sidebar__header">
-            <div>
-              <h3 style={{ margin: 0 }}>Slides</h3>
-              <p className="panel-note" style={{ margin: '0.25rem 0 0' }}>
-                Select a slide to edit it. Drag the grip, or use the arrows, to reorder.
-              </p>
-            </div>
+            <h3 style={{ margin: 0 }}>Slides</h3>
             <button
               className="btn btn-secondary btn-icon"
               onClick={() => addSlide('content')}
@@ -2987,11 +3028,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
           <aside
             id={notesSectionId}
             className={`notes-sidebar ${mobileWorkspaceView !== 'notes' ? 'workspace-pane--hidden-mobile' : ''}`}
-            style={
-              isCompactLayout
-                ? undefined
-                : { width: NOTES_PANEL_WIDTH, display: 'flex', flexDirection: 'column' }
-            }
+            style={notesRailStyle({ width: NOTES_PANEL_WIDTH, display: 'flex', flexDirection: 'column' })}
             aria-label="Slide notes"
             onClick={() => setMobileWorkspaceView('notes')}
             role="region"
@@ -3002,14 +3039,14 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
           <aside
             id={notesSectionId}
             className="notes-sidebar workspace-pane--hidden-mobile"
-            style={{
+            style={notesRailStyle({
               width: NOTES_RAIL_WIDTH,
               padding: '0.75rem 0.35rem',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               gap: '0.5rem',
-            }}
+            })}
             aria-label="Slide notes"
           >
             <button

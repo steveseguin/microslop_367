@@ -1,6 +1,146 @@
-import React, { useId } from 'react';
+import React, { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronLeft, Moon, Sun } from 'lucide-react';
+import { ChevronLeft, MoreHorizontal, Moon, Sun } from 'lucide-react';
+
+/**
+ * Must stay in step with index.css: these are exactly the breakpoints at which
+ * `.header-action-cluster` becomes a horizontal scroll container (narrow
+ * phones, and phone landscape where height is the scarce axis). Below them the
+ * actions are reachable only by swiping a row that gives no hint it scrolls, so
+ * they move behind an explicit overflow menu instead.
+ */
+const HEADER_COMPACT_QUERY = '(max-width: 640px), (max-height: 560px)';
+
+/**
+ * The overflow popover's positioning context. It has to be the HEADER, not the
+ * trigger's wrapper or the action row: `.toolbar-overflow-panel` pins itself to
+ * `right: var(--space-3)` of its containing block and is nearly `100vw` wide on
+ * a phone, so anchoring it to anything inset from the viewport edge pushes its
+ * left border off screen. This also switches on the `z-index: 20` the
+ * stylesheet already declares for `.suite-header` — dead until now, because the
+ * element was static — which is what keeps the panel above the ribbon's 15.
+ *
+ * Inline only because `.suite-header` is a stylesheet rule this file must not
+ * edit. Move `position: relative` there and delete this.
+ */
+const HEADER_POSITION: React.CSSProperties = { position: 'relative' };
+
+function subscribeToCompact(onChange: () => void) {
+  const query = window.matchMedia(HEADER_COMPACT_QUERY);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
+function readCompact() {
+  return window.matchMedia(HEADER_COMPACT_QUERY).matches;
+}
+
+function useIsCompact() {
+  return useSyncExternalStore(subscribeToCompact, readCompact, () => false);
+}
+
+/**
+ * The phone-sized presentation of whatever the editor passed as `actions`.
+ *
+ * Behaviour is deliberately identical to the ribbon's overflow popover in
+ * `Toolbar/index.tsx`, so the product has one overflow idiom rather than two:
+ * the trigger is the only tab stop while the menu is shut, Escape closes just
+ * this menu and returns focus to the trigger, a pointer press outside dismisses
+ * it, and activating anything inside dismisses it too.
+ *
+ * It is entirely `actions`-driven — it never looks at what the individual
+ * controls are — because Excel and PowerPoint render this same header with
+ * their own action sets.
+ */
+function HeaderActionOverflow({ actions }: { actions: React.ReactNode }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const panelId = useId();
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      // Capture phase + `stopImmediatePropagation`, the same contract the ribbon
+      // and the mobile sheet use: every editor binds its own window-level
+      // Escape (Word closes find and replace, PowerPoint leaves present mode),
+      // and one press must not dismiss this menu AND the thing underneath it.
+      event.stopImmediatePropagation();
+      event.preventDefault();
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (panelRef.current?.contains(target) || triggerRef.current?.contains(target)) {
+        return;
+      }
+
+      setIsOpen(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('pointerdown', handlePointerDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('pointerdown', handlePointerDown, true);
+    };
+  }, [isOpen]);
+
+  return (
+    <div className="header-overflow">
+      <button
+        ref={triggerRef}
+        className="btn btn-secondary btn-icon"
+        type="button"
+        onClick={() => setIsOpen((open) => !open)}
+        aria-haspopup="true"
+        aria-expanded={isOpen}
+        aria-controls={isOpen ? panelId : undefined}
+        aria-label="More actions"
+        title="More actions"
+      >
+        <MoreHorizontal size={18} />
+      </button>
+
+      {/*
+        Hidden, never unmounted. All three editors pass hidden `<input
+        type="file">` elements inside `actions`, and PowerPoint clicks one of
+        them by ref from a RIBBON button — unmounting this panel would null that
+        ref and silently break image insertion in an editor this file does not
+        own. `hidden` keeps the panel out of the tab order and the accessibility
+        tree while the refs stay alive.
+
+        The class is dropped while closed so the UA stylesheet's
+        `[hidden] { display: none }` can never lose to a `display` declaration
+        added to `.header-overflow-panel` later.
+      */}
+      <div
+        ref={panelRef}
+        id={panelId}
+        hidden={!isOpen}
+        className={isOpen ? 'toolbar-overflow-panel header-overflow-panel' : undefined}
+        role="group"
+        aria-label="More actions"
+        onClick={(event) => {
+          if ((event.target as HTMLElement).closest('button')) {
+            setIsOpen(false);
+          }
+        }}
+      >
+        {actions}
+      </div>
+    </div>
+  );
+}
 
 interface AppHeaderProps {
   appName: 'NinjaWord' | 'NinjaCalc' | 'NinjaSlides';
@@ -37,6 +177,7 @@ export function AppHeader({
 }: AppHeaderProps) {
   const { iconLetter, iconClass, suiteLabel } = getAppMeta(appName);
   const saveStatusId = useId();
+  const isCompact = useIsCompact();
 
   const handleHomeClick = (event: React.MouseEvent) => {
     if (saveStatus !== 'Saving...') {
@@ -54,7 +195,7 @@ export function AppHeader({
   };
 
   return (
-    <header className="suite-header">
+    <header className="suite-header" style={HEADER_POSITION}>
       <div className="suite-header__leading">
         <Link to="/" className="suite-home-link" onClick={handleHomeClick}>
           <span className="suite-home-link__icon">
@@ -99,7 +240,14 @@ export function AppHeader({
       </div>
 
       <div className="header-actions">
-        {actions && <div className="header-action-cluster">{actions}</div>}
+        {/* Rendered in exactly ONE place at any viewport, so no action is ever
+            duplicated in the tab order or the accessibility tree. */}
+        {actions &&
+          (isCompact ? (
+            <HeaderActionOverflow actions={actions} />
+          ) : (
+            <div className="header-action-cluster">{actions}</div>
+          ))}
         {toggleTheme && (
           <button
             className="btn btn-secondary btn-icon"

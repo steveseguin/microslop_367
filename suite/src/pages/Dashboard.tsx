@@ -1,10 +1,10 @@
 import { Link } from 'react-router-dom';
 import {
   FileText,
+  FolderOpen,
   Moon,
   Pencil,
   Presentation,
-  Sparkles,
   Sun,
   Table,
   Trash2,
@@ -115,31 +115,16 @@ function writePendingUndos(entries: PendingUndo[]) {
   }
 }
 
-const launchCards = [
-  {
-    type: 'word',
-    name: 'NinjaWord',
-    title: 'Write polished documents',
-    description: 'Rich text editing, tables, images, import and export, dictation, and live document insights.',
-    icon: FileText,
-    accentClass: 'word',
-  },
-  {
-    type: 'excel',
-    name: 'NinjaCalc',
-    title: 'Analyze sheets that matter',
-    description: 'Editable worksheets with imports, multiple sheets, chart previews, and selection summaries.',
-    icon: Table,
-    accentClass: 'excel',
-  },
-  {
-    type: 'powerpoint',
-    name: 'NinjaSlides',
-    title: 'Build decks quickly',
-    description: 'Slide thumbnails, speaker notes, layered canvas editing, presenter mode, and PPTX round-tripping.',
-    icon: Presentation,
-    accentClass: 'powerpoint',
-  },
+/**
+ * ONE set of create actions for the whole page. There used to be two: three
+ * buttons in a 300px marketing hero, and three large launcher cards below it
+ * carrying feature-list prose. Same three destinations, twice, plus copy nobody
+ * reads — which is what made a workspace read as a landing page.
+ */
+const CREATE_ACTIONS = [
+  { type: 'word', label: 'Document', icon: FileText },
+  { type: 'excel', label: 'Spreadsheet', icon: Table },
+  { type: 'powerpoint', label: 'Presentation', icon: Presentation },
 ] as const;
 
 const TYPE_ICON = { word: FileText, excel: Table, powerpoint: Presentation } as const;
@@ -319,64 +304,55 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
 
   return (
     <div className="dashboard">
-      <div className="dashboard-shell">
-        <header className="dashboard-topbar">
-          <div className="dashboard-brand">
-            <div className="dashboard-brand__mark" aria-hidden="true">
-              <Sparkles size={24} />
-            </div>
-            <div>
-              <span className="dashboard-brand__eyebrow">Office Workspace</span>
-              <span className="dashboard-brand__title">OfficeNinja Suite</span>
-            </div>
-          </div>
-          <div className="dashboard-topbar__actions">
-            <button
-              className="btn btn-secondary btn-icon dashboard-theme-toggle"
-              onClick={toggleTheme}
-              type="button"
-              aria-label={isDarkMode ? 'Switch to light theme' : 'Switch to dark theme'}
-            >
-              {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
-          </div>
-        </header>
-      </div>
+      <header className="dashboard-topbar">
+        <div className="dashboard-shell dashboard-topbar__inner">
+          <span className="dashboard-brand">
+            <span className="dashboard-brand__mark" aria-hidden="true">
+              N
+            </span>
+            <span className="dashboard-brand__title">OfficeNinja</span>
+          </span>
 
-      <section className="dashboard-hero" aria-labelledby="dashboard-hero-title">
-        <div className="dashboard-shell">
-          <div className="dashboard-hero-copy">
-            <div className="dashboard-hero-copy__text">
-              <span className="dashboard-kicker">
-                <Sparkles size={14} aria-hidden="true" />
-                Documents, sheets and slides
-              </span>
-              <h1 id="dashboard-hero-title">Everything you are working on, in one place.</h1>
-              <p>Files save locally as you type and reopen exactly where you left them.</p>
-            </div>
+          <nav className="dashboard-create" aria-label="Create a new file">
+            {CREATE_ACTIONS.map(({ type, label, icon: Icon }, index) => (
+              <Link
+                key={type}
+                className={`btn ${index === 0 ? 'btn-primary' : 'btn-secondary'} dashboard-create__btn`}
+                to={`/${type}`}
+                aria-label={`New ${label.toLowerCase()}`}
+              >
+                <Icon size={16} aria-hidden="true" />
+                {/* Two labels, one visible at a time. On a phone the three
+                    buttons share one row, and "New presentation" could only
+                    ever render as "New pres…"; the accessible name is the same
+                    either way (aria-label above). */}
+                <span className="dashboard-create__label">New {label.toLowerCase()}</span>
+                <span className="dashboard-create__label dashboard-create__label--short" aria-hidden="true">
+                  {label}
+                </span>
+              </Link>
+            ))}
+          </nav>
 
-            <nav className="dashboard-hero-actions" aria-label="Create a new file">
-              <Link className="btn btn-primary" to="/word">
-                <FileText size={16} aria-hidden="true" />
-                New document
-              </Link>
-              <Link className="btn btn-secondary" to="/excel">
-                <Table size={16} aria-hidden="true" />
-                New spreadsheet
-              </Link>
-              <Link className="btn btn-secondary" to="/powerpoint">
-                <Presentation size={16} aria-hidden="true" />
-                New presentation
-              </Link>
-            </nav>
-          </div>
+          <button
+            className="btn btn-secondary btn-icon dashboard-theme-toggle"
+            onClick={toggleTheme}
+            type="button"
+            aria-label={isDarkMode ? 'Switch to light theme' : 'Switch to dark theme'}
+          >
+            {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
         </div>
-      </section>
+      </header>
 
       <section className="dashboard-section" aria-labelledby="dashboard-recent-title">
         <div className="dashboard-shell">
           <div className="dashboard-section-header">
-            <div>
+            {/* One caption, and it earns its line: it is the only place the
+                product says the files live in this browser and nowhere else.
+                The heading itself stays exactly "Your files" — a count inside
+                it would become part of its accessible name. */}
+            <div className="dashboard-section-title">
               <h2 id="dashboard-recent-title">Your files</h2>
               <p>
                 {recentDocs.length === 0
@@ -416,9 +392,17 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
           </div>
 
           {recentDocs.length === 0 ? (
-            <p className="dashboard-empty">No files yet. Create a document, spreadsheet, or presentation to get started.</p>
+            <div className="dashboard-empty">
+              <FolderOpen size={22} aria-hidden="true" />
+              <p>
+                <strong>No files yet.</strong> Start a document, spreadsheet or presentation — everything you
+                make is saved in this browser as you type.
+              </p>
+            </div>
           ) : visibleDocs.length === 0 ? (
-            <p className="dashboard-empty">No files match “{query}”.</p>
+            <div className="dashboard-empty">
+              <p>No files match “{query}”.</p>
+            </div>
           ) : (
             <>
               <div className="recent-grid">
@@ -427,78 +411,69 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
                   const isRenaming = renamingId === doc.id;
                   return (
                     <article key={doc.id} className="recent-card">
-                      <div className="recent-card__header">
-                        <span className="recent-card__type">
-                          <Icon size={14} aria-hidden="true" />
-                          <span>{TYPE_LABEL[doc.type]}</span>
-                        </span>
-                        <div className="recent-card__actions">
-                          <button
-                            className="recent-card-btn"
-                            onClick={() => {
-                              setRenamingId(doc.id);
-                              setRenameDraft(doc.title);
+                      <div className={`file-icon ${doc.type}`} aria-hidden="true">
+                        <Icon size={18} />
+                      </div>
+
+                      <div className="recent-card__meta">
+                        {isRenaming ? (
+                          <form
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              void commitRename(doc);
                             }}
-                            title={`Rename ${doc.title}`}
-                            aria-label={`Rename ${doc.title}`}
-                            type="button"
                           >
-                            <Pencil size={16} />
-                          </button>
-                          <button
-                            className="recent-card-btn recent-card-btn--danger"
-                            onClick={() => void handleDelete(doc)}
-                            title={`Delete ${doc.title}`}
-                            aria-label={`Delete ${doc.title}`}
-                            type="button"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="recent-card__file">
-                        <div className={`launcher-card__icon ${doc.type}`} aria-hidden="true">
-                          <Icon size={20} />
-                        </div>
-                        <div className="recent-card__meta">
-                          {isRenaming ? (
-                            <form
-                              onSubmit={(event) => {
-                                event.preventDefault();
-                                void commitRename(doc);
+                            <label className="sr-only" htmlFor={`rename-${doc.id}`}>
+                              New name for {doc.title}
+                            </label>
+                            <input
+                              id={`rename-${doc.id}`}
+                              className="form-control"
+                              value={renameDraft}
+                              autoFocus
+                              onChange={(event) => setRenameDraft(event.target.value)}
+                              onBlur={() => void commitRename(doc)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Escape') {
+                                  setRenamingId(null);
+                                }
                               }}
-                            >
-                              <label className="sr-only" htmlFor={`rename-${doc.id}`}>
-                                New name for {doc.title}
-                              </label>
-                              <input
-                                id={`rename-${doc.id}`}
-                                className="form-control"
-                                value={renameDraft}
-                                autoFocus
-                                onChange={(event) => setRenameDraft(event.target.value)}
-                                onBlur={() => void commitRename(doc)}
-                                onKeyDown={(event) => {
-                                  if (event.key === 'Escape') {
-                                    setRenamingId(null);
-                                  }
-                                }}
-                              />
-                            </form>
-                          ) : (
-                            <h3>
-                              <Link className="card-stretch-link" to={`/${doc.type}?id=${doc.id}`}>
-                                {doc.title}
-                              </Link>
-                            </h3>
-                          )}
-                          <p>Updated {formatDate(doc.updatedAt)}</p>
-                        </div>
+                            />
+                          </form>
+                        ) : (
+                          <h3>
+                            <Link className="card-stretch-link" to={`/${doc.type}?id=${doc.id}`}>
+                              {doc.title}
+                            </Link>
+                          </h3>
+                        )}
+                        <p className="file-meta">
+                          {TYPE_LABEL[doc.type]} · {formatDate(doc.updatedAt)}
+                        </p>
                       </div>
 
-                      <div className="recent-card__footer">
-                        <span>Open file</span>
+                      <div className="recent-card__actions">
+                        <button
+                          className="recent-card-btn"
+                          onClick={() => {
+                            setRenamingId(doc.id);
+                            setRenameDraft(doc.title);
+                          }}
+                          title={`Rename ${doc.title}`}
+                          aria-label={`Rename ${doc.title}`}
+                          type="button"
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          className="recent-card-btn recent-card-btn--danger"
+                          onClick={() => void handleDelete(doc)}
+                          title={`Delete ${doc.title}`}
+                          aria-label={`Delete ${doc.title}`}
+                          type="button"
+                        >
+                          <Trash2 size={16} />
+                        </button>
                       </div>
                     </article>
                   );
@@ -506,7 +481,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
               </div>
 
               {(hiddenCount > 0 || showAll) && visibleDocs.length > PAGE_SIZE && (
-                <div className="dashboard-section-header" style={{ marginTop: '1rem', marginBottom: 0 }}>
+                <div className="dashboard-more">
                   <button className="btn btn-secondary" type="button" onClick={() => setShowAll((value) => !value)}>
                     {showAll ? 'Show fewer files' : `Show all ${visibleDocs.length} files`}
                   </button>
@@ -514,43 +489,6 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
               )}
             </>
           )}
-        </div>
-      </section>
-
-      <section className="dashboard-section" aria-labelledby="dashboard-apps-title">
-        <div className="dashboard-shell">
-          <div className="dashboard-section-header">
-            <div>
-              <h2 id="dashboard-apps-title">Start something new</h2>
-              <p>Each app opens with its tools, autosave, and mobile layout already in place.</p>
-            </div>
-          </div>
-
-          <nav className="launcher-grid" aria-label="Open an app">
-            {launchCards.map((card) => {
-              const Icon = card.icon;
-              return (
-                <article key={card.type} className="launcher-card">
-                  <div className={`launcher-card__icon ${card.accentClass}`} aria-hidden="true">
-                    <Icon size={24} />
-                  </div>
-                  <div>
-                    <h3>
-                      <Link className="card-stretch-link" to={`/${card.type}`}>
-                        {card.name}
-                      </Link>
-                    </h3>
-                    <p>{card.title}</p>
-                  </div>
-                  <p>{card.description}</p>
-                  <div className="launcher-card__footer">
-                    <span>Open editor</span>
-                    <span>{TYPE_LABEL[card.type]}</span>
-                  </div>
-                </article>
-              );
-            })}
-          </nav>
         </div>
       </section>
 

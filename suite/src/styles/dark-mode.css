@@ -10,12 +10,25 @@ body.dark-mode {
    What it was MISSING is the matching ink. `body.dark-mode { color }` above
    cascades into the in-cell editor, which drew #edf4ff text on this white
    fill — typing into a cell was invisible. `.document-page` in index.css
-   already pairs its white background with `color: #0f172a`; so does this. */
+   already pairs its white background with `color: #0f172a`; so does this.
+
+   `.luckysheet-cell-sheettable` IS DELIBERATELY NOT IN THIS LIST, and adding
+   it back blanks every cell value in the product's dark theme.
+   It is not a backdrop: it is a `position: relative`, 4560x1760 div that comes
+   AFTER `.fortune-sheet-canvas` in the DOM. Both are positioned with `z-index:
+   auto`, so paint order is document order and an opaque fill on this one
+   covers the canvas that all the cell text was just drawn onto. Nothing about
+   the computed styles says so — `getComputedStyle(.luckysheet-cell-sheettable)
+   .color` reports the correct #0f172a the whole time, which is why two earlier
+   passes at this bug looked correct and shipped a blank grid. Proven by
+   screenshot: toggling this one selector to `transparent` and forcing a
+   repaint brings Team/Target/Actual back. If a grey band ever appears behind
+   the grid again, fix it on `.fortune-sheet-container`, which is an ancestor
+   and paints below the canvas. */
 body.dark-mode .fortune-sheet-container,
 body.dark-mode .fortune-sheet-area,
 body.dark-mode .fortune-sheet-canvas,
-body.dark-mode .luckysheet-input-box,
-body.dark-mode .luckysheet-cell-sheettable {
+body.dark-mode .luckysheet-input-box {
   background: #ffffff;
 }
 

@@ -38,6 +38,7 @@ import {
   ListOrdered,
   Mic,
   Redo,
+  RotateCcw,
   Rows3,
   Save,
   Search,
@@ -648,6 +649,7 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const colorInputRef = useRef<HTMLInputElement | null>(null);
   const findInputRef = useRef<HTMLInputElement | null>(null);
   const dragDepthRef = useRef(0);
   const previousFileNameRef = useRef(fileName);
@@ -1976,20 +1978,30 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
         ? `${matches.length} result${matches.length === 1 ? '' : 's'}`
         : `${activeMatchIndex + 1} of ${matches.length}`;
 
-  const controlStyle: React.CSSProperties = {
-    height: 32,
-    borderRadius: 8,
-    border: '1px solid rgba(127, 127, 127, 0.4)',
-    background: 'transparent',
-    color: 'inherit',
-    font: 'inherit',
-    fontSize: 13,
-    padding: '0 6px',
-    maxWidth: 150,
-  };
-
   return (
     <div className="app-container">
+      {/*
+        Every hidden picker lives here rather than in the header's `actions`,
+        because `actions` is now relocated into an overflow menu on phones and a
+        picker should not depend on where its button happens to be rendered.
+        The colour input is deliberately OUTSIDE `.toolbar` too: the stylesheet
+        force-sizes `.toolbar input[type="color"]`, which would fight `.sr-only`.
+      */}
+      <input ref={importInputRef} type="file" accept=".docx" hidden onChange={handleFileSelected} />
+      <input ref={imageInputRef} type="file" accept="image/*" hidden onChange={(event) => void handleImageUpload(event)} />
+      <input
+        ref={colorInputRef}
+        type="color"
+        className="sr-only"
+        value={currentColor}
+        onChange={(event) => editor.chain().focus().setColor(event.target.value).run()}
+        // The swatch button in the ribbon is the control; this input is only the
+        // native picker it opens, so it must not appear twice to a screen reader
+        // or take a second tab stop.
+        aria-hidden="true"
+        tabIndex={-1}
+      />
+
       <AppHeader
         appName="NinjaWord"
         fileName={fileName}
@@ -2000,8 +2012,6 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
         saveStatus={saveStatus}
         actions={
           <>
-            <input ref={importInputRef} type="file" accept=".docx" hidden onChange={handleFileSelected} />
-            <input ref={imageInputRef} type="file" accept="image/*" hidden onChange={(event) => void handleImageUpload(event)} />
             <button
               className="btn btn-secondary"
               onClick={saveNow}
@@ -2078,9 +2088,9 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
 
         <ToolbarGroup label="Font">
           <select
+            className="toolbar-select"
             aria-label="Font family"
             title="Font family"
-            style={controlStyle}
             value={currentFontFamily}
             onChange={(event) => {
               const value = event.target.value;
@@ -2098,9 +2108,9 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
             ))}
           </select>
           <select
+            className="toolbar-select toolbar-select--narrow"
             aria-label="Font size"
             title="Font size"
-            style={{ ...controlStyle, maxWidth: 90 }}
             value={currentFontSize}
             onChange={(event) => {
               const value = event.target.value;
@@ -2117,23 +2127,57 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
               </option>
             ))}
           </select>
-          <input
-            type="color"
-            aria-label="Text colour"
-            title="Text colour"
-            style={{ ...controlStyle, width: 44, padding: 2, maxWidth: 44 }}
-            value={currentColor}
-            onChange={(event) => editor.chain().focus().setColor(event.target.value).run()}
-          />
+          {/*
+            Office's text-colour control: the "A" glyph over a bar carrying the
+            current colour. A bare `<input type="color">` renders as a solid
+            filled tile, which read as the loudest object in a row of 1.5px line
+            icons no matter how the stylesheet dressed it. The button is a plain
+            `.toolbar-btn`, so it inherits the row's size, hover, focus ring and
+            roving tab index; only the bar is coloured, and the "A" follows the
+            row's ink via `currentColor`.
+          */}
           <button
-            className="btn btn-secondary"
+            className="toolbar-btn"
             type="button"
-            style={{ height: 32, fontSize: 13 }}
+            onClick={() => colorInputRef.current?.click()}
+            title="Text colour"
+            aria-label={`Text colour (${currentColor})`}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path
+                d="M5.5 16.5 12 4l6.5 12.5M8.2 13h7.6"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              {/*
+                The hairline is not decoration. The bar carries an arbitrary
+                user colour, and the default (#000000) is invisible against the
+                dark ribbon — as is white against the light one. A boundary
+                drawn in `currentColor` adapts to whichever theme is showing,
+                the same job the stylesheet's `::-webkit-color-swatch` border
+                does for a native swatch.
+              */}
+              <rect
+                x="4.5"
+                y="19"
+                width="15"
+                height="3"
+                rx="1.2"
+                fill={currentColor}
+                stroke="currentColor"
+                strokeOpacity="0.45"
+                strokeWidth="1"
+              />
+            </svg>
+          </button>
+          <ToolbarButton
+            icon={RotateCcw}
             onClick={() => editor.chain().focus().unsetColor().run()}
             title="Reset text colour"
-          >
-            Reset
-          </button>
+          />
         </ToolbarGroup>
 
         <ToolbarGroup label="Alignment">
