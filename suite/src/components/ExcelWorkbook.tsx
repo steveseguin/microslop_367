@@ -148,6 +148,66 @@ function useAccessibleFortuneToolbar(shellRef: React.RefObject<HTMLDivElement | 
       }
     };
 
+    /*
+     * fortune-sheet builds a Combo's accessible name as `${label}: ${valueLabel}`, and
+     * `valueLabel` is not always translated or even present. Measured in this build:
+     * `aria-label="Border: 边框设置"` and `aria-label="Merge cells: 合并单元格"` announce
+     * untranslated Chinese to an English screen reader, and six more ("Font color: ",
+     * "Fill color: ", "Horizontal align: ", "Vertical align: ", "Text wrap: ", "Sort and
+     * filter: ") announce a dangling separator with nothing after it.
+     *
+     * Only those two shapes are rewritten, down to the label alone. A value that is real
+     * and translated ("Format: Automatic", "Font size: 10", "Border: Dropdown") carries
+     * genuine state and is left exactly as the library wrote it. CSS cannot do this: an
+     * accessible name is not a stylable property.
+     */
+    const CJK = /[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uff00-\uffef]/;
+
+    const syncAccessibleNames = (toolbar: HTMLElement) => {
+      for (const node of allControlsOf(toolbar)) {
+        const label = node.getAttribute('aria-label');
+        const parts = label ? /^(.*?):\s*(.*)$/.exec(label) : null;
+        if (!parts) {
+          continue;
+        }
+
+        const [, name, value] = parts;
+        if (name && (value === '' || CJK.test(value))) {
+          node.setAttribute('aria-label', name);
+        }
+      }
+    };
+
+    /*
+     * The library's toggle buttons announce nothing when they are ON. Its `Button` renders
+     * `style={selected ? { backgroundColor: '#E7E5EB' } : {}}` — colour is the ONLY signal,
+     * which is both a WCAG 1.4.1 and a 4.1.2 failure.
+     *
+     * `aria-pressed` is applied to exactly the four items the library can ever mark
+     * selected (`selectedMap` in @fortune-sheet/core: bold, italic, underline,
+     * strike-through). Putting it on the others would be a lie in the opposite direction —
+     * "Clear format, not pressed" is not a toggle at all. They are matched on the icon's
+     * `<use href="#name">`, which is the library's internal item id: stable, and unlike the
+     * tooltip not affected by locale.
+     */
+    const TOGGLE_ICON_IDS = ['#bold', '#italic', '#underline', '#strike-through'];
+
+    const syncPressedState = (toolbar: HTMLElement) => {
+      for (const node of toolbar.querySelectorAll<HTMLElement>('.fortune-toolbar-button[role="button"]')) {
+        const iconId = node.querySelector('svg use')?.getAttribute('xlink:href') ?? node.querySelector('svg use')?.getAttribute('href');
+        if (!iconId || !TOGGLE_ICON_IDS.includes(iconId)) {
+          continue;
+        }
+
+        // An inline backgroundColor is set by nothing else on these buttons, so it is a
+        // faithful read of `selected` without hard-coding the library's hex value.
+        const pressed = node.style.backgroundColor !== '' ? 'true' : 'false';
+        if (node.getAttribute('aria-pressed') !== pressed) {
+          node.setAttribute('aria-pressed', pressed);
+        }
+      }
+    };
+
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as Element | null;
       const control = target?.closest<HTMLElement>('.fortune-toolbar [role="button"]') ?? null;
@@ -209,17 +269,35 @@ function useAccessibleFortuneToolbar(shellRef: React.RefObject<HTMLDivElement | 
       syncRovingTabIndex();
     };
 
+    const syncToolbar = () => {
+      const toolbar = toolbarOf();
+      if (!toolbar) {
+        return;
+      }
+
+      syncAccessibleNames(toolbar);
+      syncPressedState(toolbar);
+      syncRovingTabIndex();
+    };
+
     let frame = 0;
     const scheduleSync = () => {
       window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(syncRovingTabIndex);
+      frame = window.requestAnimationFrame(syncToolbar);
     };
 
     shell.addEventListener('keydown', handleKeyDown);
     shell.addEventListener('focusin', scheduleSync);
 
+    /*
+     * `style` is watched as well as `tabindex` because the selected state of a toggle
+     * button IS an inline style: React updates that attribute in place on the existing
+     * node, which produces no childList record, so without it `aria-pressed` would go
+     * stale the moment bold was switched on. Nothing here ever writes `style` or
+     * `tabindex` unless it is already wrong, so the observer cannot feed itself.
+     */
     const observer = new MutationObserver(scheduleSync);
-    observer.observe(shell, { childList: true, subtree: true, attributeFilter: ['tabindex'] });
+    observer.observe(shell, { childList: true, subtree: true, attributeFilter: ['tabindex', 'style'] });
     scheduleSync();
 
     return () => {

@@ -11,20 +11,6 @@ import { ChevronLeft, MoreHorizontal, Moon, Sun } from 'lucide-react';
  */
 const HEADER_COMPACT_QUERY = '(max-width: 640px), (max-height: 560px)';
 
-/**
- * The overflow popover's positioning context. It has to be the HEADER, not the
- * trigger's wrapper or the action row: `.toolbar-overflow-panel` pins itself to
- * `right: var(--space-3)` of its containing block and is nearly `100vw` wide on
- * a phone, so anchoring it to anything inset from the viewport edge pushes its
- * left border off screen. This also switches on the `z-index: 20` the
- * stylesheet already declares for `.suite-header` — dead until now, because the
- * element was static — which is what keeps the panel above the ribbon's 15.
- *
- * Inline only because `.suite-header` is a stylesheet rule this file must not
- * edit. Move `position: relative` there and delete this.
- */
-const HEADER_POSITION: React.CSSProperties = { position: 'relative' };
-
 function subscribeToCompact(onChange: () => void) {
   const query = window.matchMedia(HEADER_COMPACT_QUERY);
   query.addEventListener('change', onChange);
@@ -214,7 +200,7 @@ export function AppHeader({
   };
 
   return (
-    <header className="suite-header" style={HEADER_POSITION}>
+    <header className="suite-header">
       <div className="suite-header__leading">
         <Link to="/" className="suite-home-link" onClick={handleHomeClick}>
           <span className="suite-home-link__icon">

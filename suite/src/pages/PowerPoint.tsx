@@ -33,8 +33,10 @@ import { Toolbar, ToolbarButton, ToolbarGroup } from '../components/Toolbar';
 import {
   BACKUP_SIZE_LIMIT_BYTES,
   DocumentPersistenceError,
+  DocumentReadError,
   getCurrentClientId,
   loadDocument,
+  retryStorageConnection,
   saveDocument,
   saveDocumentBackupNow,
   subscribeToDocument,
@@ -89,6 +91,9 @@ interface BannerState {
   title: string;
   detail?: string;
   action?: { label: string; onClick: () => void };
+  actions?: Array<{ label: string; onClick: () => void; isPrimary?: boolean }>;
+  /** A lock the banner is the only explanation of, and the only way out of. */
+  persistent?: boolean;
 }
 
 interface SlideCapture {
@@ -688,6 +693,16 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   const [dropSlideIndex, setDropSlideIndex] = useState<number | null>(null);
   const [slideLoadError, setSlideLoadError] = useState<{ slideId: string; index: number } | null>(null);
   const [presentSlideFailed, setPresentSlideFailed] = useState(false);
+  /*
+   * The stored deck could not be READ (as opposed to "does not exist"). While true the
+   * canvas is never claimed for a slide and every save path refuses, so the starter deck
+   * this page seeds itself with can never reach storage on top of a record nobody has seen.
+   */
+  const [isDeckUnopenable, setIsDeckUnopenable] = useState(false);
+  const isDeckUnopenableRef = useRef(false);
+  const [openFailureDetail, setOpenFailureDetail] = useState<string | null>(null);
+  // Bumped by "Try again"; re-arms the load effect.
+  const [loadAttempt, setLoadAttempt] = useState(0);
   // Persistent, not a toast: while true, an edit made inside the autosave window cannot be
   // recovered after a crash, and the user has to be able to see that at any moment.
   const [oversizeForBackup, setOversizeForBackup] = useState<number | null>(null);
@@ -823,6 +838,10 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     conflictRevisionRef.current = null;
     setLastSavedAt(null);
     setSaveStatus('Saved');
+    isDeckUnopenableRef.current = false;
+    setIsDeckUnopenable(false);
+    setOpenFailureDetail(null);
+    openFailureDetailRef.current = null;
     setBanner(null);
     setPresentIndex(null);
     setIsLoaded(false);
@@ -899,7 +918,66 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     [captureActiveSlide, commitSlides],
   );
 
+  /**
+   * Retry rather than a hard lock: the likeliest cause is transient -- the 10s IndexedDB
+   * open budget expiring (an upgrade blocked by another tab), or the 5s window in which
+   * db.ts remembers a failed open. `retryStorageConnection()` clears that memo so the click
+   * actually re-opens the database instead of instantly repeating the same failure.
+   * Nothing was written, so retrying is free.
+   */
+  const retryOpen = useCallback(() => {
+    retryStorageConnection();
+    isDeckUnopenableRef.current = false;
+    setIsDeckUnopenable(false);
+    setOpenFailureDetail(null);
+    setBanner(null);
+    setSaveStatus('Loading...');
+    setLoadAttempt((value) => value + 1);
+  }, []);
+
+  /**
+   * Leave the unreadable deck strictly alone and open a brand new one. A full reload onto a
+   * new id re-mounts against an id nothing is stored under, so there is no path by which
+   * this session can touch the record it could not read.
+   */
+  const startNewDeck = useCallback(() => {
+    window.location.hash = `#/powerpoint?id=${createId('ppt')}`;
+    window.location.reload();
+  }, []);
+
+  const unopenableBanner = useCallback(
+    (detail: string | null): BannerState => ({
+      tone: 'error',
+      title: 'This presentation could not be opened. Your saved copy has NOT been changed.',
+      detail:
+        'Browser storage did not answer, so the editor does not know what this deck contains. No slide was loaded and saving is disabled — nothing here can overwrite it. This is usually temporary.' +
+        (detail ? ` (${detail})` : ''),
+      persistent: true,
+      actions: [
+        { label: 'Try again', onClick: retryOpen, isPrimary: true },
+        { label: 'Start a new presentation instead', onClick: startNewDeck },
+      ],
+    }),
+    [retryOpen, startNewDeck],
+  );
+
+  const openFailureDetailRef = useRef<string | null>(null);
+  openFailureDetailRef.current = openFailureDetail;
+  const unopenableBannerRef = useRef(unopenableBanner);
+  unopenableBannerRef.current = unopenableBanner;
+
   const performSave = useCallback(async ({ force = false, allowResurrect = false }: { force?: boolean; allowResurrect?: boolean } = {}) => {
+    /*
+     * The stored deck could not be READ. Anything this page could serialise now is its own
+     * starter deck, and writing that would destroy a record nobody has seen. This guard
+     * sits in the single save funnel so it also covers the toolbar Save button and Ctrl+S.
+     */
+    if (isDeckUnopenableRef.current) {
+      setSaveStatus('Read-only: could not open');
+      setBanner(unopenableBannerRef.current(openFailureDetailRef.current));
+      return;
+    }
+
     if (!isLoadedRef.current) {
       return;
     }
@@ -1302,6 +1380,8 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
           setCurrentSlideId(migratedSlides[0].id);
         }
 
+        // Only the retry path parks the pill on 'Loading...'; clear it now the load is in.
+        setSaveStatus((current) => (current === 'Loading...' ? (doc ? 'Saved' : 'Not saved yet') : current));
         setIsLoaded(true);
         isLoadedRef.current = true;
         if (deckDirtyRef.current) {
@@ -1309,16 +1389,33 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         }
       })
       .catch((error) => {
+        /*
+         * The stored deck could NOT be read. This used to open "a new slide deck instead"
+         * and mark the page loaded, which armed autosave: the first edit wrote the starter
+         * deck over a record nobody had managed to look at, with the pill reading "Saved".
+         * db.ts's conflict check cannot catch it -- a tab reloading a deck it saved itself
+         * keeps the same client id, which disables half of `isConflict`.
+         *
+         * Every failure is treated as unreadable, including an unexpected one: from here
+         * "the load threw" and "the load could not read" are the same thing, and guessing
+         * between them is what wrote the starter deck in the first place.
+         *
+         * `isLoaded` deliberately stays FALSE. It gates `renderCurrentSlide` (so the canvas
+         * is never claimed for a slide and no template is applied), the autosave debounce
+         * and the pagehide snapshot, so the block holds even if a future save path forgets
+         * to check `isDeckUnopenableRef`.
+         */
         console.error('Failed to load presentation', error);
-        setBanner({
-          tone: 'error',
-          title: 'Presentation failed to load cleanly.',
-          detail: 'A new slide deck was opened instead.',
-        });
-        setIsLoaded(true);
-        isLoadedRef.current = true;
+        isDeckUnopenableRef.current = true;
+        setIsDeckUnopenable(true);
+        const detail = error instanceof DocumentReadError ? error.detail : null;
+        setOpenFailureDetail(detail);
+        openFailureDetailRef.current = detail;
+        // Contains "read-only" so AppHeader paints the pill as a danger state.
+        setSaveStatus('Read-only: could not open');
+        setBanner(unopenableBannerRef.current(detail));
       });
-  }, [commitSlides, docId, fabricCanvas, isLoaded, scheduleSave]);
+  }, [commitSlides, docId, fabricCanvas, isLoaded, loadAttempt, scheduleSave]);
 
   /**
    * Rebuilds previews for slides that arrived without one — the unload snapshot drops
@@ -2705,18 +2802,18 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   const hasNotesOnCurrentSlide = Boolean(currentSlide?.notes?.trim());
 
   /**
-   * The rail's width is published as `--notes-rail-w` rather than written straight onto the
-   * element, so index.css owns the value the moment it wants to: a `.notes-sidebar { width:
-   * var(--notes-rail-w, 288px) }` rule there makes the inline `width` below redundant and it
-   * can be deleted in one line. Until that rule exists the property is also consumed here so
-   * the rail is actually the width it declares. Nothing is set below the stacking breakpoint
-   * — the mobile `width: 100%` stays entirely in CSS, which is where it can respond.
+   * The rail PUBLISHES its width as `--notes-rail-w` and never sets `width` itself.
+   * `index.css` now carries `.notes-sidebar { width: var(--notes-rail-w, 288px) }` for
+   * desktop and `width: 100%` below the stacking breakpoint, so the width is decided in one
+   * place that can respond to the viewport. This function's only job is to declare the
+   * value the stylesheet reads, plus the non-width desktop layout properties.
    */
   const notesRailStyle = (desktop: React.CSSProperties): React.CSSProperties => {
-    const declared = typeof desktop.width === 'number' ? `${desktop.width}px` : String(desktop.width ?? 'auto');
+    const { width, ...rest } = desktop;
+    const declared = typeof width === 'number' ? `${width}px` : String(width ?? 'auto');
     const railWidth = { '--notes-rail-w': declared } as React.CSSProperties;
 
-    return isCompactLayout ? railWidth : { ...railWidth, ...desktop, width: 'var(--notes-rail-w)' };
+    return isCompactLayout ? railWidth : { ...railWidth, ...rest };
   };
 
   // The "Deck status" card that used to sit under this one is gone: current slide, selection
@@ -2854,6 +2951,21 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
           <div>
             <div className="editor-banner__text">{banner.title}</div>
             {banner.detail && <div className="editor-banner__hint">{banner.detail}</div>}
+            {banner.actions && banner.actions.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                {banner.actions.map((action) => (
+                  <button
+                    key={action.label}
+                    className={`btn ${action.isPrimary ? 'btn-primary' : 'btn-secondary'}`}
+                    type="button"
+                    style={{ height: 32, fontSize: 13 }}
+                    onClick={action.onClick}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             {banner.action && (
@@ -2869,9 +2981,15 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
                 {banner.action.label}
               </button>
             )}
-            <button className="btn btn-secondary btn-icon" onClick={() => setBanner(null)} type="button" aria-label="Dismiss message">
-              <X size={16} />
-            </button>
+            {/*
+              While the deck is locked the banner is the only explanation of why the canvas
+              is blank and the only way out, so it must not be dismissable.
+            */}
+            {!banner.persistent && (
+              <button className="btn btn-secondary btn-icon" onClick={() => setBanner(null)} type="button" aria-label="Dismiss message">
+                <X size={16} />
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -2989,6 +3107,37 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
               <canvas ref={canvasRef} />
             </div>
             {isDropTargetActive && <div className="canvas-drop-target-hint">Drop an image to add it to this slide.</div>}
+            {/*
+              The stored deck could not be read, so no slide was loaded and the canvas is
+              deliberately empty. Without this the user would be looking at a blank white
+              slide with no indication that it is not their deck.
+            */}
+            {isDeckUnopenable && (
+              <div
+                role="alert"
+                style={{
+                  position: 'absolute',
+                  inset: '1rem',
+                  zIndex: 5,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  textAlign: 'center',
+                  padding: '1rem',
+                  borderRadius: '1rem',
+                  background: 'rgba(15, 23, 42, 0.82)',
+                  color: '#f8fafc',
+                }}
+              >
+                <strong>This presentation could not be opened.</strong>
+                <span style={{ maxWidth: '32rem', fontSize: '0.9rem' }}>
+                  Browser storage did not answer, so no slide was loaded and saving is disabled. Your saved copy
+                  has not been changed.
+                </span>
+              </div>
+            )}
             {slideLoadError && (
               <div
                 role="alert"

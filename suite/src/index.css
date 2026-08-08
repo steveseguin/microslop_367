@@ -693,19 +693,61 @@ body.dark-mode .btn-primary {
   white-space: nowrap;
 }
 
+/* These three pills are the product's only ambient state signal, so they follow
+   the same rule as the create buttons and the file icons: tell them apart
+   before reading them.
+
+   Hue alone will not do that. Green / amber / red is the worst possible triad
+   for the commonest colour-vision deficiencies — to a deuteranope those three
+   are one colour at three lightnesses. Each pill therefore also carries a
+   SHAPE: a filled dot for a confirmed write, a hollow ring for "nothing has
+   happened yet", a diamond for "this needs you".
+
+   `content: ""` and not a "✓" / "!" glyph on purpose. Generated text content IS
+   exposed in the accessibility tree in Chrome and Firefox, and this element is
+   referenced by `aria-describedby` from the filename field — a decorative tick
+   would be spoken as part of the document's description. An empty box with a
+   background has no text to leak. */
+.status-pill::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin-right: var(--space-1);
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+
 .status-pill--success {
   color: var(--success);
   background: var(--success-soft);
 }
 
+/* NEUTRAL, deliberately. This was `--warning` on `--warning-soft`, so a
+   brand-new untouched document opened announcing "Not saved yet" in the same
+   amber it uses for a problem — the app flagging itself before the user had
+   typed a character. `pending` covers "not written yet" and "writing now",
+   neither of which is a fault, so it gets the quietest treatment in the set:
+   muted ink on a plain raised surface. Measured 6.2:1 light / 6.4:1 dark. */
 .status-pill--pending {
-  color: var(--warning);
-  background: var(--warning-soft);
+  color: var(--text-muted);
+  background: var(--surface-strong);
+}
+
+/* A ring, not a disc: "nothing has landed yet" reads as an unfilled state. */
+.status-pill--pending::before {
+  background: none;
+  border: 2px solid currentColor;
 }
 
 .status-pill--alert {
   color: var(--danger);
   background: var(--danger-soft);
+}
+
+.status-pill--alert::before {
+  border-radius: 1px;
+  rotate: 45deg;
 }
 
 /* =========================================================================
@@ -2904,6 +2946,25 @@ input[type="color"]::-moz-color-swatch {
   .spreadsheet-container .fortune-toolbar-combo {
     min-width: 44px;
     height: 44px;
+  }
+
+  /* The two halves of a split control are the elements that actually carry the
+     click, and they sit INSIDE the combo's 1px border, so `height: 100%` gave
+     them 42. The negative margin lets them cover the border box exactly — the
+     border is transparent until the control is pressed, so nothing shifts. */
+  .spreadsheet-container .fortune-toolbar-combo-button,
+  .spreadsheet-container .fortune-toolbar-combo-arrow {
+    height: 44px;
+    margin-block: -1px;
+  }
+
+  /* The arrow was 10x18. It cannot also be 44 WIDE: seven of these on the row,
+     each 88px for two 44px halves, is 616px of controls on a 390px screen and
+     everything past the third would be exiled into the overflow menu. 24px
+     clears SC 2.5.8's 24x24 minimum on both axes and keeps the row usable. */
+  .spreadsheet-container .fortune-toolbar-combo-arrow {
+    width: 24px;
+    justify-content: center;
   }
 
   .spreadsheet-container .fortune-toolbar-divider {

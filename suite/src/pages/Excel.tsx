@@ -27,7 +27,15 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { StatusBar } from '../components/StatusBar';
 import { Toolbar, ToolbarButton, ToolbarGroup } from '../components/Toolbar';
 import type { WorkbookInstance } from '../components/ExcelWorkbook';
-import { getCurrentClientId, loadDocument, saveDocument, saveDocumentBackupNow, subscribeToDocument } from '../utils/db';
+import {
+  DocumentReadError,
+  getCurrentClientId,
+  loadDocument,
+  retryStorageConnection,
+  saveDocument,
+  saveDocumentBackupNow,
+  subscribeToDocument,
+} from '../utils/db';
 
 const ExcelWorkbook = lazy(() => import('../components/ExcelWorkbook'));
 const SelectionChart = lazy(() => import('../components/SelectionChart'));
@@ -37,10 +45,17 @@ interface ExcelProps {
   isDarkMode: boolean;
 }
 
+interface BannerAction {
+  label: string;
+  onClick: () => void;
+  isPrimary?: boolean;
+}
+
 interface BannerState {
   tone: 'success' | 'warning' | 'error';
   title: string;
   detail?: string;
+  actions?: BannerAction[];
 }
 
 interface SelectionSummary {
@@ -726,6 +741,16 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
   const [hasConflict, setHasConflict] = useState(false);
   // Another tab has saved past us: neither save path can win from here without forcing.
   const [isStale, setIsStale] = useState(false);
+  /*
+   * The stored workbook could not be READ (as opposed to "does not exist"). While true the
+   * grid is not mounted at all and every save path refuses, so the starter workbook this
+   * page seeds itself with can never reach storage on top of a record nobody has seen.
+   */
+  const [isWorkbookUnopenable, setIsWorkbookUnopenable] = useState(false);
+  const isWorkbookUnopenableRef = useRef(false);
+  const [openFailureDetail, setOpenFailureDetail] = useState<string | null>(null);
+  // Bumped by "Try again"; re-arms the load effect.
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const isNarrowStatusBar = useIsNarrowStatusBar();
 
   useEffect(() => {
@@ -773,6 +798,9 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
     setDocumentRevision(0);
     setHasConflict(false);
     setIsStale(false);
+    isWorkbookUnopenableRef.current = false;
+    setIsWorkbookUnopenable(false);
+    setOpenFailureDetail(null);
     setBanner(null);
     setLastSavedAt(null);
     setFileName(defaultFileName);
@@ -827,18 +855,88 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
             });
           }
         }
+        // Only the retry path parks the pill on 'Loading...'; clear it now the load is in.
+        setSaveStatus((current) => (current === 'Loading...' ? (doc ? 'Saved' : 'Not saved yet') : current));
         setIsLoaded(true);
       })
       .catch((error) => {
+        /*
+         * The stored workbook could NOT be read. This used to open "a starter workbook
+         * instead" and mark the page loaded, which armed autosave: the first cell edit
+         * wrote the starter workbook over a record nobody had managed to look at, with the
+         * pill reading "Saved". db.ts's conflict check cannot catch it -- a tab reloading a
+         * workbook it saved itself keeps the same client id, which disables half of
+         * `isConflict`.
+         *
+         * Every failure is treated as unreadable, including an unexpected one: from here
+         * "the load threw" and "the load could not read" are the same thing, and guessing
+         * between them is what wrote the starter workbook in the first place.
+         *
+         * `isLoaded` deliberately stays FALSE. It gates the autosave debounce, the
+         * pagehide/visibilitychange snapshot and the unmount flush, so the block holds even
+         * if a future save path forgets to check `isWorkbookUnopenableRef`.
+         */
         console.error('Failed to load spreadsheet', error);
-        setBanner({
-          tone: 'error',
-          title: 'Spreadsheet failed to load cleanly.',
-          detail: 'A starter workbook was opened instead.',
-        });
-        setIsLoaded(true);
+        isWorkbookUnopenableRef.current = true;
+        setIsWorkbookUnopenable(true);
+        setOpenFailureDetail(error instanceof DocumentReadError ? error.detail : null);
+        // Contains "read-only" so AppHeader paints the pill as a danger state.
+        setSaveStatus('Read-only: could not open');
       });
-  }, [docId, isLoaded]);
+  }, [docId, isLoaded, loadAttempt]);
+
+  /**
+   * Retry rather than a hard lock: the likeliest cause is transient -- the 10s IndexedDB
+   * open budget expiring (an upgrade blocked by another tab), or the 5s window in which
+   * db.ts remembers a failed open. `retryStorageConnection()` clears that memo so the click
+   * actually re-opens the database instead of instantly repeating the same failure.
+   * Nothing was written, so retrying is free.
+   */
+  const retryOpen = useCallback(() => {
+    retryStorageConnection();
+    isWorkbookUnopenableRef.current = false;
+    setIsWorkbookUnopenable(false);
+    setOpenFailureDetail(null);
+    setBanner(null);
+    setSaveStatus('Loading...');
+    hasInitializedSaveRef.current = false;
+    skipNextWorkbookChangeRef.current = true;
+    setWorkbookKey((current) => current + 1);
+    setLoadAttempt((value) => value + 1);
+  }, []);
+
+  /**
+   * Leave the unreadable workbook strictly alone and open a brand new one. A full reload
+   * onto a new id re-mounts against an id nothing is stored under, so there is no path by
+   * which this session can touch the record it could not read.
+   */
+  const startNewWorkbook = useCallback(() => {
+    window.location.hash = `#/excel?id=${createId('excel')}`;
+    window.location.reload();
+  }, []);
+
+  const unopenableBanner = useCallback(
+    (detail: string | null): BannerState => ({
+      tone: 'error',
+      title: 'This workbook could not be opened. Your saved copy has NOT been changed.',
+      detail:
+        'Browser storage did not answer, so the editor does not know what this workbook contains. The grid is not loaded and saving is disabled — nothing here can overwrite it. This is usually temporary.' +
+        (detail ? ` (${detail})` : ''),
+      actions: [
+        { label: 'Try again', onClick: retryOpen, isPrimary: true },
+        { label: 'Start a new workbook instead', onClick: startNewWorkbook },
+      ],
+    }),
+    [retryOpen, startNewWorkbook],
+  );
+
+  useEffect(() => {
+    if (!isWorkbookUnopenable) {
+      return;
+    }
+
+    setBanner(unopenableBanner(openFailureDetail));
+  }, [isWorkbookUnopenable, openFailureDetail, unopenableBanner]);
 
   function getActiveSelection() {
     return workbookRef.current?.getSelection()?.[0] as WorkbookSelection | undefined;
@@ -973,6 +1071,18 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
         return;
       }
 
+      /*
+       * The stored workbook could not be READ. Anything this page could serialise now is
+       * its own starter workbook, and writing that would destroy a record nobody has seen.
+       * This guard sits in the single save funnel on purpose: the toolbar Save button and
+       * Ctrl+S call it directly, bypassing the `isLoaded` gate that protects autosave.
+       */
+      if (isWorkbookUnopenableRef.current) {
+        setSaveStatus('Read-only: could not open');
+        setBanner(unopenableBanner(openFailureDetail));
+        return;
+      }
+
       if (commitOpenCellEditor()) {
         // Let fortune-sheet's state update land before reading the model back.
         await new Promise((resolve) => window.setTimeout(resolve, 120));
@@ -1086,7 +1196,7 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
         isSavingRef.current = false;
       }
     },
-    [buildPersistablePayload, commitOpenCellEditor, defaultFileName, docId],
+    [buildPersistablePayload, commitOpenCellEditor, defaultFileName, docId, openFailureDetail, unopenableBanner],
   );
 
   const performSaveRef = useRef(performSave);
@@ -2352,6 +2462,21 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
           <div>
             <div className="editor-banner__text">{banner.title}</div>
             {banner.detail && <div className="editor-banner__hint">{banner.detail}</div>}
+            {banner.actions && banner.actions.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                {banner.actions.map((action) => (
+                  <button
+                    key={action.label}
+                    className={`btn ${action.isPrimary ? 'btn-primary' : 'btn-secondary'}`}
+                    type="button"
+                    style={{ height: 32, fontSize: 13 }}
+                    onClick={action.onClick}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             {(hasConflict || isStale) && banner.tone === 'warning' && (
@@ -2359,14 +2484,20 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
                 Force save
               </button>
             )}
-            <button
-              className="btn btn-secondary btn-icon"
-              onClick={() => setBanner(null)}
-              type="button"
-              aria-label="Dismiss message"
-            >
-              <X size={16} />
-            </button>
+            {/*
+              While the workbook is locked the banner is the only explanation of why the
+              grid is missing and the only way out, so it must not be dismissable.
+            */}
+            {!isWorkbookUnopenable && (
+              <button
+                className="btn btn-secondary btn-icon"
+                onClick={() => setBanner(null)}
+                type="button"
+                aria-label="Dismiss message"
+              >
+                <X size={16} />
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -2531,15 +2662,28 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
       <div className="workspace">
         <div className="spreadsheet-shell">
           <div className="spreadsheet-container" role="region" aria-label="Spreadsheet grid">
-            <Suspense fallback={<div className="surface-loading" role="status">Loading spreadsheet engine...</div>}>
-              <ExcelWorkbook
-                key={workbookKey}
-                data={workbookSeed}
-                onReady={handleWorkbookReady}
-                onOp={handleWorkbookOperation}
-                hooks={workbookHooks as unknown as Record<string, (...args: unknown[]) => void>}
-              />
-            </Suspense>
+            {/*
+              The grid is NOT mounted while the stored workbook is unreadable. Rendering it
+              would put the starter workbook on screen looking like the user's file, and it
+              is the starter workbook that every save path would have to be trusted not to
+              write. Not mounting it removes the payload entirely: `buildPersistablePayload`
+              has no workbook instance and returns null.
+            */}
+            {isWorkbookUnopenable ? (
+              <div className="surface-loading" role="status" style={{ padding: 'var(--space-5, 24px)', textAlign: 'center' }}>
+                This workbook could not be opened, so the grid was not loaded. Your saved copy has not been changed.
+              </div>
+            ) : (
+              <Suspense fallback={<div className="surface-loading" role="status">Loading spreadsheet engine...</div>}>
+                <ExcelWorkbook
+                  key={workbookKey}
+                  data={workbookSeed}
+                  onReady={handleWorkbookReady}
+                  onOp={handleWorkbookOperation}
+                  hooks={workbookHooks as unknown as Record<string, (...args: unknown[]) => void>}
+                />
+              </Suspense>
+            )}
           </div>
         </div>
       </div>

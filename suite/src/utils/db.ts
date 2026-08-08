@@ -99,6 +99,39 @@ export class DocumentPersistenceError extends Error {
   }
 }
 
+/**
+ * Thrown by `loadDocument` when the document could not be READ.
+ *
+ * `loadDocument` resolving to `undefined` means exactly one thing — THIS DOCUMENT DOES NOT
+ * EXIST — and every caller acts on it by seeding a default document and entering its
+ * autosave loop. So "I could not find out whether it exists" must never be expressed as
+ * `undefined`: when IndexedDB cannot be read and there is no localStorage copy, the stored
+ * record may be sitting in the database intact, and the first keystroke would overwrite it
+ * (the revision check cannot help — a tab reloading a document it saved itself keeps the
+ * same `lastSavedBy`, which disables half of `isConflict`).
+ *
+ * An exception rather than a widened return type, for the same reason `saveDocument`
+ * throws: pages already have a `.catch`, so the fail-safe behaviour is the default and a
+ * caller that forgets about this case gets an error path rather than silent data loss.
+ * `loadDocument`'s signature is unchanged.
+ *
+ *  - `code: 'storage-unreadable'` -> NOTHING was read and NOTHING was written. The stored
+ *    copy, whatever it is, is untouched. Callers must not autosave; the correct UI is a
+ *    read-only lock that offers a retry.
+ *  - `detail` carries the underlying storage error, when there was one, for display.
+ */
+export class DocumentReadError extends Error {
+  readonly code: 'storage-unreadable';
+  readonly detail: string | null;
+
+  constructor(message: string, detail: string | null) {
+    super(message);
+    this.name = 'DocumentReadError';
+    this.code = 'storage-unreadable';
+    this.detail = detail;
+  }
+}
+
 interface OfficeNinjaDB extends DBSchema {
   documents: {
     key: string;
@@ -1010,6 +1043,18 @@ async function getDB() {
   return dbPromise;
 }
 
+/**
+ * Forgets a remembered open failure so an explicit, user-initiated retry actually retries.
+ *
+ * `openFailureUntil` exists so a 600ms autosave loop does not re-pay the 10s open budget on
+ * every keystroke. A person pressing "Try again" after being told their document could not
+ * be opened is not that loop, and making them wait out an invisible 5s window would look
+ * exactly like the failure repeating. Call this ONLY from an explicit user action.
+ */
+export function retryStorageConnection() {
+  openFailureUntil = 0;
+}
+
 /** Diagnostics for UI/telemetry. Reflects the most recent storage operation. */
 export function getStorageDiagnostics() {
   return {
@@ -1400,6 +1445,13 @@ export function saveDocumentBackupNow<T = unknown>(
   }
 }
 
+/**
+ * Reads a document.
+ *
+ * Resolves to `undefined` ONLY when the document genuinely does not exist (or was
+ * deleted). When the stores could not be read at all it THROWS `DocumentReadError` —
+ * see that class for why the two cases must not share a return value.
+ */
 export async function loadDocument<T = unknown>(id: string) {
   if (isDocumentTombstoned(id)) {
     return undefined;
@@ -1408,23 +1460,66 @@ export async function loadDocument<T = unknown>(id: string) {
   const db = await getDB();
 
   let databaseRecord: DocumentRecord<T> | undefined;
+  // Did we actually complete a read of the primary store? `db !== null` is not the same
+  // question: an open that failed and a `get` that threw both leave us knowing nothing.
+  let databaseRead = false;
+  let readError: unknown;
   if (db) {
     try {
       databaseRecord = normalizeDocument<T>(await db.get(STORE_NAME, id), 'database');
+      databaseRead = true;
       markDatabaseHealthy();
     } catch (error) {
       markDatabaseUnhealthy(error);
+      readError = error;
       console.warn('Database read failed; falling back to the local copy', error);
     }
   }
 
   const backupRecord = readBackup<T>(id);
+
+  if (!databaseRead && backupRecord === undefined) {
+    /*
+     * ABSENT vs UNREADABLE. The primary store was never read and there is no local copy,
+     * so nothing in this call has seen where this document lives.
+     *
+     * The revision ledger decides which of the two it is, and it is the right witness
+     * because every successful save in this browser writes one: an entry means THIS
+     * BROWSER HAS STORED THIS DOCUMENT, and since the only stores are local, a record for
+     * it almost certainly exists right now in the IndexedDB we could not open. Returning
+     * `undefined` in that state tells the caller "no such document"; it seeds a default and
+     * autosaves, and the intact stored record is gone on the first keystroke.
+     *
+     * With NO ledger entry this browser has no evidence the document ever existed, and
+     * refusing would be indistinguishable from refusing to create a new document — it would
+     * make the whole app unusable wherever IndexedDB is permanently blocked (private
+     * browsing, blocked site data), which is precisely the degraded mode the localStorage
+     * path exists to serve. So that case still resolves to `undefined`.
+     *
+     * KNOWN GAP: the ledger lives in localStorage, holds at most MAX_LEDGER_ENTRIES ids and
+     * is dropped when the user clears site data. A document whose entry has been evicted or
+     * cleared, opened while IndexedDB is unreadable, is still reported absent. Closing that
+     * would mean refusing to open any new document in a browser without IndexedDB.
+     */
+    const witness = getLedgerEntry(id);
+    if (witness) {
+      throw new DocumentReadError(
+        `Document "${id}" could not be read: ${db ? 'IndexedDB rejected the read' : 'IndexedDB could not be opened'} and there is no local copy, ` +
+          `but this browser has stored revision ${witness.r} of it. Nothing was read and nothing was written.`,
+        readError ? describeError(readError) : lastDatabaseError,
+      );
+    }
+  }
+
   const record = pickLatestRecord(databaseRecord, backupRecord);
 
-  if (db && databaseRecord !== undefined) {
+  if (databaseRead && databaseRecord !== undefined) {
     // Heal a ghost ledger entry: nothing anywhere is as high as the ledger claims.
     repairLedgerDownward(id, Math.max(databaseRecord.revision, backupRecord?.revision ?? 0));
-  } else if (db && databaseRecord === undefined && backupRecord === undefined) {
+  } else if (databaseRead && databaseRecord === undefined && backupRecord === undefined) {
+    // Confirmed absent from both stores — the ONLY safe place to forget the revision.
+    // This used to be gated on `db` alone, so a `get` that threw also dropped the ledger
+    // entry, discarding the one witness that protects the degraded-mode save path.
     forgetRevision(id);
   }
 

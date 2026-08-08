@@ -7,7 +7,7 @@ import { Extension } from '@tiptap/core';
 // Type-only import: registers the `setImage` command augmentation that
 // `tiptap-extension-resize-image` inherits but does not re-declare.
 import type { ImageOptions } from '@tiptap/extension-image';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { NodeSelection, Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
@@ -57,7 +57,15 @@ import { AppHeader } from '../components/AppHeader';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { StatusBar } from '../components/StatusBar';
 import { Toolbar, ToolbarButton, ToolbarGroup } from '../components/Toolbar';
-import { getCurrentClientId, loadDocument, saveDocument, saveDocumentBackupNow, subscribeToDocument } from '../utils/db';
+import {
+  DocumentReadError,
+  getCurrentClientId,
+  loadDocument,
+  retryStorageConnection,
+  saveDocument,
+  saveDocumentBackupNow,
+  subscribeToDocument,
+} from '../utils/db';
 
 interface WordProps {
   toggleTheme: () => void;
@@ -617,6 +625,28 @@ function buildUnreadableBanner(
   };
 }
 
+/**
+ * A document whose stored copy could not be READ at all — distinct from one that was read
+ * and could not be parsed. There is no payload to hand back here, so the escape routes are
+ * different: retry (the likeliest cause is a transient IndexedDB open timeout) or open a
+ * DIFFERENT document, which is the only way to start typing without putting the stored
+ * record at risk. "Discard and start fresh" is deliberately NOT offered: it would mean
+ * overwriting a document nobody has managed to look at.
+ */
+function buildUnopenableBanner(detail: string | null, onRetry: () => void, onNewDocument: () => void): BannerState {
+  return {
+    tone: 'error',
+    title: 'This document could not be opened. Your saved copy has NOT been changed.',
+    detail:
+      'Browser storage did not answer, so the editor does not know what this document contains. Saving is disabled — nothing you type here can overwrite it. This is usually temporary.' +
+      (detail ? ` (${detail})` : ''),
+    actions: [
+      { label: 'Try again', onClick: onRetry, isPrimary: true },
+      { label: 'Start a new document instead', onClick: onNewDocument },
+    ],
+  };
+}
+
 export default function Word({ toggleTheme, isDarkMode }: WordProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const defaultFileName = DEFAULT_FILE_NAME;
@@ -629,6 +659,11 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isContentUnreadable, setIsContentUnreadable] = useState(false);
+  // Set only when the STORED COPY COULD NOT BE READ (as opposed to read-but-unparseable).
+  // While true there is no payload to download and nothing may be written.
+  const [isDocumentUnopenable, setIsDocumentUnopenable] = useState(false);
+  // Bumped by "Try again"; re-arms the load effect.
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [showFindReplace, setShowFindReplace] = useState(false);
   const [showImagePanel, setShowImagePanel] = useState(false);
   const [findText, setFindText] = useState('');
@@ -675,6 +710,15 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
       tone,
       () => downloadStoredCopyRef.current?.(),
       () => discardStoredCopyRef.current?.(),
+    ),
+  );
+  const retryOpenRef = useRef<(() => void) | null>(null);
+  const startNewDocumentRef = useRef<(() => void) | null>(null);
+  const unopenableBannerRef = useRef((detail: string | null) =>
+    buildUnopenableBanner(
+      detail,
+      () => retryOpenRef.current?.(),
+      () => startNewDocumentRef.current?.(),
     ),
   );
 
@@ -857,11 +901,17 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
 
   const saveNow = useCallback(() => {
     if (autosaveBlockedRef.current) {
-      setBanner({
-        tone: 'error',
-        title: 'Saving is disabled for this document.',
-        detail: 'The stored copy could not be opened, so writing would destroy it.',
-      });
+      // Re-assert the lock banner rather than replacing it: it carries the only escape
+      // routes (retry / open a different document), and Ctrl+S must not strip them.
+      setBanner((current) =>
+        current?.actions?.length
+          ? current
+          : {
+              tone: 'error',
+              title: 'Saving is disabled for this document.',
+              detail: 'The stored copy could not be opened, so writing would destroy it.',
+            },
+      );
       return;
     }
 
@@ -997,20 +1047,37 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
           return;
         }
 
+        /*
+         * The stored copy could NOT be read. Previously this opened "a fresh document
+         * instead" and entered the autosave loop, so the first keystroke wrote an empty
+         * document over a record nobody had managed to look at — silently, with the pill
+         * reading "Saved". db.ts's conflict check cannot catch it: a tab reloading a
+         * document it saved itself keeps the same client id, which disables half of
+         * `isConflict`.
+         *
+         * Every failure is treated as unreadable, including an unexpected one: "the load
+         * threw" and "the load could not read" are the same thing from here, and guessing
+         * the difference is how the empty document got written in the first place.
+         */
         console.error('Failed to load document', error);
-        setSaveStatus('Not saved yet');
-        setBanner({
-          tone: 'error',
-          title: 'Document failed to load cleanly.',
-          detail: 'The editor opened with a fresh document instead.',
-        });
-        setIsLoaded(true);
+        autosaveBlockedRef.current = true;
+        storedPayloadRef.current = null;
+        setIsDocumentUnopenable(true);
+        setIsContentUnreadable(true);
+        // Contains "read-only" so AppHeader paints the pill as a danger state.
+        setSaveStatus('Read-only: could not open');
+        editor.setEditable(false);
+        setBanner(
+          unopenableBannerRef.current(error instanceof DocumentReadError ? error.detail : null),
+        );
+        // `isLoaded` deliberately stays false: it gates autosave registration, so the
+        // block is enforced twice over.
       });
 
     return () => {
       cancelled = true;
     };
-  }, [defaultFileName, docId, editor, isContentUnreadable, isLoaded]);
+  }, [defaultFileName, docId, editor, isContentUnreadable, isLoaded, loadAttempt]);
 
   // Autosave registration no longer depends on `fileName`/`documentRevision`, so a
   // rename or a revision bump can never clear a pending timer and drop the edit.
@@ -1285,7 +1352,27 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
       const embeddableBlob = prepareEmbeddableImageBlob(blob, options.source);
       const dataUrl = await readBlobAsDataUrl(embeddableBlob);
 
-      activeEditor.chain().focus().setImage({ src: dataUrl }).run();
+      /*
+       * SILENT CONTENT LOSS if the selection is left alone.
+       *
+       * Inserting an image leaves a `NodeSelection` on the image just inserted, and
+       * `setImage` is `insertContent`, which REPLACES the selection. So a second insert
+       * overwrote the first, a third overwrote the second, and the banner still said
+       * "Image inserted" — one image survived no matter how many were added. It affected
+       * every entry point (file picker, drag-and-drop, paste), which is why the fix lives
+       * here rather than in one handler; clicking into the text between inserts happened
+       * to avoid it, because that leaves an ordinary text selection.
+       *
+       * Only a NodeSelection is moved aside. Replacing a TEXT selection with an image is a
+       * legitimate thing to ask for and is left exactly as it was.
+       */
+      const chain = activeEditor.chain().focus();
+      const { selection } = activeEditor.state;
+      if (selection instanceof NodeSelection) {
+        chain.setTextSelection(selection.to);
+      }
+      chain.setImage({ src: dataUrl }).run();
+
       setBanner({ tone: 'success', title: options.title, detail: options.detail });
     },
     [],
@@ -1427,9 +1514,47 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
   downloadStoredCopyRef.current = downloadStoredCopy;
   discardStoredCopyRef.current = confirmDiscardStoredCopy;
 
+  /**
+   * Retry, rather than a hard lock, because the likeliest cause is transient: the 10s
+   * IndexedDB open budget expiring (an upgrade blocked by another tab), or the 5s window
+   * in which db.ts remembers a failed open. `retryStorageConnection()` clears that memo so
+   * the click actually re-opens the database instead of instantly reporting the same
+   * failure. Nothing has been written, so a retry is free.
+   */
+  const retryOpen = () => {
+    retryStorageConnection();
+    autosaveBlockedRef.current = false;
+    storedPayloadRef.current = null;
+    setIsDocumentUnopenable(false);
+    setIsContentUnreadable(false);
+    setBanner(null);
+    setSaveStatus('Loading...');
+    editor.setEditable(true);
+    setLoadAttempt((value) => value + 1);
+  };
+
+  /**
+   * Leave the unreadable document strictly alone and open a brand new one. A full reload
+   * onto a new id is deliberate: it re-mounts against an id nothing is stored under, so
+   * there is no path by which this session can touch the record it could not read.
+   */
+  const startNewDocument = () => {
+    window.location.hash = `#/word?id=word-${Date.now()}`;
+    window.location.reload();
+  };
+
+  retryOpenRef.current = retryOpen;
+  startNewDocumentRef.current = startNewDocument;
+
   /* ---------------- DOCX export ---------------- */
 
   const exportDocx = async () => {
+    if (isDocumentUnopenable) {
+      // Nothing was read, so there is not even a raw copy to offer.
+      setBanner(unopenableBannerRef.current(null));
+      return;
+    }
+
     if (isContentUnreadable) {
       // The editor holds the placeholder document, not the user's content. Exporting it
       // would hand back a plausible-looking wrong file.
@@ -2334,9 +2459,16 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
               </div>
             )}
           </div>
-          <button className="btn btn-secondary btn-icon" onClick={() => setBanner(null)} type="button" aria-label="Dismiss message">
-            <X size={16} />
-          </button>
+          {/*
+            While the document is locked the banner is the only explanation of why nothing
+            can be typed or saved, and the only way out. Dismissing it would leave a dead
+            editor with no stated reason.
+          */}
+          {!isContentUnreadable && (
+            <button className="btn btn-secondary btn-icon" onClick={() => setBanner(null)} type="button" aria-label="Dismiss message">
+              <X size={16} />
+            </button>
+          )}
         </div>
       )}
 

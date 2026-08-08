@@ -317,7 +317,10 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
             {CREATE_ACTIONS.map(({ type, label, icon: Icon }, index) => (
               <Link
                 key={type}
-                className={`btn ${index === 0 ? 'btn-primary' : 'btn-secondary'} dashboard-create__btn`}
+                // The per-type modifier is what carries the brand colour. The CSS
+                // previously hooked this off `[href$="/word"]`, which worked but lost
+                // the colour silently if a route were ever renamed.
+                className={`btn ${index === 0 ? 'btn-primary' : 'btn-secondary'} dashboard-create__btn dashboard-create__btn--${type}`}
                 to={`/${type}`}
                 aria-label={`New ${label.toLowerCase()}`}
               >
