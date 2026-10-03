@@ -4,6 +4,21 @@ Playwright tests for the React app in `suite/`. This file is the whole story: ho
 them, what they actually check, what they deliberately do **not** check, and the product
 bugs they currently document.
 
+`productivity-tools.spec.ts` covers timers across reloads, invoice totals and print output,
+backup/restore and import validation, note chronology/search/exports, competing tabs,
+storage failures, PDF page edits and canonical form values, offline reopening, and
+desktop/mobile screenshots in both themes. PDF fixtures are generated locally. Voice
+tests use a controlled recognition stub to check transcript handling and online consent;
+they do not verify a physical microphone, speech-service accuracy, or language-pack
+availability. Those depend on the browser and device. Screenshots and sample invoice
+PDFs are written to the ignored `test-results/` directory.
+
+The new-tools offline test starts a loopback static host for `dist/`. Vite preview's
+`Vary: Origin` script responses can make first-install offline reloads miss the
+existing shell cache (module and worker fetches have different Origin headers).
+The static-host fixture avoids that preview-specific behavior without altering
+production service-worker matching or the development server's CORS settings.
+
 ---
 
 ## Running

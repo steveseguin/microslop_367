@@ -1,6 +1,10 @@
 import { Link } from 'react-router-dom';
+import '../styles/tools.css';
 import {
   FileText,
+  Clock3,
+  NotebookPen,
+  FilePenLine,
   FolderOpen,
   Moon,
   Pencil,
@@ -402,6 +406,11 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
 
       <section className="dashboard-section" aria-labelledby="dashboard-recent-title">
         <div className="dashboard-shell">
+          <nav className="tool-launchers" aria-label="Productivity tools">
+            <Link className="tool-launcher" to="/time"><Clock3 size={24} /><span><strong>NinjaTime</strong><small>Track time & create invoices</small></span></Link>
+            <Link className="tool-launcher" to="/notes"><NotebookPen size={24} /><span><strong>NinjaNotes</strong><small>Notes, dictation & a daily timeline</small></span></Link>
+            <Link className="tool-launcher" to="/pdf"><FilePenLine size={24} /><span><strong>NinjaPDF</strong><small>Edit, organize & fill PDFs</small></span></Link>
+          </nav>
           <div className="dashboard-section-header">
             {/* One caption, and it earns its line: it is the only place the
                 product says the files live in this browser and nowhere else.
@@ -452,6 +461,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
               <p>
                 <strong>No files yet.</strong> Start a document, spreadsheet, presentation or Blueline design — everything you
                 make is saved in this browser as you type.
+                {' '}Time entries, notes, and your PDF draft are saved inside their tools above.
               </p>
             </div>
           ) : visibleDocs.length === 0 ? (

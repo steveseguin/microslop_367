@@ -6,6 +6,9 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Word = lazy(() => import('./pages/Word'));
 const Excel = lazy(() => import('./pages/Excel'));
 const PowerPoint = lazy(() => import('./pages/PowerPoint'));
+const Time = lazy(() => import('./pages/Time'));
+const Notes = lazy(() => import('./pages/Notes'));
+const Pdf = lazy(() => import('./pages/Pdf'));
 
 const THEME_KEY = 'officeninja_theme';
 
@@ -55,8 +58,8 @@ function AppLoading() {
 function App() {
   const location = useLocation();
   useEffect(() => {
-    const names: Record<string, string> = { '/word': 'NinjaWord', '/excel': 'NinjaCalc', '/powerpoint': 'NinjaSlides' };
-    document.title = names[location.pathname] ? `${names[location.pathname]} | OfficeNinja` : 'OfficeNinja | Free Office & Design Tools';
+    const names: Record<string, string> = { '/word': 'NinjaWord', '/excel': 'NinjaCalc', '/powerpoint': 'NinjaSlides', '/time': 'NinjaTime', '/notes': 'NinjaNotes', '/pdf': 'NinjaPDF' };
+    document.title = names[location.pathname] ? `${names[location.pathname]} | OfficeNinja` : 'OfficeNinja | Free Office, Design & Productivity Tools';
   }, [location.pathname]);
   // `null` means "no explicit choice yet", so the OS preference stays in charge.
   const [themeChoice, setThemeChoice] = useState<ThemeChoice | null>(() => readStoredTheme());
@@ -120,6 +123,9 @@ function App() {
               <Route path="/word" element={<Word toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
               <Route path="/excel" element={<Excel toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
               <Route path="/powerpoint" element={<PowerPoint toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+              <Route path="/time" element={<Time toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+              <Route path="/notes" element={<Notes toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+              <Route path="/pdf" element={<Pdf toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
             </Routes>
           </Suspense>
         </ErrorBoundary>

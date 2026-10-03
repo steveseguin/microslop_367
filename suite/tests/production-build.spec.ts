@@ -14,7 +14,7 @@ import { editorPath, makeId, waitForExcelReady, waitForSlidesReady, waitForWordR
  * bump that changes the hash format does not break the suite.
  */
 
-const HEAVY_CHUNKS = /word-editor|word-io|excel-workbook|excel-io|excel-chart|slides-canvas|slides-io/i;
+const HEAVY_CHUNKS = /word-editor|word-io|excel-workbook|excel-io|excel-chart|slides-canvas|slides-io|pdf-engine|pdf-renderer/i;
 
 function loadedScripts(page: import('@playwright/test').Page) {
   return page.evaluate(() =>
@@ -65,7 +65,7 @@ test.describe('Production bundle', () => {
       .toBe(true);
     // Opening Word must not drag in the spreadsheet or slides engines.
     const afterWord = await loadedScripts(page);
-    expect(afterWord.filter((name) => /excel-workbook|slides-canvas/i.test(name))).toEqual([]);
+    expect(afterWord.filter((name) => /excel-workbook|slides-canvas|pdf-engine|pdf-renderer/i.test(name))).toEqual([]);
   });
 
   test('the spreadsheet engine chunk loads when the Excel route is opened', async ({ page }) => {

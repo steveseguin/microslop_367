@@ -16,8 +16,8 @@
     "test:debug": "playwright test --debug",
     "test:report": "playwright show-report",
     "test:install": "playwright install --with-deps chromium",
-    "prebuild": "node scripts/build-blueline.mjs",
-    "predev": "node scripts/build-blueline.mjs"
+    "prebuild": "node scripts/build-blueline.mjs && node scripts/prepare-pdf.mjs",
+    "predev": "node scripts/build-blueline.mjs && node scripts/prepare-pdf.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
@@ -38,6 +38,8 @@
     "jszip": "^3.10.1",
     "lucide-react": "^0.575.0",
     "mammoth": "^1.11.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.4.299",
     "pptxgenjs": "^4.0.1",
     "react": "^19.2.0",
     "react-chartjs-2": "^5.3.1",

@@ -1,7 +1,7 @@
 {
   "name": "OfficeNinja",
   "short_name": "OfficeNinja",
-  "description": "Free document, spreadsheet, presentation, and Blueline design editors with local autosave.",
+  "description": "Free office, design, time tracking, invoicing, voice notes, and PDF tools with local saving.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -35,6 +35,18 @@
     {
       "name": "New Blueline design",
       "url": "./blueline/?new=1"
+    },
+    {
+      "name": "Time tracking and invoices",
+      "url": "./#/time"
+    },
+    {
+      "name": "Notes and dictation",
+      "url": "./#/notes"
+    },
+    {
+      "name": "PDF editor",
+      "url": "./#/pdf"
     }
   ]
 }

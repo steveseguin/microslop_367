@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { designUrl } from '../utils/blueline';
+import { SUITE_APPS } from '../utils/suiteApps';
 import { Link, useNavigate } from 'react-router-dom';
 import { ChevronLeft, MoreHorizontal, Moon, Sun } from 'lucide-react';
 
@@ -255,13 +256,10 @@ export function AppHeader({
             if (saveStatus === 'Saving...' && !window.confirm('Changes are still saving. Leave this editor anyway?')) return;
             const next = event.target.value;
             if (next === 'Blueline') window.location.assign(designUrl());
-            else navigate(next === 'NinjaWord' ? '/word' : next === 'NinjaCalc' ? '/excel' : '/powerpoint');
+            else navigate(SUITE_APPS.find(([name]) => name === next)?.[1] ?? '/');
           }}
         >
-          <option>NinjaWord</option>
-          <option>NinjaCalc</option>
-          <option>NinjaSlides</option>
-          <option>Blueline</option>
+          {SUITE_APPS.map(([name]) => <option key={name}>{name}</option>)}
         </select>
         {/* Rendered in exactly ONE place at any viewport, so no action is ever
             duplicated in the tab order or the accessibility tree. */}

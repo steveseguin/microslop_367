@@ -18,6 +18,8 @@ import react from '@vitejs/plugin-react'
  */
 const RUNTIME_ONLY_PATTERNS = [
   /^blueline\//,
+  /^pdf-assets\//,
+  /^assets\/(Time|Notes|Pdf|pdf-engine|pdf-renderer|pdf.worker)[-.]/,
   /^assets\/(Word|Excel|PowerPoint|ExcelWorkbook|SelectionChart)-/,
   /^assets\/(word-editor|word-io|excel-workbook|excel-io|excel-chart|slides-canvas|slides-io|zip-runtime)[-.]/,
   /^assets\/__vite-browser-external-/,
@@ -149,6 +151,9 @@ export default defineConfig({
 
             return
           }
+
+          if (id.includes('pdfjs-dist')) return 'pdf-renderer'
+          if (id.includes('pdf-lib') || id.includes('pako')) return 'pdf-engine'
 
           if (id.includes('@fortune-sheet')) {
             return 'excel-workbook'

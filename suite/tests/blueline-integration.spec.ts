@@ -100,7 +100,7 @@ test('SEO, manifest and agent resources are included in the production build', a
     expect(html).toContain('og:description');
     expect(html).toContain('Blueline');
   }
-  expect((await (await request.get(`${base}/manifest.webmanifest`)).json()).shortcuts).toHaveLength(4);
+  expect((await (await request.get(`${base}/manifest.webmanifest`)).json()).shortcuts).toHaveLength(7);
   expect(await (await request.get(`${base}/sitemap.xml`)).text()).toContain('https://microslop.xyz/blueline/');
   for (const path of ['robots.txt', 'blueline/tools.json', 'blueline/llms.txt', 'blueline/docs/ai-control.md', 'blueline/examples/embed.html']) {
     expect((await request.get(`${base}/${path}`)).ok()).toBeTruthy();
