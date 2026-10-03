@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blueline embed demo</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f6f7f9; --fg: #15181c; --line: #d9dde3; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #16181c; --fg: #e9ebee; --line: #2f343b; } }
+  body { margin: 0; height: 100vh; display: grid; grid-template-columns: 300px 1fr; font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  aside { padding: 16px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; overflow: auto; }
+  iframe { width: 100%; height: 100%; border: 0; }
+  button { padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer; text-align: left; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: rgba(127,127,127,.12); padding: 8px; border-radius: 6px; max-height: 40vh; overflow: auto; }
+</style>
+</head>
+<body>
+<aside>
+  <b>Drive the embedded Blueline</b>
+  <p>First open Blueline's <b>AI</b> panel and tick <i>Accept postMessage control</i>. Until then, every call is answered with <code>not_enabled</code>.</p>
+  <button id="doc">get_document</button>
+  <button id="outline">get_tree (outline)</button>
+  <button id="add">create a sticky note</button>
+  <button id="shot">screenshot the viewport</button>
+  <pre id="out">Results appear here.</pre>
+  <img id="img" alt="" style="max-width:100%">
+</aside>
+<!-- Point src at your copy, e.g. https://you.github.io/blueline/ -->
+<iframe id="bl" src="../index.html" title="Blueline"></iframe>
+<script>
+const frame = document.getElementById('bl');
+const out = document.getElementById('out');
+let next = 1; const waiting = new Map();
+window.addEventListener('message', (e) => {
+  if (e.source !== frame.contentWindow || !e.data || e.data.type !== 'blueline:result') return;
+  const done = waiting.get(e.data.id); if (done) { waiting.delete(e.data.id); done(e.data); }
+});
+function call(tool, args = {}) {
+  return new Promise((resolve) => {
+    const id = next++; waiting.set(id, resolve);
+    frame.contentWindow.postMessage({ type: 'blueline:call', id, tool, args }, '*');
+  });
+}
+const show = (r) => { out.textContent = JSON.stringify(r.ok ? r.result : r.error, null, 2); return r; };
+document.getElementById('doc').onclick = async () => show(await call('get_document'));
+document.getElementById('outline').onclick = async () => { const r = await call('get_tree', { depth: 2, format: 'outline' }); out.textContent = r.ok ? r.result.outline : JSON.stringify(r.error); };
+document.getElementById('add').onclick = async () => show(await call('create', { spec: {
+  type: 'frame', name: 'Sticky', x: 900, y: 40, w: 200, fill: '#FFE58F', radius: 4,
+  layout: { mode: 'column', padding: 16 }, effects: [{ type: 'drop-shadow', y: 4, blur: 10, color: '#00000026' }],
+  children: [{ type: 'text', text: 'Added from the embedding page', font: { size: 15, weight: 500 }, sizing: { w: 'fill' } }],
+} }));
+document.getElementById('shot').onclick = async () => { const r = await call('screenshot', { max_size: 600 }); if (r.ok) document.getElementById('img').src = 'data:' + r.result.mime + ';base64,' + r.result.base64; else show(r); };
+</script>
+</body>
+</html>

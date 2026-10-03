@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Playwright run artifacts
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -25,5 +31,3 @@ dist-ssr
 
 # Generated from ../blueline by predev/prebuild
 public/blueline/
-test-results/
-playwright-report/

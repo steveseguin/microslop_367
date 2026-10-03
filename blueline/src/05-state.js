@@ -72,7 +72,7 @@ const IDB = {
   },
   async tx(mode, fn) {
     const db = await this.open(); if (!db) return null;
-    return new Promise((res) => { try { const t = db.transaction('files', mode); const st = t.objectStore('files'); const r = fn(st); t.oncomplete = () => res(r && r.result !== undefined ? r.result : true); t.onerror = () => res(null); } catch (e) { res(null); } });
+    return new Promise((res) => { try { const t = db.transaction('files', mode); const st = t.objectStore('files'); const r = fn(st); t.oncomplete = () => res(r ? r.result : true); t.onerror = () => res(null); t.onabort = () => res(null); } catch (e) { res(null); } });
   },
   put(rec) { return this.tx('readwrite', st => st.put(rec)); },
   get(id) { return this.tx('readonly', st => st.get(id)); },

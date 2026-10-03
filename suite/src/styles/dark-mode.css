@@ -2,16 +2,172 @@ body.dark-mode {
   color: var(--text);
 }
 
+/* The grid keeps a light "paper" surface in dark mode, like `.document-page`
+   and the slide canvas: fortune-sheet paints white cells onto its canvas, and
+   the DOM layers stacked over that canvas have to match or they show through.
+   VERIFIED, not assumed: dropping the fill repaints 24,830px of the grid from
+   #fff to #dfdfdf/#545454 at 1280x800, so this rule is still doing work.
+   What it was MISSING is the matching ink. `body.dark-mode { color }` above
+   cascades into the in-cell editor, which drew #edf4ff text on this white
+   fill — typing into a cell was invisible. `.document-page` in index.css
+   already pairs its white background with `color: #0f172a`; so does this.
+
+   `.luckysheet-cell-sheettable` IS DELIBERATELY NOT IN THIS LIST, and adding
+   it back blanks every cell value in the product's dark theme.
+   It is not a backdrop: it is a `position: relative`, 4560x1760 div that comes
+   AFTER `.fortune-sheet-canvas` in the DOM. Both are positioned with `z-index:
+   auto`, so paint order is document order and an opaque fill on this one
+   covers the canvas that all the cell text was just drawn onto. Nothing about
+   the computed styles says so — `getComputedStyle(.luckysheet-cell-sheettable)
+   .color` reports the correct #0f172a the whole time, which is why two earlier
+   passes at this bug looked correct and shipped a blank grid. Proven by
+   screenshot: toggling this one selector to `transparent` and forcing a
+   repaint brings Team/Target/Actual back. If a grey band ever appears behind
+   the grid again, fix it on `.fortune-sheet-container`, which is an ancestor
+   and paints below the canvas. */
 body.dark-mode .fortune-sheet-container,
 body.dark-mode .fortune-sheet-area,
 body.dark-mode .fortune-sheet-canvas,
-body.dark-mode .fortune-sheet-overlay,
-body.dark-mode .luckysheet-input-box,
-body.dark-mode .luckysheet-cell-sheettable {
+body.dark-mode .luckysheet-input-box {
   background: #ffffff;
 }
 
+/* The ink has to be scoped at the CONTAINER, not at the grid. Every layer the
+   library owns paints on a light background of its own (#fff container,
+   #fafafc toolbar and sheet-tab bar) while `body.dark-mode { color }` above
+   pushes #edf4ff into all of them. Scoping the grid alone left the font-family
+   and font-size combo labels at 1.06:1 — #edf4ff on #fafafc — and the stat
+   area with them. Descendants that set their own colour (the sheet-tab bar is
+   #444) are unaffected, because an own rule beats an inherited value. */
+body.dark-mode .fortune-container,
+body.dark-mode .fortune-sheet-container,
+body.dark-mode .fortune-sheet-area,
+body.dark-mode .fortune-sheet-canvas,
+body.dark-mode .luckysheet-input-box,
+body.dark-mode .luckysheet-cell-sheettable {
+  color: #0f172a;
+}
+
 body.dark-mode .document-page,
-body.dark-mode .canvas-shell canvas {
+body.dark-mode .canvas-shell canvas.lower-canvas {
   background: #ffffff;
+}
+
+/* =========================================================================
+   fortune-sheet's CHROME is chrome, not paper.
+
+   The rules above keep the GRID light on purpose — it is the sheet of paper,
+   the same decision as `.document-page` and the slide canvas. Its toolbar and
+   its sheet-tab strip are not paper, and they were being left at the library's
+   #fafafc: a 41px band of near-white sitting directly under our #131c29 ribbon,
+   and a second one directly above our #131c29 status bar. That single tone did
+   more to make Excel look like two products bolted together than every other
+   difference combined. Dark chrome / white paper / dark chrome is the sandwich
+   the rest of the suite already uses.
+
+   These have to beat `@fortune-sheet/react/dist/index.css`, which Vite emits as
+   a lazily-injected chunk and therefore sorts AFTER this file. `body.dark-mode`
+   plus a class is (0,2,1) against the library's (0,1,0), so it wins on
+   specificity and does not depend on injection order at all.
+   ========================================================================= */
+
+body.dark-mode .fortune-toolbar,
+body.dark-mode .luckysheet-sheet-area,
+body.dark-mode #luckysheet-bottom-pager {
+  background: var(--chrome);
+}
+
+/* `body.dark-mode .fortune-container { color: #0f172a }` above deliberately
+   pushes dark ink into everything the library owns, because all of it used to
+   paint on a light background of its own. These two no longer do, and an own
+   declaration beats an inherited value regardless of specificity. */
+body.dark-mode .fortune-toolbar {
+  color: var(--text);
+  border-bottom-color: var(--border);
+}
+
+body.dark-mode .luckysheet-sheet-area {
+  color: var(--text-muted);
+  border-top-color: var(--border);
+}
+
+body.dark-mode .luckysheet-sheet-area div.luckysheet-sheets-item {
+  color: var(--text-muted);
+}
+
+body.dark-mode .luckysheet-sheet-area div.luckysheet-sheets-item-active,
+body.dark-mode .luckysheet-sheet-area div.luckysheet-sheets-item-active:hover {
+  color: var(--accent-ink);
+}
+
+body.dark-mode .fortune-zoom-ratio,
+body.dark-mode .fortune-sheettab-button,
+body.dark-mode .fortune-zoom-button {
+  color: var(--text-muted);
+}
+
+/* THE ICONS ARE THE HARD PART, and a filter is not laziness — it is the only
+   thing CSS can do here. Every glyph on that row is a `<use>` of a `<symbol>`
+   whose paths carry `fill="#525C6F"` / `stroke="#525C6F"` as PRESENTATION
+   ATTRIBUTES. A use-element shadow tree cannot be selected into, so neither
+   `color` nor a rule aimed at the original `<symbol>` reaches them: verified by
+   screenshot, `svg symbol * { fill: red !important }` on the live page changed
+   precisely nothing. Left alone, #525C6F on #131c29 measures 1.9:1 — the row
+   would be legible only as a rumour.
+
+   `invert(1) hue-rotate(180deg)` is chosen over `brightness(0) invert(x)`
+   because it PRESERVES the relative tone inside two-tone icons: the border and
+   alignment glyphs draw the "off" strokes in #CCCED2 and the "on" strokes in
+   #525C6F, and flipping both is exactly right on a dark ground — the active
+   edge stays the bright one. The hue-rotate undoes the yellow cast that a
+   straight invert gives a blue-grey, landing #525C6F on ~#9FB2C4: 7.3:1 on
+   --chrome, comfortably past the 3:1 that SC 1.4.11 asks of an icon that is the
+   whole control.
+
+   Scoped to the chrome only. It must never touch `.fortune-sheet-canvas` (the
+   grid draws its own ink on white and needs no help) nor the colour swatches,
+   which are plain divs and not SVG. */
+/* `.spreadsheet-container` is in this selector purely for SPECIFICITY: the
+   light-theme rule it replaces (index.css, `filter: brightness(0.57)`) is also
+   two classes plus an element, and a tie would be settled by import order —
+   which is exactly the kind of thing that silently reverses when someone
+   reorders two lines in main.tsx. Three classes settles it outright. */
+body.dark-mode .spreadsheet-container .fortune-toolbar svg,
+body.dark-mode .spreadsheet-container .luckysheet-sheet-area svg {
+  /* The trailing brightness is measured, not taste: invert+hue-rotate alone
+     landed the primary ink on #9ba5b8 (6.91:1) against our own lucide glyphs at
+     #edf4ff (15.49:1), and the second row read as the dimmer of the two. 1.15
+     takes it to ~#b2bdd3 / ~8.9:1. It is deliberately NOT taken all the way to
+     parity: these are filled glyphs where ours are 1.5px strokes, and a filled
+     shape at equal luminance reads heavier than an outlined one. */
+  filter: invert(1) hue-rotate(180deg) brightness(1.15);
+}
+
+/* The live colour chips under the font/fill colour buttons are absolutely
+   positioned divs with an inline background, i.e. real data, not chrome. They
+   must NOT be inverted along with the icon they annotate — they are siblings of
+   the SVG rather than children, so the rule above already misses them; this is
+   here to say so, and to keep the picker's swatches honest too. */
+body.dark-mode .fortune-toolbar-color-picker-item {
+  filter: none;
+}
+
+/* Popovers the library opens off that row: they were white cards with a black
+   2px-radius shadow. */
+body.dark-mode .fortune-toolbar-select,
+body.dark-mode .fortune-toolbar-color-picker,
+body.dark-mode .fortune-toolbar-more-container,
+body.dark-mode .toolbar-item-sub-menu,
+body.dark-mode .fortune-zoom-ratio-menu,
+body.dark-mode .fortune-context-menu {
+  background: var(--surface-solid);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+body.dark-mode .fortune-toolbar-select svg,
+body.dark-mode .fortune-toolbar-more-container svg,
+body.dark-mode .toolbar-item-sub-menu svg,
+body.dark-mode .fortune-context-menu svg {
+  filter: invert(1) hue-rotate(180deg);
 }

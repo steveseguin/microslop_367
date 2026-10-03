@@ -1,58 +1,154 @@
+/* The UI face is SELF-HOSTED, not a system stack. The previous stack led with
+   "Aptos"/"Segoe UI Variable" — Windows-only — so the product literally had a
+   different typeface on every OS and nobody was looking at the same design.
+   Fontsource ships the woff2 inside the bundle, so this also works offline and
+   needs no external origin (a Google Fonts <link> would be blocked by the CSP).
+   Only the `latin*` subsets are ever fetched at runtime: every face below is
+   unicode-range gated, so a Latin page downloads ~48 KB and nothing else. */
+@import "@fontsource-variable/inter/wght.css";
+@import "@fontsource-variable/inter/wght-italic.css";
+
+/* =========================================================================
+   OfficeNinja Suite — design tokens
+   One scale per dimension. Component rules consume tokens; they do not
+   invent new sizes, radii or shadows.
+   ========================================================================= */
+
 :root {
-  --font-sans: "Aptos", "Aptos Display", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-sans: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+
+  /* Type scale — 7 steps. Every font-size in this file is one of these. */
+  --text-2xs: 0.6875rem;  /* 11px   micro uppercase labels */
+  --text-xs: 0.78125rem;  /* 12.5px pills, meta */
+  --text-sm: 0.875rem;    /* 14px   secondary body, captions, controls */
+  --text-md: 1rem;        /* 16px   body */
+  --text-lg: 1.1875rem;   /* 19px   card titles */
+  --text-xl: 1.375rem;    /* 22px   section titles */
+  --text-2xl: 1.75rem;    /* 28px   display */
+
+  /* Space scale — 6 steps. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+
+  /* Radii — 5 steps plus a pill. Tightened: everything used to be a lozenge,
+     which is what made a productivity tool read as a consumer landing page.
+     Office/Docs sit between 4px and 8px for chrome; paper and dialogs get more. */
+  --radius-xs: 0.375rem;  /* 6px  toolbar buttons, swatches */
+  --radius-sm: 0.5rem;    /* 8px  inputs, buttons */
+  --radius-md: 0.625rem;  /* 10px cards */
+  --radius-lg: 0.875rem;  /* 14px panels, dialogs */
+  --radius-xl: 1rem;      /* 16px sheets */
+  --radius-pill: 999px;
+
+  /* Elevation — 3 UI steps plus one dedicated "sheet of paper" shadow.
+     Deliberately shallow: the only thing on screen allowed to float is the
+     document. Chrome uses a 1px hairline, not a drop shadow. */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.1);
+  --shadow-lg: 0 16px 48px rgba(15, 23, 42, 0.18);
+  --shadow-paper: 0 1px 3px rgba(15, 23, 42, 0.12), 0 12px 32px rgba(15, 23, 42, 0.12);
+
+  /* One control height for every chrome row, so the header and the ribbon line
+     up instead of each inventing a size. */
+  --control-h: 1.875rem;  /* 30px */
+
+  /* App identity colours. ONE definition, consumed by the create button, the
+     file-list row icon and the editor's app mark, so blue=document,
+     green=spreadsheet, red=presentation is learned once and never contradicted.
+     `--brand-ink` is the glyph that sits ON a brand chip, and it flips with the
+     tones below rather than being assumed white. */
+  --brand-word: #2b579a;
+  --brand-excel: #1c7048;
+  --brand-powerpoint: #c0431f;
+  --brand-ink: #ffffff;
+
   --accent: #2563eb;
   --accent-strong: #1d4ed8;
   --accent-soft: rgba(37, 99, 235, 0.12);
-  --success: #1f9d61;
+  /* Ink tokens are the *text* colours for use on their matching -soft fill.
+     They are measured against that fill, not against the surface. */
+  --accent-ink: #1d4ed8;
+  --success: #0a6b3d;
   --success-soft: rgba(31, 157, 97, 0.14);
-  --warning: #b76a00;
+  --warning: #8a4f00;
   --warning-soft: rgba(183, 106, 0, 0.14);
-  --danger: #c2410c;
+  --danger: #a3350a;
   --danger-soft: rgba(194, 65, 12, 0.14);
-  --surface: rgba(255, 255, 255, 0.88);
+
+  /* Surfaces are OPAQUE. Every one of these used to be a translucent fill under
+     a `backdrop-filter: blur()`, which stacked three frosted planes on top of
+     each other and made the whole app look soft-focus. */
+  --surface: #ffffff;
   --surface-solid: #ffffff;
-  --surface-muted: rgba(246, 248, 252, 0.92);
-  --surface-strong: #eef3fb;
-  --canvas-bg: #d8dee8;
-  --border: rgba(15, 23, 42, 0.12);
-  --border-strong: rgba(15, 23, 42, 0.2);
+  --surface-muted: #f2f5f9;
+  --surface-strong: #e6ebf3;
+  /* `--chrome` is the header / ribbon / status-bar plane; `--canvas-bg` is the
+     desk the document sits on. The contrast between the two is what makes the
+     document read as the subject of the screen. */
+  --chrome: #ffffff;
+  --app-bg: #eef1f6;
+  --canvas-bg: #e3e7ee;
+  --border: rgba(15, 23, 42, 0.1);
+  --border-strong: rgba(15, 23, 42, 0.18);
+
   --text: #0f172a;
-  --text-muted: #516173;
-  --text-subtle: #6b7c91;
-  --shadow-sm: 0 10px 30px rgba(15, 23, 42, 0.06);
-  --shadow-md: 0 18px 48px rgba(15, 23, 42, 0.1);
-  --shadow-lg: 0 32px 90px rgba(15, 23, 42, 0.18);
-  --radius-sm: 10px;
-  --radius-md: 16px;
-  --radius-lg: 24px;
-  --radius-xl: 32px;
+  --text-muted: #45546a;
+  --text-subtle: #4f5e73;
+
+  --focus-ring: #1d4ed8;
+
   --transition: 180ms ease;
 }
 
 [data-theme="dark"] {
+  /* The print-brand tones are far too dark to sit on a dark surface: #2b579a on
+     --surface-muted (#1b2534) measures 2.0:1, i.e. an identity colour you have
+     to hunt for. These are the same three hues lifted until each clears 3:1
+     against the darkest surface they are used on (measured: 6.3, 6.9 and 6.2),
+     with `--brand-ink` flipping to dark ink so the glyph inside still clears
+     4.5:1 (7.0, 7.5, 6.9). Hue identity is what carries the mapping, not
+     lightness, so light-blue still reads as "the blue one". */
+  --brand-word: #7ba7e0;
+  --brand-excel: #57bd8a;
+  --brand-powerpoint: #f08a63;
+  --brand-ink: #0f172a;
+
   --accent: #60a5fa;
   --accent-strong: #3b82f6;
   --accent-soft: rgba(96, 165, 250, 0.18);
+  --accent-ink: #93c5fd;
   --success: #52d08d;
   --success-soft: rgba(82, 208, 141, 0.16);
   --warning: #f5b84b;
   --warning-soft: rgba(245, 184, 75, 0.16);
   --danger: #fb923c;
   --danger-soft: rgba(251, 146, 60, 0.14);
-  --surface: rgba(9, 14, 23, 0.84);
-  --surface-solid: #101826;
-  --surface-muted: rgba(15, 23, 36, 0.92);
-  --surface-strong: #162235;
-  --canvas-bg: #1a2432;
-  --border: rgba(148, 163, 184, 0.18);
-  --border-strong: rgba(148, 163, 184, 0.28);
+
+  --surface: #131c29;
+  --surface-solid: #131c29;
+  --surface-muted: #1b2534;
+  --surface-strong: #253143;
+  --chrome: #131c29;
+  --app-bg: #0b1119;
+  --canvas-bg: #0b1119;
+  --border: rgba(148, 163, 184, 0.2);
+  --border-strong: rgba(148, 163, 184, 0.32);
+
   --text: #edf4ff;
   --text-muted: #a9b8cb;
-  --text-subtle: #91a0b3;
-  --shadow-sm: 0 12px 36px rgba(0, 0, 0, 0.22);
-  --shadow-md: 0 20px 60px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 36px 100px rgba(0, 0, 0, 0.42);
+  --text-subtle: #9fb0c4;
+
+  --focus-ring: #7cb0ff;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --shadow-paper: 0 1px 3px rgba(0, 0, 0, 0.5), 0 14px 40px rgba(0, 0, 0, 0.45);
 }
 
 * {
@@ -62,29 +158,44 @@
 html,
 body,
 #root {
-  min-height: 100%;
-}
-
-html {
-  scroll-behavior: smooth;
+  height: 100%;
 }
 
 body {
   margin: 0;
   font-family: var(--font-sans);
+  font-size: var(--text-md);
   color: var(--text);
-  background:
-    radial-gradient(circle at top left, rgba(37, 99, 235, 0.18), transparent 34%),
-    radial-gradient(circle at top right, rgba(31, 157, 97, 0.12), transparent 28%),
-    linear-gradient(180deg, #f4f8ff 0%, #e9eef7 52%, #e3e9f3 100%);
+  /* Flat. The two radial "brand blobs" behind the whole product were the
+     single loudest thing on the dashboard and competed with the file list. */
+  background: var(--app-bg);
   line-height: 1.5;
+  /* Inter ships these as opt-in: `cv05` is the tailed lowercase l (so l/I/1 are
+     distinguishable in filenames and formulas), `calt`/`liga` are its default
+     contextual set. `tnum` is applied only where numbers must align. */
+  font-feature-settings: "liga" 1, "calt" 1, "cv05" 1;
+  font-variation-settings: normal;
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
-[data-theme="dark"] body {
-  background:
-    radial-gradient(circle at top left, rgba(59, 130, 246, 0.18), transparent 34%),
-    radial-gradient(circle at top right, rgba(82, 208, 141, 0.1), transparent 24%),
-    linear-gradient(180deg, #08101a 0%, #0d1522 52%, #111d2d 100%);
+/* Inter is optically wider than the system faces it replaces; a hair of
+   negative tracking on headings keeps them from looking loose. */
+h1,
+h2,
+h3,
+h4 {
+  letter-spacing: -0.015em;
+}
+
+/* Numbers that sit in columns or update in place must not jitter. */
+.status-bar,
+.status-pill,
+.formula-coordinate,
+.file-meta {
+  font-variant-numeric: tabular-nums;
 }
 
 button,
@@ -107,6 +218,21 @@ a {
   color: inherit;
 }
 
+::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+/* -------------------------------------------------------------------------
+   Focus: ONE indicator language for the whole product.
+   2px solid at 2px offset measures >=3:1 against every surface it lands on
+   (WCAG 2.2 SC 2.4.11), unlike the 14%-alpha halo it replaces.
+   ------------------------------------------------------------------------- */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -119,58 +245,119 @@ a {
   border: 0;
 }
 
+/* =========================================================================
+   App shell — bounded to the viewport. Header, ribbon and status bar are
+   pinned; only the document region scrolls. (Office 365 / Google Docs model.)
+   ========================================================================= */
+
 .app {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .app-main {
-  min-height: 100vh;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-main > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.app-container {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Chrome rows never absorb the shrink that belongs to the document region. */
+.suite-header,
+.toolbar-shell,
+.mobile-toolbar-launcher,
+.workspace-mobile-switcher,
+.editor-banner,
+.find-replace-bar,
+.insert-image-panel,
+.formula-strip,
+.status-bar {
+  flex: 0 0 auto;
 }
 
 .skip-link {
   position: fixed;
-  left: 1rem;
+  left: var(--space-4);
   top: -4rem;
   z-index: 1200;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--accent);
   color: #fff;
   font: inherit;
   font-weight: 700;
-  padding: 0.75rem 1rem;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.24);
-  transition: top 0.2s ease, transform 0.2s ease;
+  padding: var(--space-3) var(--space-4);
+  box-shadow: var(--shadow-md);
+  transition: top 0.2s ease;
 }
 
+/* In dark the accent is a LIGHT blue (#60a5fa), so the white ink that reads at
+   5.17:1 in light collapses to 2.54:1 — a WCAG 1.4.3 failure on a control that
+   ONLY keyboard users ever see, and only while focused, which is why every
+   sweep of the rendered page missed it (it parks at `top: -4rem`).
+   #0f172a on the same fill is 6.92:1 — the paper/ink pair `.document-page`
+   and the dark-mode spreadsheet grid already use. */
+[data-theme="dark"] .skip-link,
+body.dark-mode .skip-link,
+/* Same defect, same fix, everywhere it occurs: every control that paints
+   `#fff` on a `var(--accent)` fill fails AA once the accent turns light.
+   Measured in dark before this rule: .btn-primary 3.38:1 against SC 1.4.11's
+   3:1 for non-text, from white ink on that fill. (`.toolbar-btn.active` and
+   the active workspace-switcher tab used to be in this list; neither fills
+   with the accent any more — both are tint-plus-hairline now.) */
+[data-theme="dark"] .btn-primary,
+body.dark-mode .btn-primary {
+  color: #0f172a;
+}
+
+/* The skip link's own fill is the accent colour, so the shared accent ring would
+   sit on top of itself. A two-tone ring keeps BOTH adjacent contrasts above 3:1:
+   surface-coloured inside against the pill, accent outside against the page. */
 .skip-link:focus-visible {
-  top: 1rem;
-  transform: translateY(0);
+  top: var(--space-4);
+  outline: 2px solid var(--surface-solid);
+  outline-offset: -4px;
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .app-loading {
-  min-height: 100vh;
+  min-height: 0;
   display: grid;
   place-items: center;
-  padding: 1.5rem;
+  padding: var(--space-5);
 }
 
 .app-loading__card {
   width: min(420px, 100%);
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding: 1.25rem;
+  gap: var(--space-4);
+  padding: var(--space-5);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: var(--surface);
   box-shadow: var(--shadow-md);
-  backdrop-filter: blur(18px);
 }
 
 .app-loading__card strong {
   display: block;
-  margin-bottom: 0.2rem;
+  margin-bottom: var(--space-1);
 }
 
 .app-loading__card p {
@@ -182,7 +369,7 @@ a {
   width: 2.5rem;
   height: 2.5rem;
   flex-shrink: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 3px solid rgba(37, 99, 235, 0.16);
   border-top-color: var(--accent);
   animation: app-spin 900ms linear infinite;
@@ -192,7 +379,7 @@ a {
   min-height: 100%;
   display: grid;
   place-items: center;
-  padding: 1.25rem;
+  padding: var(--space-5);
   color: var(--text-muted);
   text-align: center;
 }
@@ -203,36 +390,32 @@ a {
   }
 }
 
+/* =========================================================================
+   Buttons
+   ========================================================================= */
+
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  min-height: 40px;
-  padding: 0.65rem 1rem;
-  border-radius: 999px;
+  gap: var(--space-2);
+  min-height: 34px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
-  font-size: 0.93rem;
+  font-size: var(--text-sm);
   font-weight: 600;
+  text-decoration: none;
   transition:
-    transform var(--transition),
     background var(--transition),
     border-color var(--transition),
-    color var(--transition),
-    box-shadow var(--transition);
+    color var(--transition);
 }
 
-.btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.btn:focus-visible,
-.toolbar-btn:focus-visible,
-.mobile-toolbar-toggle:focus-visible,
-.workspace-switcher-tab:focus-visible,
-.slide-color-input:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14);
+/* No lift on hover. Buttons in a document tool are surfaces, not toys — the
+   1px rise plus a 24px accent shadow was the tell that this was a demo. */
+.btn:active:not(:disabled) {
+  transform: scale(0.985);
 }
 
 .btn:disabled,
@@ -244,12 +427,11 @@ a {
 
 .btn-primary {
   color: #ffffff;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
-  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.18);
+  background: var(--accent);
 }
 
 .btn-primary:hover:not(:disabled) {
-  box-shadow: 0 16px 32px rgba(37, 99, 235, 0.24);
+  background: var(--accent-strong);
 }
 
 .btn-secondary {
@@ -263,6 +445,10 @@ a {
   border-color: var(--border-strong);
 }
 
+.btn-secondary:active:not(:disabled) {
+  background: var(--surface-strong);
+}
+
 .btn-danger {
   color: var(--danger);
   background: var(--danger-soft);
@@ -270,26 +456,32 @@ a {
 }
 
 .btn-icon {
-  min-width: 40px;
-  padding-inline: 0.8rem;
+  min-width: 34px;
+  padding-inline: var(--space-2);
 }
 
-.app-container {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
+/* =========================================================================
+   Header
+   ========================================================================= */
 
+/* One row, ~44px, the way Office 365 web and Docs do it. It used to be 67px of
+   translucent frosted glass carrying a two-line brand lockup and 40px pills. */
 .suite-header {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding: calc(1rem + env(safe-area-inset-top, 0px)) 1.25rem 1rem;
-  background: var(--surface);
+  gap: var(--space-3);
+  /* The inline padding matches the ribbon's, so the back arrow and the undo
+     arrow sit on the same optical margin instead of 12px apart. */
+  padding: calc(var(--space-2) + env(safe-area-inset-top, 0px)) var(--space-3) var(--space-2);
+  background: var(--chrome);
   border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(18px);
-  position: sticky;
-  top: 0;
+  /* Load-bearing, not decoration. The header is the containing block for
+     `.header-overflow-panel`, which pins to `right: var(--space-3)` and is
+     nearly 100vw wide on a phone: anchored to the 44px trigger instead, its
+     left border landed at x = -4. It is also what activates the `z-index`
+     below — a static element has no stacking position, so the declaration was
+     inert and the panel rendered UNDER the ribbon's `z-index: 15`. */
+  position: relative;
   z-index: 20;
 }
 
@@ -298,7 +490,13 @@ a {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 0.85rem;
+  gap: var(--space-2);
+}
+
+/* "Documents" / "Spreadsheets" / "Presentations" above "NinjaWord" is the app's
+   own name said twice, and it cost the header a whole second text row. */
+.app-brand__eyebrow {
+  display: none;
 }
 
 .suite-header__leading {
@@ -308,11 +506,16 @@ a {
 .suite-home-link {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: var(--control-h);
+  min-width: var(--control-h);
   text-decoration: none;
   color: var(--text-muted);
-  padding: 0.55rem 0.8rem;
-  border-radius: 999px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   transition: background var(--transition), border-color var(--transition), color var(--transition);
 }
@@ -321,6 +524,10 @@ a {
   background: var(--surface-muted);
   border-color: var(--border);
   color: var(--text);
+}
+
+.suite-home-link:active {
+  background: var(--surface-strong);
 }
 
 .suite-home-link__icon {
@@ -332,33 +539,34 @@ a {
 .app-brand {
   display: inline-flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--space-2);
   min-width: 0;
 }
 
 .app-logo-icon {
-  width: 2.6rem;
-  height: 2.6rem;
-  border-radius: 0.9rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-xs);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #ffffff;
+  color: var(--brand-ink);
+  font-size: var(--text-xs);
   font-weight: 700;
-  letter-spacing: 0.04em;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  letter-spacing: 0.02em;
 }
 
 .app-logo-icon.word {
-  background: linear-gradient(135deg, #2b579a 0%, #1f3f78 100%);
+  background: var(--brand-word);
 }
 
 .app-logo-icon.excel {
-  background: linear-gradient(135deg, #217346 0%, #14522f 100%);
+  background: var(--brand-excel);
 }
 
 .app-logo-icon.powerpoint {
-  background: linear-gradient(135deg, #d24726 0%, #a53b20 100%);
+  background: var(--brand-powerpoint);
 }
 
 .app-brand__copy {
@@ -368,71 +576,146 @@ a {
 }
 
 .app-brand__eyebrow {
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-subtle);
 }
 
+/* The app's name is context; the document's name is the subject. Both set in
+   the same weight and size made the header read as two competing titles. */
 .app-title {
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: var(--text);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
 .suite-header__document {
-  flex: 1;
-  min-width: 220px;
-}
-
-.file-name-field {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
+/* Sized to hold a real filename and no more. At 24rem the save pill that
+   follows it ended up stranded in the middle of an empty header. */
+.file-name-field {
+  flex: 0 1 15rem;
+  /* Floor the field so that header controls added later cannot squeeze the
+     filename below a usable/tappable width. */
+  min-width: 3.5rem;
+}
+
+/* The document's name is a title, not a form field: it reads as text until you
+   reach for it. A permanently-outlined 40px pill made the header look like a
+   sign-up form. */
 .file-name {
   width: 100%;
-  padding: 0.78rem 1rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--surface-muted);
+  min-height: var(--control-h);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text);
-  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.file-name:hover {
+  background: var(--surface-muted);
+  border-color: var(--border);
 }
 
 .file-name:focus {
-  outline: none;
-  border-color: rgba(37, 99, 235, 0.35);
+  border-color: var(--accent);
   background: var(--surface-solid);
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14);
 }
 
+/* `nowrap`, always. Wrapping put the theme toggle on a header row of its own
+   the moment the export buttons stopped fitting (~960px), doubling the height
+   of the chrome. The cluster inside is a scroll container, so it gives width
+   back instead — see the note on `.header-action-cluster`. */
 .header-actions {
   margin-left: auto;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  /* The shell is `overflow: hidden`, so there is no page-scroll escape hatch:
+     the actions must always be able to give width back to the header rather
+     than push themselves off the edge. */
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .header-action-cluster {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--space-2);
   flex-wrap: wrap;
   justify-content: flex-end;
+  min-width: 0;
+}
+
+/* The cluster carries the overflow so that the theme toggle, which sits outside
+   it, is never the control that falls off. `auto` shows nothing until the
+   buttons actually stop fitting, so wide viewports are untouched. */
+.header-action-cluster {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  /* An overflow container clips the 2px focus ring drawn at 2px offset. */
+  padding-block: 4px;
+  margin-block: -4px;
+  /* NEVER pair `overflow-x: auto` with a plain `flex-end` again: when the
+     content overflows, `flex-end` pushes it out of the START edge, which
+     scrollLeft cannot reach, so the buttons paint over the filename instead of
+     scrolling. `safe` keeps the right alignment while it fits and falls back to
+     start the moment it does not. The plain `flex-start` above it is the
+     fallback for engines without `safe`, so the unsafe pairing cannot come back
+     via an unsupported keyword either. */
+  justify-content: flex-start;
+  justify-content: safe flex-end;
 }
 
 .status-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 88px;
-  padding: 0.45rem 0.8rem;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  min-width: 0;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-2xs);
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  /* A save indicator that wraps to two lines drags the whole header taller. */
+  white-space: nowrap;
+}
+
+/* These three pills are the product's only ambient state signal, so they follow
+   the same rule as the create buttons and the file icons: tell them apart
+   before reading them.
+
+   Hue alone will not do that. Green / amber / red is the worst possible triad
+   for the commonest colour-vision deficiencies — to a deuteranope those three
+   are one colour at three lightnesses. Each pill therefore also carries a
+   SHAPE: a filled dot for a confirmed write, a hollow ring for "nothing has
+   happened yet", a diamond for "this needs you".
+
+   `content: ""` and not a "✓" / "!" glyph on purpose. Generated text content IS
+   exposed in the accessibility tree in Chrome and Firefox, and this element is
+   referenced by `aria-describedby` from the filename field — a decorative tick
+   would be spoken as part of the document's description. An empty box with a
+   background has no text to leak. */
+.status-pill::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin-right: var(--space-1);
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: currentColor;
 }
 
 .status-pill--success {
@@ -440,9 +723,21 @@ a {
   background: var(--success-soft);
 }
 
+/* NEUTRAL, deliberately. This was `--warning` on `--warning-soft`, so a
+   brand-new untouched document opened announcing "Not saved yet" in the same
+   amber it uses for a problem — the app flagging itself before the user had
+   typed a character. `pending` covers "not written yet" and "writing now",
+   neither of which is a fault, so it gets the quietest treatment in the set:
+   muted ink on a plain raised surface. Measured 6.2:1 light / 6.4:1 dark. */
 .status-pill--pending {
-  color: var(--warning);
-  background: var(--warning-soft);
+  color: var(--text-muted);
+  background: var(--surface-strong);
+}
+
+/* A ring, not a disc: "nothing has landed yet" reads as an unfilled state. */
+.status-pill--pending::before {
+  background: none;
+  border: 2px solid currentColor;
 }
 
 .status-pill--alert {
@@ -450,26 +745,75 @@ a {
   background: var(--danger-soft);
 }
 
+.status-pill--alert::before {
+  border-radius: 1px;
+  rotate: 45deg;
+}
+
+/* =========================================================================
+   Toolbar / ribbon
+   ========================================================================= */
+
+/* -------------------------------------------------------------------------
+   The ribbon: ONE dense row.
+
+   It used to be eight separately-bordered rounded cards, each spending a whole
+   text row on a tiny uppercase caption above two or three icons, wrapping onto
+   a second line at 1440px: 192px of chrome to do a job Office does in 44.
+   Groups are now separated by a hairline rule instead of a box, the captions
+   survive only as the group's `aria-label` (set in Toolbar/index.tsx, so the
+   public ToolbarGroup API is unchanged), and anything that does not fit is
+   moved into the overflow menu rather than allowed to wrap.
+   ------------------------------------------------------------------------- */
+
 .toolbar-shell {
-  background: var(--surface);
+  position: relative;
+  background: var(--chrome);
   border-bottom: 1px solid var(--border);
-  padding: 0.9rem 1.25rem 1rem;
-  backdrop-filter: blur(14px);
+  padding: var(--space-1) var(--space-3);
   z-index: 15;
 }
 
 .toolbar {
   display: flex;
-  align-items: stretch;
-  gap: 0.85rem;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 0;
+  flex-wrap: nowrap;
+  min-width: 0;
+  /* The overflow menu is the escape hatch; nothing may spill or wrap.
+     NOT `overflow: hidden`: that clips the 2px focus ring drawn at 2px offset,
+     and it did — measured at 1.23:1 in light and 1.42:1 in dark, i.e. no
+     visible ring at all on any ribbon button, which is SC 2.4.11. `clip` on
+     the inline axis with `visible` on the block axis is the only pairing CSS
+     allows, and the 4px clip margin buys back the room the ring needs at the
+     row's left and right ends. */
+  overflow-x: clip;
+  overflow-y: visible;
+  overflow-clip-margin: 4px;
 }
 
+/* The hidden mirror the fit calculation measures (see Toolbar/index.tsx). It
+   must lay out at its NATURAL width and take part in no layout of its own.
+   `visibility: hidden` (not `display: none`) is required — a display:none
+   subtree has no boxes to measure and no ResizeObserver notifications. */
+.toolbar--mirror {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: none;
+  overflow: visible;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Base = the STACKED presentation, which is what the mobile sheet and the
+   overflow menu use. The dense row below overrides it inside `.toolbar`. */
 .toolbar-group {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
-  padding: 0.75rem 0.85rem;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
   min-width: 0;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
@@ -477,7 +821,7 @@ a {
 }
 
 .toolbar-group-label {
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -487,42 +831,291 @@ a {
 .toolbar-group-controls {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: var(--space-1);
   flex-wrap: wrap;
 }
 
+/* --- dense row --- */
+
+.toolbar > .toolbar-group {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 1px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+/* A hairline, not a card. */
+.toolbar > .toolbar-group + .toolbar-group,
+.toolbar > .toolbar-group + .toolbar-overflow-trigger {
+  border-left: 1px solid var(--border);
+}
+
+.toolbar > .toolbar-group:first-child {
+  padding-left: 0;
+}
+
+.toolbar .toolbar-group-label {
+  display: none;
+}
+
+.toolbar .toolbar-group-controls {
+  gap: 1px;
+  flex-wrap: nowrap;
+}
+
 .toolbar-btn {
-  width: 2.35rem;
-  height: 2.35rem;
+  width: 2.75rem;
+  height: 2.75rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  border-radius: 0.8rem;
+  border-radius: var(--radius-xs);
   border: 1px solid transparent;
   background: transparent;
   color: var(--text);
   transition:
     background var(--transition),
     border-color var(--transition),
-    color var(--transition),
-    transform var(--transition);
+    color var(--transition);
+}
+
+.toolbar .toolbar-btn {
+  width: var(--control-h);
+  height: var(--control-h);
 }
 
 .toolbar-btn:hover:not(:disabled) {
-  background: var(--surface-strong);
-  border-color: var(--border);
+  background: var(--surface-muted);
 }
 
+.toolbar-btn:active:not(:disabled) {
+  background: var(--surface-strong);
+}
+
+/* Tinted, not filled. A solid blue gradient plus a coloured drop shadow on
+   every pressed formatting button made the ribbon the loudest object on the
+   screen; Office marks state with a tint and a hairline. The hairline is not
+   decoration — it is the >=3:1 non-text boundary SC 1.4.11 wants, which a 12%
+   tint on its own cannot provide. */
 .toolbar-btn.active {
-  color: #ffffff;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
-  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.16);
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* --- controls the page files own and this file has to make presentable --- */
+
+/* A raw `<input type="color">` is a black rectangle in a chrome bevel, so it is
+   re-skinned into a swatch that matches `.toolbar-btn`. Word no longer renders
+   one in the ribbon at all — its colour control is a swatch BUTTON with the
+   native input parked outside `.toolbar` as `.sr-only` — so the sized rule
+   below now serves PowerPoint's `.slide-color-input` alone. */
+input[type="color"] {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: var(--surface-solid);
+  cursor: pointer;
+  transition: border-color var(--transition);
+}
+
+input[type="color"]:hover {
+  border-color: var(--accent);
+}
+
+input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+input[type="color"]::-webkit-color-swatch {
+  border: 1px solid rgba(15, 23, 42, 0.24);
+  border-radius: 3px;
+}
+
+input[type="color"]::-moz-color-swatch {
+  border: 1px solid rgba(15, 23, 42, 0.24);
+  border-radius: 3px;
+}
+
+/* The `!important`s that used to be here are gone: they existed to beat an
+   inline `controlStyle` in Word.tsx that no longer exists, and a two-class
+   selector already outranks `.slide-color-input`'s own 40px rule. */
+.toolbar .slide-color-input {
+  width: var(--control-h);
+  height: var(--control-h);
+  max-width: var(--control-h);
+  /* Generous inset: the colour has to read as a chip inside a button, not as a
+     solid black tile sitting in the middle of a row of line icons. */
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: var(--surface-solid);
+}
+
+/* The ribbon's `<select>`s (Word's font family and size).
+   Styled by CLASS, not by `.toolbar select`: the same markup is re-parented
+   into `.toolbar-overflow-panel` and `.mobile-toolbar-sheet`, neither of which
+   has a `.toolbar` ancestor, so a descendant selector left both of those
+   rendering bare native selects. */
+.toolbar-select {
+  height: var(--control-h);
+  max-width: 8rem;
+  padding: 0 var(--space-1) 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: var(--text-xs);
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.toolbar-select:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-strong);
+}
+
+/* Font SIZE holds two digits; at 8rem it was a mostly-empty box beside the
+   family name and broke the row's rhythm. */
+.toolbar-select--narrow {
+  max-width: 5rem;
+}
+
+/* Outside the dense row — the overflow popover and the mobile sheet — the same
+   control has to clear 44px like everything else the thumb can reach. */
+.toolbar-overflow-panel .toolbar-select,
+.mobile-toolbar-sheet .toolbar-select {
+  height: 44px;
+  max-width: 12rem;
+  font-size: var(--text-sm);
+}
+
+/* A text button among icon buttons (Word's "Reset") reads as a mistake unless
+   it is deliberately sized as a chip in the same row rhythm. Inline `height`
+   and the base `.btn` `min-height` both have to be beaten. */
+.toolbar .btn {
+  min-height: var(--control-h);
+  height: var(--control-h) !important;
+  padding-inline: var(--space-2);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs) !important;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.toolbar .btn-secondary {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.toolbar .btn-secondary:hover:not(:disabled) {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+/* PowerPoint puts a bare `<svg>` swatch preview next to its colour input. */
+.toolbar .toolbar-group > svg {
+  flex-shrink: 0;
+}
+
+/* --- overflow menu --- */
+
+.toolbar-overflow-trigger {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 1px;
+  margin-left: auto;
+  padding-left: var(--space-2);
+}
+
+.toolbar-more {
+  gap: var(--space-1);
+  width: auto !important;
+  padding-inline: var(--space-2);
+  color: var(--text-muted);
+}
+
+.toolbar-more[aria-expanded="true"] {
+  background: var(--surface-strong);
+  color: var(--text);
+}
+
+.toolbar-more__label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.toolbar-overflow-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: var(--space-3);
+  z-index: 30;
+  width: min(30rem, calc(100vw - var(--space-5)));
+  max-height: min(60dvh, 30rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+}
+
+.toolbar-overflow-panel .toolbar-group {
+  width: 100%;
+}
+
+/* --- header overflow (the `⋯` that replaces the export row on a phone) ---
+
+   This panel used to be styled ONLY by borrowing `.toolbar-overflow-panel`'s
+   class, i.e. it looked right by accident and the next ribbon restyle would
+   have silently moved it. It keeps that class for the shared popover shape and
+   adds what is genuinely its own below: it hangs off `.suite-header`, not off
+   `.toolbar-shell`, so it needs its own containing-block-relative offsets and
+   a stacking level above the header's own 20. */
+.header-overflow {
+  position: static;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.header-overflow-panel {
+  /* Anchored to `.suite-header` (which sets `position: relative` for exactly
+     this), never to the 44px trigger — from the trigger the panel's left border
+     measured x = -4 at 390px. */
+  top: 100%;
+  right: var(--space-3);
+  left: var(--space-3);
+  z-index: 40;
+  width: auto;
+  max-height: min(70dvh, 26rem);
+  /* Export actions are full-width rows here, not a wrapped cluster: at 390px a
+     row of three labelled buttons is what forced the overflow menu to exist. */
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.header-overflow-panel .btn {
+  width: 100%;
+  justify-content: flex-start;
+  min-height: 44px;
 }
 
 .mobile-toolbar-launcher {
   display: none;
-  padding: 0.75rem 1rem 0;
+  padding: var(--space-3) var(--space-4) 0;
 }
 
 .mobile-toolbar-toggle {
@@ -530,58 +1123,73 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.6rem;
-  padding: 0.85rem 1rem;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
   box-shadow: var(--shadow-sm);
+  transition: background var(--transition), transform var(--transition);
 }
 
+.mobile-toolbar-toggle:active {
+  transform: scale(0.99);
+  background: var(--surface-strong);
+}
+
+/* The sheet is only mounted on compact viewports (see Toolbar/index.tsx), so its
+   controls can never sit in the desktop tab order or duplicate an aria-label. */
 .mobile-toolbar-modal {
   position: fixed;
   inset: 0;
   z-index: 40;
-  display: flex;
+  display: none;
   align-items: flex-end;
   justify-content: center;
-  padding: 1rem;
+  padding: var(--space-4);
   background: rgba(15, 23, 42, 0.45);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--transition);
 }
 
+/* The sheet mounts only when opened, so entrance is an animation, not a
+   transition between two rendered states. */
 .mobile-toolbar-modal.open {
-  opacity: 1;
-  pointer-events: auto;
+  display: flex;
+  animation: sheet-scrim var(--transition) both;
+}
+
+@keyframes sheet-scrim {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sheet-rise {
+  from {
+    transform: translateY(100%);
+  }
 }
 
 .mobile-toolbar-sheet {
   width: min(100%, 640px);
-  max-height: min(82vh, 760px);
+  max-height: min(82dvh, 760px);
   display: flex;
   flex-direction: column;
-  border-radius: 1.5rem;
+  border-radius: var(--radius-lg);
   background: var(--surface-solid);
   box-shadow: var(--shadow-lg);
   overflow: hidden;
   overscroll-behavior: contain;
-  transform: translateY(100%);
-  transition: transform 220ms ease;
-}
-
-.mobile-toolbar-modal.open .mobile-toolbar-sheet {
-  transform: translateY(0);
+  animation: sheet-rise 220ms ease both;
 }
 
 .mobile-toolbar-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 1rem 1rem 0.9rem;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-4) var(--space-3);
   border-bottom: 1px solid var(--border);
 }
 
@@ -592,182 +1200,154 @@ a {
 
 .mobile-toolbar-subtitle {
   display: block;
-  margin-top: 0.2rem;
-  font-size: 0.88rem;
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
 .mobile-toolbar-close {
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: var(--surface-muted);
   color: var(--text);
+  transition: background var(--transition), transform var(--transition);
+}
+
+.mobile-toolbar-close:active {
+  transform: scale(0.94);
+  background: var(--surface-strong);
 }
 
 .mobile-toolbar-body {
-  padding: 1rem;
-  padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  padding: var(--space-4);
+  padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
+  gap: var(--space-3);
 }
 
 .mobile-toolbar-body .toolbar-group {
   width: 100%;
 }
 
+/* =========================================================================
+   Workspace — the only scrolling region
+   ========================================================================= */
+
+/* The desk the document sits on: one flat tone, so the paper is the only thing
+   with an edge and a shadow. */
 .workspace {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   display: flex;
-  background: linear-gradient(180deg, rgba(210, 219, 230, 0.86) 0%, rgba(201, 211, 224, 0.94) 100%);
+  background: var(--canvas-bg);
 }
 
-[data-theme="dark"] .workspace {
-  background: linear-gradient(180deg, rgba(20, 29, 40, 0.88) 0%, rgba(18, 25, 36, 0.96) 100%);
-}
-
-.workspace-center,
-.workspace-sidebar,
-.workspace-sidebar--left {
+.workspace > *,
+.slides-layout > *,
+.spreadsheet-shell > * {
   min-height: 0;
 }
 
 .workspace-center {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
-.workspace-sidebar,
-.workspace-sidebar--left {
-  width: 320px;
-  flex-shrink: 0;
-  padding: 1rem;
-  overflow: auto;
-  background: var(--surface);
-  border-left: 1px solid var(--border);
-  backdrop-filter: blur(18px);
-}
 
-.workspace-sidebar--left {
-  border-left: 0;
-  border-right: 1px solid var(--border);
-}
 
+/* A segmented control, not three lozenges. The selected pane used to be a
+   saturated blue gradient pill with a coloured shadow — on a tablet it was
+   louder than the slide it was selecting. Same tint-plus-hairline language as
+   the ribbon's pressed buttons: the hairline is what carries SC 1.4.11's 3:1,
+   which a 12%-alpha fill on its own cannot. */
 .workspace-mobile-switcher {
   display: none;
-  gap: 0.55rem;
-  padding: 0.9rem 1rem 0;
-  background: transparent;
-}
-
-.workspace-switcher-tab {
-  flex: 1 1 0;
-  min-height: 42px;
-  padding: 0.7rem 0.95rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text-muted);
-  font-weight: 700;
-  transition:
-    border-color var(--transition),
-    background var(--transition),
-    color var(--transition),
-    box-shadow var(--transition);
-}
-
-.workspace-switcher-tab.active {
-  color: #ffffff;
-  border-color: transparent;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
-  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.18);
-}
-
-.panel-card {
-  padding: 1rem;
-  border-radius: var(--radius-lg);
-  background: var(--surface-solid);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-sm);
-}
-
-.panel-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.panel-section + .panel-section {
-  margin-top: 1rem;
-}
-
-.panel-section h3 {
-  margin: 0 0 0.65rem;
-  font-size: 0.96rem;
-}
-
-.panel-section p,
-.panel-note,
-.panel-list,
-.panel-list li {
-  color: var(--text-muted);
-  font-size: 0.92rem;
-}
-
-.panel-list {
-  display: grid;
-  gap: 0.55rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.metric-grid {
-  display: grid;
-  gap: 0.75rem;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.metric-card {
-  padding: 0.85rem;
-  border-radius: var(--radius-md);
+  gap: 2px;
+  margin: var(--space-2) var(--space-3) 0;
+  padding: 3px;
+  border-radius: var(--radius-sm);
   background: var(--surface-muted);
   border: 1px solid var(--border);
 }
 
-.metric-label {
-  display: block;
-  font-size: 0.74rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-subtle);
+.workspace-switcher-tab {
+  flex: 1 1 0;
+  min-height: 38px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  transition:
+    border-color var(--transition),
+    background var(--transition),
+    color var(--transition);
 }
 
-.metric-value {
-  display: block;
-  margin-top: 0.3rem;
-  font-size: 1.2rem;
-  font-weight: 700;
-  color: var(--text);
+.workspace-switcher-tab.active {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* =========================================================================
+   Panels
+   ========================================================================= */
+
+.panel-card {
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--surface-solid);
+  border: 1px solid var(--border);
+}
+
+/* A bordered card, inside a bordered rail, inside a bordered shell is three
+   frames around one piece of content. A rail already IS the container, so a
+   panel that fills it drops its own frame. */
+.notes-sidebar > .panel-card,
+.slide-sidebar > .panel-card {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.panel-section + .panel-section {
+  margin-top: var(--space-4);
+}
+
+.panel-section h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+}
+
+.panel-section p,
+.panel-note {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
 }
 
 .editor-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 0.85rem 1.25rem;
-  background: var(--surface);
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  background: var(--chrome);
   border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
 }
 
 .editor-banner--success {
@@ -788,26 +1368,25 @@ a {
 
 .editor-banner__hint {
   color: var(--text-muted);
-  font-size: 0.9rem;
+  font-size: var(--text-sm);
 }
 
 .status-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 0.75rem 1.1rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
-  background: var(--surface);
+  gap: var(--space-4);
+  padding: var(--space-1) var(--space-4) calc(var(--space-1) + env(safe-area-inset-bottom, 0px));
+  background: var(--chrome);
   border-top: 1px solid var(--border);
   color: var(--text-muted);
-  font-size: 0.84rem;
-  backdrop-filter: blur(14px);
+  font-size: var(--text-xs);
 }
 
 .status-bar__segment {
   display: inline-flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--space-3);
   min-width: 0;
 }
 
@@ -815,368 +1394,544 @@ a {
   justify-content: flex-end;
 }
 
+/* Excel's status line. The whole strip is one voice: the range and the sheet
+   name identify WHERE you are and take the ink; the derived statistics are a
+   readout and step back, so the eye is not asked to rank six equal items. */
+.status-bar__group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.status-selection,
+.status-sheet {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.status-sheet-count,
+.status-stats {
+  color: var(--text-muted);
+}
+
+.status-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-stat {
+  font-variant-numeric: tabular-nums;
+}
+
+.status-save {
+  white-space: nowrap;
+}
+
+/* =========================================================================
+   Dashboard
+   ========================================================================= */
+
 .dashboard {
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--app-bg);
 }
 
 .dashboard-shell {
-  width: min(1280px, calc(100% - 2rem));
+  width: min(1400px, calc(100% - var(--space-5)));
   margin: 0 auto;
 }
 
-.dashboard-hero {
-  position: relative;
-  padding: 1.25rem 0 2rem;
+/* One chrome row, the same height as the editors' header, so moving between
+   the workspace and a document does not shift the whole page. */
+.dashboard-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex: 0 0 auto;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--border);
 }
 
-.dashboard-topbar {
+.dashboard-topbar__inner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1rem 0 1.5rem;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
 }
 
 .dashboard-brand {
   display: inline-flex;
   align-items: center;
-  gap: 0.9rem;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-right: auto;
 }
 
 .dashboard-brand__mark {
-  width: 3.1rem;
-  height: 3.1rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 1rem;
-  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  border-radius: var(--radius-xs);
+  background: var(--accent);
   color: #ffffff;
-  box-shadow: 0 20px 40px rgba(37, 99, 235, 0.24);
-}
-
-.dashboard-brand__eyebrow {
-  display: block;
-  font-size: 0.74rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-subtle);
-}
-
-.dashboard-brand__title {
-  display: block;
-  font-size: 1.3rem;
+  font-size: var(--text-xs);
   font-weight: 800;
 }
 
-.dashboard-theme-toggle {
-  min-width: 46px;
+.dashboard-brand__title {
+  font-size: var(--text-sm);
+  font-weight: 650;
+  white-space: nowrap;
 }
 
-.dashboard-hero-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(300px, 0.95fr);
-  gap: 1.25rem;
-}
-
-.dashboard-hero-copy,
-.dashboard-hero-panel {
-  padding: 1.8rem;
-  border-radius: var(--radius-xl);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  box-shadow: var(--shadow-md);
-  backdrop-filter: blur(18px);
-}
-
-.dashboard-hero-copy {
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.82) 0%, rgba(243, 247, 255, 0.94) 100%),
-    linear-gradient(135deg, rgba(37, 99, 235, 0.08), transparent);
-}
-
-[data-theme="dark"] .dashboard-hero-copy {
-  background:
-    linear-gradient(135deg, rgba(11, 18, 30, 0.94) 0%, rgba(17, 26, 40, 0.94) 100%),
-    linear-gradient(135deg, rgba(96, 165, 250, 0.08), transparent);
-}
-
-.dashboard-kicker {
-  display: inline-flex;
+.dashboard-create {
+  display: flex;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.45rem 0.8rem;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
-.dashboard-hero-copy h1 {
-  margin: 1rem 0 0.85rem;
-  font-size: clamp(2.2rem, 5vw, 4.2rem);
-  line-height: 0.98;
-  letter-spacing: -0.03em;
+.dashboard-create__btn {
+  min-height: var(--control-h);
+  font-size: var(--text-xs);
+  white-space: nowrap;
 }
 
-.dashboard-hero-copy p {
-  margin: 0;
-  max-width: 56ch;
-  color: var(--text-muted);
-  font-size: 1.04rem;
+/* --- create actions: recognisable before they are read ---
+
+   These were one `.btn-primary` and two `.btn-secondary`, all three carrying a
+   grey line icon: three identical pills that could only be told apart by
+   reading them. Each now leads with a filled chip in its app's identity colour,
+   the SAME token the file-list row and the editor's app mark use, so the
+   blue/green/red mapping is learned once and holds everywhere.
+
+   Deliberately NOT three primary-weight buttons — that is three things
+   shouting and no default. The surfaces stay neutral and equal; only the 24px
+   chip is coloured, and "New document" keeps `.btn-primary` so one action still
+   reads as the default.
+
+   HOOK: the type is matched off the router's `href` because there is no
+   per-type class on this element. It works (HashRouter renders `to="/word"` as
+   `href="#/word"`) but it silently loses its colour if a route is ever renamed.
+   A `dashboard-create__btn--word|--excel|--powerpoint` class is requested — see
+   the handover note; when it lands these three selectors become one-liners. */
+.dashboard-create__btn {
+  --create-brand: var(--accent);
 }
 
-.dashboard-hero-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-top: 1.5rem;
+.dashboard-create__btn[href$="/word"] {
+  --create-brand: var(--brand-word);
 }
 
-.dashboard-stat-grid {
-  display: grid;
-  gap: 0.8rem;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-top: 1.75rem;
+.dashboard-create__btn[href$="/excel"] {
+  --create-brand: var(--brand-excel);
 }
 
-.dashboard-stat {
-  padding: 1rem;
-  border-radius: var(--radius-lg);
-  background: var(--surface-solid);
-  border: 1px solid var(--border);
+.dashboard-create__btn[href$="/powerpoint"] {
+  --create-brand: var(--brand-powerpoint);
 }
 
-.dashboard-stat strong {
-  display: block;
-  font-size: 1.35rem;
-  margin-bottom: 0.15rem;
+.dashboard-create__btn--blueline { --create-brand: #087bb5; }
+.file-icon.blueline { color: #087bb5; background: color-mix(in srgb, #087bb5 12%, var(--surface)); }
+.suite-app-switcher { max-width: 125px; min-height: 32px; padding: 0.25rem; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-solid); color: var(--text); font: inherit; font-size: var(--text-xs); }
+@media (max-width: 640px) {
+  .dashboard-create { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .suite-app-switcher { max-width: 100px; }
 }
 
-.dashboard-stat span {
-  color: var(--text-muted);
-  font-size: 0.9rem;
+.dashboard-create__btn svg {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  padding: 4px;
+  border-radius: var(--radius-xs);
+  background: var(--create-brand);
+  color: var(--brand-ink);
 }
 
-.dashboard-hero-panel h2 {
-  margin: 0;
-  font-size: 1.05rem;
+/* The default action stays a filled button — but filled in ITS OWN identity
+   colour rather than the generic `--accent`, which put a Word-blue chip on an
+   accent-blue field where neither could be seen. Inside a filled button the
+   chip inverts: the ink becomes the surface and the brand becomes the glyph, so
+   the same two colours are doing the same job either way round. */
+.dashboard-create__btn.btn-primary {
+  background: var(--create-brand);
+  border-color: var(--create-brand);
+  color: var(--brand-ink);
 }
 
-.dashboard-hero-panel p {
-  margin: 0.4rem 0 1rem;
-  color: var(--text-muted);
+.dashboard-create__btn.btn-primary svg {
+  background: var(--brand-ink);
+  color: var(--create-brand);
 }
 
-.dashboard-checklist {
-  display: grid;
-  gap: 0.75rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+.dashboard-create__btn.btn-primary:hover {
+  background: var(--create-brand);
+  /* Dims chip and field together, so the pair keeps its measured ratio instead
+     of needing a second hand-picked hover tone per brand and per theme. */
+  filter: brightness(0.92);
 }
 
-.dashboard-checklist li {
-  display: flex;
-  gap: 0.65rem;
-  align-items: flex-start;
-  padding: 0.9rem 1rem;
-  border-radius: var(--radius-md);
-  background: var(--surface-solid);
-  border: 1px solid var(--border);
+.dashboard-create__label--short {
+  display: none;
 }
 
-.dashboard-checklist strong {
-  display: block;
-  margin-bottom: 0.2rem;
+.dashboard-theme-toggle {
+  flex-shrink: 0;
+  min-height: var(--control-h);
+  min-width: var(--control-h);
 }
+
+/* --- files --- */
 
 .dashboard-section {
-  padding: 0 0 2rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-5) 0 var(--space-6);
+}
+
+.dashboard-section > .dashboard-shell {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .dashboard-section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1rem;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+
+.dashboard-section-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
 }
 
 .dashboard-section-header h2 {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: var(--text-lg);
+  font-weight: 650;
 }
 
-.dashboard-section-header p {
-  margin: 0.2rem 0 0;
+.dashboard-section-title p {
+  margin: 0;
   color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
 }
 
-.launcher-grid {
-  display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.launcher-card,
-.recent-card {
+.dashboard-file-tools {
   display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1.25rem;
-  border-radius: var(--radius-lg);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dashboard-search {
+  min-width: 0;
+  flex: 1 1 13rem;
+  min-height: 34px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
-  text-decoration: none;
-  transition:
-    transform var(--transition),
-    box-shadow var(--transition),
-    border-color var(--transition);
-  backdrop-filter: blur(18px);
+  background: var(--surface-solid);
+  color: var(--text);
+  font-size: var(--text-sm);
 }
 
-.launcher-card:hover,
+.dashboard-sort {
+  min-height: 34px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-solid);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+
+/* A LIST, one file per row, at every width.
+
+   It used to be `repeat(auto-fill, minmax(min(100%, 20rem), 1fr))`, which tiled
+   into three or four columns on a wide screen. Tiles are for things you
+   recognise by their picture; these rows have no picture, so a grid forces the
+   eye to scan in two dimensions and read every name to find one file. A single
+   column is scanned once, vertically, and the width it gives back is what lets
+   each row lay out as mark -> name -> meta -> actions on one line. */
+.recent-grid {
+  display: grid;
+  gap: var(--space-1);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* A file row, not a marketing card: icon, name, one meta line, two actions.
+   The old card spent three stacked rows plus a footer that said "Open file"
+   on saying one filename. */
+.recent-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-solid);
+  transition: border-color var(--transition), background var(--transition);
+}
+
 .recent-card:hover {
-  transform: translateY(-3px);
-  border-color: rgba(37, 99, 235, 0.22);
-  box-shadow: var(--shadow-md);
+  border-color: var(--border-strong);
+  background: var(--surface-muted);
 }
 
-.launcher-card__icon {
-  width: 3.25rem;
-  height: 3.25rem;
+.recent-card:focus-within {
+  border-color: var(--accent);
+}
+
+/* The row's first mark, and the fastest thing on the screen to read: colour and
+   shape land before the filename does. */
+.file-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 1rem;
-  color: #ffffff;
+  border-radius: var(--radius-sm);
+  color: var(--brand-ink);
 }
 
-.launcher-card__icon.word {
-  background: linear-gradient(135deg, #2b579a 0%, #1f3f78 100%);
+.file-icon.word {
+  background: var(--brand-word);
 }
 
-.launcher-card__icon.excel {
-  background: linear-gradient(135deg, #217346 0%, #14522f 100%);
+.file-icon.excel {
+  background: var(--brand-excel);
 }
 
-.launcher-card__icon.powerpoint {
-  background: linear-gradient(135deg, #d24726 0%, #a53b20 100%);
-}
-
-.launcher-card h3,
-.recent-card h3 {
-  margin: 0;
-  font-size: 1.2rem;
-}
-
-.launcher-card p,
-.recent-card p {
-  margin: 0;
-  color: var(--text-muted);
-}
-
-.launcher-card__footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-top: auto;
-  color: var(--text-subtle);
-  font-size: 0.88rem;
-}
-
-.recent-grid {
-  display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-}
-
-.recent-card {
-  cursor: pointer;
-}
-
-.recent-card:focus-visible {
-  outline: none;
-  border-color: rgba(37, 99, 235, 0.42);
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12), var(--shadow-md);
-}
-
-.recent-card__header,
-.recent-card__footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.85rem;
-}
-
-.recent-card__file {
-  display: flex;
-  gap: 0.8rem;
-  align-items: center;
-  min-width: 0;
+.file-icon.powerpoint {
+  background: var(--brand-powerpoint);
 }
 
 .recent-card__meta {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
-.recent-card__meta h3 {
+/* One row, once there is width for one. Stacking the name over "Document · 3
+   May" makes every row 2 lines tall for no reason on a screen that just gave
+   the list its full width back; side by side, the type word lands in a fixed
+   column so it can be scanned down the page like the colour chips beside it.
+   Below this width the two go back to stacking, where truncating one filename
+   is worse than spending a second line. */
+@media (min-width: 641px) {
+  .recent-card__meta {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-4);
+  }
+
+  .recent-card__meta > :first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .recent-card .file-meta {
+    flex: 0 0 auto;
+    width: 15rem;
+    text-align: right;
+  }
+}
+
+.recent-card h3 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.recent-card__type {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.4rem 0.7rem;
-  border-radius: 999px;
-  background: var(--surface-muted);
-  border: 1px solid var(--border);
-  color: var(--text-subtle);
-  font-size: 0.78rem;
-  font-weight: 700;
+.recent-card p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.recent-delete-btn {
-  width: 2.25rem;
-  height: 2.25rem;
+.recent-card__actions {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* The whole card is the hit area, but only the title is a real link, so the
+   delete/rename buttons stay separately reachable instead of being nested
+   inside an anchor. */
+.card-stretch-link {
+  text-decoration: none;
+  color: inherit;
+  outline-offset: 4px;
+}
+
+.card-stretch-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.recent-card-btn {
+  width: 32px;
+  height: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: none;
-  border-radius: 999px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  transition: background var(--transition), color var(--transition);
+}
+
+.recent-card-btn:hover {
+  background: var(--surface-strong);
+  color: var(--text);
+}
+
+.recent-card-btn--danger:hover {
   background: var(--danger-soft);
   color: var(--danger);
 }
 
+.dashboard-more {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-4);
+}
+
+/* Small, centred and welcoming: it used to be a full-bleed dashed box holding
+   one flat sentence, which reads as an error, not an invitation. No buttons —
+   the create actions are in the bar directly above and repeating them here is
+   how this page ended up with two routes to the same three destinations. */
 .dashboard-empty {
-  padding: 2rem;
-  border-radius: var(--radius-lg);
-  border: 1px dashed var(--border-strong);
-  background: var(--surface);
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  min-height: 12rem;
+  padding: var(--space-5) var(--space-4);
   color: var(--text-muted);
   text-align: center;
 }
 
+.dashboard-empty svg {
+  flex-shrink: 0;
+  color: var(--text-subtle);
+}
+
+.dashboard-empty p {
+  max-width: 30rem;
+  margin: 0;
+  font-size: var(--text-sm);
+  text-wrap: balance;
+}
+
+.dashboard-empty strong {
+  display: block;
+  margin-bottom: var(--space-1);
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 650;
+}
+
+/* One toast per pending delete. A single fixed toast could only ever describe
+   the newest deletion, which is exactly how a second delete used to bury the
+   first file's only recovery path. */
+.dashboard-undo-stack {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--space-5) + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(30rem, calc(100vw - var(--space-6)));
+  max-height: calc(100dvh - var(--space-6));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.dashboard-undo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex: 0 0 auto;
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--text-sm);
+}
+
+.dashboard-undo__text {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* =========================================================================
+   Editor chrome shared by the three apps
+   ========================================================================= */
+
+/* Chrome rows, so they sit on the ribbon's rhythm rather than each inventing
+   their own height: the formula strip alone was 57px of the space above the
+   grid. */
 .find-replace-bar,
 .insert-image-panel,
 .formula-strip {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  padding: 0.9rem 1.25rem;
-  background: var(--surface);
+  padding: var(--space-1) var(--space-3);
+  background: var(--chrome);
   border-bottom: 1px solid var(--border);
 }
 
@@ -1187,53 +1942,58 @@ a {
 .image-import-dropzone {
   flex: 1 1 100%;
   display: grid;
-  gap: 0.35rem;
-  padding: 0.9rem 1rem;
-  border-radius: 18px;
-  border: 1px dashed rgba(37, 99, 235, 0.32);
-  background: rgba(37, 99, 235, 0.06);
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--accent);
+  background: var(--accent-soft);
   color: var(--text);
   cursor: pointer;
-  transition: border-color var(--transition), background var(--transition), box-shadow var(--transition);
+  transition: border-color var(--transition), background var(--transition);
 }
 
 .image-import-dropzone strong {
-  font-size: 0.95rem;
+  font-size: var(--text-sm);
 }
 
 .image-import-dropzone span {
   color: var(--text-muted);
-  font-size: 0.88rem;
+  font-size: var(--text-sm);
 }
 
 .image-import-dropzone:hover,
-.image-import-dropzone:focus-visible,
 .image-import-dropzone--active {
-  outline: none;
-  border-color: rgba(37, 99, 235, 0.48);
+  border-color: var(--accent-strong);
   background: rgba(37, 99, 235, 0.12);
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+}
+
+.form-control,
+.formula-input,
+.notes-textarea,
+.dashboard-search,
+.dashboard-sort {
+  transition: border-color var(--transition), background var(--transition);
 }
 
 .form-control,
 .formula-input,
 .notes-textarea {
   width: 100%;
-  padding: 0.72rem 0.9rem;
-  border-radius: 14px;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface-muted);
   color: var(--text);
-  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
 }
 
 .form-control:focus,
 .formula-input:focus,
-.notes-textarea:focus {
-  outline: none;
-  border-color: rgba(37, 99, 235, 0.35);
+.notes-textarea:focus,
+.dashboard-search:focus,
+.dashboard-sort:focus {
+  border-color: var(--accent);
   background: var(--surface-solid);
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
 }
 
 .form-inline-field {
@@ -1244,11 +2004,15 @@ a {
   flex: 2 1 240px;
 }
 
+/* =========================================================================
+   Word
+   ========================================================================= */
+
 .word-stage {
   display: flex;
-  gap: 1rem;
+  gap: var(--space-4);
   min-height: 100%;
-  padding: 1.25rem;
+  padding: var(--space-5);
   width: 100%;
 }
 
@@ -1259,19 +2023,20 @@ a {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding: 0.5rem;
-  overflow: auto;
+  /* The workspace is the single scroll container; this must not add a second. */
+  overflow: visible;
 }
 
+/* Flattened: one sheet of paper, one shadow. The shell no longer draws a
+   second card around the page it contains. */
 .document-shell {
   width: min(100%, 10.6in);
   min-width: 0;
   flex: 1 1 auto;
-  padding: 1.15rem;
-  border-radius: 1.7rem;
-  background: rgba(255, 255, 255, 0.32);
-  border: 1px solid rgba(255, 255, 255, 0.36);
-  box-shadow: var(--shadow-md);
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
 }
 
 .document-page {
@@ -1279,29 +2044,31 @@ a {
   width: min(100%, 8.5in);
   min-height: 11in;
   margin: 0 auto;
-  padding: clamp(1.1rem, 3vw, 1in);
-  border-radius: 1rem;
+  /* Percentage padding resolves against the page's own containing block, so the
+     writing column stays constant instead of shrinking as the viewport grows. */
+  padding: clamp(var(--space-4), 11.8%, 1in);
+  border-radius: var(--radius-xs);
   background: #ffffff;
   color: #0f172a;
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+  box-shadow: var(--shadow-paper);
 }
 
 .document-page--drop-target {
-  outline: 3px dashed rgba(37, 99, 235, 0.35);
+  outline: 3px dashed var(--accent);
   outline-offset: -14px;
 }
 
 .drop-target-hint,
 .canvas-drop-target-hint {
   position: absolute;
-  inset: 1rem;
+  inset: var(--space-4);
   display: grid;
   place-items: center;
-  padding: 1rem;
-  border-radius: 0.9rem;
-  border: 2px dashed rgba(37, 99, 235, 0.35);
+  padding: var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 2px dashed var(--accent);
   background: rgba(37, 99, 235, 0.08);
-  color: var(--accent-strong);
+  color: var(--accent-ink);
   font-weight: 700;
   text-align: center;
   pointer-events: none;
@@ -1313,6 +2080,31 @@ a {
   min-height: calc(11in - 2in);
 }
 
+/* A genuinely empty document now that the instructional seed content is gone —
+   an entirely blank sheet with a blinking caret and no other cue on the screen.
+
+   ProseMirror renders an empty top-level paragraph as exactly
+   `<p><br class="ProseMirror-trailingBreak"></p>` (verified on the live page),
+   which is the only hook available: there is no Placeholder extension in this
+   build, and adding one is a page-file plus dependency change — see the
+   handover note, `@tiptap/extension-placeholder` would replace this rule with a
+   `data-placeholder` attribute that is translatable and per-node.
+
+   Absolutely positioned and `pointer-events: none` so it takes no part in
+   layout and cannot be clicked, selected or caught by the caret — the same
+   mechanism that extension uses. `user-select: none` keeps it out of a
+   select-all, and being a pseudo-element it is already outside the
+   accessibility tree, so a screen reader is not told the document contains
+   words that it does not. */
+.ProseMirror > p:only-child:has(> br.ProseMirror-trailingBreak:only-child)::before {
+  content: "Start writing, or paste something in.";
+  position: absolute;
+  pointer-events: none;
+  user-select: none;
+  /* 4.6:1 on the page's #ffffff — a hint still has to be readable. */
+  color: #616b7d;
+}
+
 .ProseMirror > * + * {
   margin-top: 0.8em;
 }
@@ -1320,14 +2112,14 @@ a {
 .ProseMirror img {
   max-width: 100%;
   height: auto;
-  border-radius: 12px;
-  margin: 1rem 0;
+  border-radius: var(--radius-sm);
+  margin: var(--space-4) 0;
   border: 2px solid transparent;
   cursor: pointer;
 }
 
 .ProseMirror img.ProseMirror-selectednode {
-  outline: 3px solid rgba(37, 99, 235, 0.3);
+  outline: 3px solid var(--accent);
 }
 
 .ProseMirror table {
@@ -1339,7 +2131,7 @@ a {
 .ProseMirror table td,
 .ProseMirror table th {
   min-width: 1em;
-  padding: 0.45rem 0.55rem;
+  padding: var(--space-1) var(--space-2);
   border: 1px solid rgba(15, 23, 42, 0.18);
   vertical-align: top;
 }
@@ -1347,6 +2139,10 @@ a {
 .ProseMirror table th {
   background: #f4f7fb;
 }
+
+/* =========================================================================
+   Excel
+   ========================================================================= */
 
 .formula-strip {
   display: grid;
@@ -1357,31 +2153,31 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 70px;
-  padding: 0.72rem 0.85rem;
-  border-radius: 14px;
+  min-width: 64px;
+  min-height: var(--control-h);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-xs);
   border: 1px solid var(--border);
   background: var(--surface-muted);
   font-family: var(--font-mono);
-  font-size: 0.88rem;
+  font-size: var(--text-xs);
   font-weight: 700;
 }
 
 .formula-helper {
   display: inline-flex;
   align-items: center;
-  padding: 0 0.2rem;
+  padding: 0 var(--space-1);
   font-family: var(--font-mono);
   font-weight: 700;
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .spreadsheet-shell {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   display: flex;
-  min-width: 0;
-  min-height: clamp(440px, 72vh, 980px);
 }
 
 .spreadsheet-container {
@@ -1398,6 +2194,341 @@ a {
   height: 100% !important;
 }
 
+/* fortune-sheet's own Count/Sum/Average strip. It has no prop to disable it,
+   it is EMPTY whenever nothing is selected — which is most of the time — and
+   everything it can say is already spelled out in our own status bar. 22px of
+   grid back at every viewport, and it matters most at 844x390 where the
+   library's chrome was outweighing the grid it wraps. */
+.spreadsheet-container .fortune-stat-area {
+  display: none !important;
+}
+
+/* -------------------------------------------------------------------------
+   fortune-sheet's OWN toolbar, restyled into our ribbon.
+
+   Excel stacks two control rows: ours (39px: undo, redo, save, add sheet,
+   freeze, sort, find, insert/delete row+column, chart) and the library's (41px:
+   currency, percent, decimals, font, B/I/U, colours, borders, align, wrap,
+   merge, filter). They are NOT duplicates — that was checked control by control
+   — so both stay. What had to go is the seam: two typefaces' worth of icon,
+   two button sizes, two divider idioms, two greys, and in DARK MODE a #fafafc
+   band sitting between two panels of #131c29, which announced "different
+   product" from across the room.
+
+   EVERY selector here is prefixed with `.spreadsheet-container` on purpose.
+   `@fortune-sheet/react/dist/index.css` is imported inside ExcelWorkbook.tsx,
+   so Vite emits it as a LAZY chunk that is injected after `index.css`: a
+   single-class rule of ours loses the source-order tie to a single-class rule
+   of theirs. Two classes wins it without a single `!important` — except for
+   the one inline style called out below, which nothing else can beat.
+   ------------------------------------------------------------------------- */
+
+.spreadsheet-container .fortune-toolbar {
+  /* 4px + 30px control + 4px + 1px hairline = 39px, the same arithmetic as
+     `.toolbar-shell` + `--control-h`, so the two rows are the same height to
+     the pixel instead of 39 against 41. */
+  padding: var(--space-1) var(--space-3);
+  gap: 1px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--border);
+}
+
+.spreadsheet-container .fortune-toolbar-button,
+.spreadsheet-container .fortune-toolbar-combo {
+  min-width: var(--control-h);
+  height: var(--control-h);
+  margin: 0;
+  padding: 0;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  transition:
+    background var(--transition),
+    border-color var(--transition),
+    color var(--transition);
+}
+
+.spreadsheet-container .fortune-toolbar-button:hover,
+.spreadsheet-container .fortune-toolbar-combo:hover {
+  background: var(--surface-muted);
+}
+
+.spreadsheet-container .fortune-toolbar-button:active,
+.spreadsheet-container .fortune-toolbar-combo:active {
+  background: var(--surface-strong);
+}
+
+/* The arrow half of a split control (apply-last-colour vs open-the-picker) is a
+   separate target, so it keeps a separate hover — one step stronger than the
+   body's, which is how Office distinguishes the two halves. */
+.spreadsheet-container .fortune-toolbar-combo-arrow {
+  border-radius: var(--radius-xs);
+  transition: background var(--transition);
+}
+
+.spreadsheet-container .fortune-toolbar-combo-arrow:hover {
+  background: var(--surface-strong);
+}
+
+/* The pressed state is an INLINE `backgroundColor: "#E7E5EB"` written by the
+   library's Button component — there is no class to hook, and no `aria-pressed`
+   either (see the report: that half needs JS). React serialises it as
+   `background-color: rgb(231, 229, 235)`, which a substring attribute selector
+   can match; `!important` is then the only thing that outranks the style
+   attribute. Same tint-plus-hairline as `.toolbar-btn.active`, and the hairline
+   is again what carries SC 1.4.11's 3:1 — a 12%-alpha tint cannot. */
+.spreadsheet-container .fortune-toolbar-button[style*="rgb(231, 229, 235)"] {
+  background: var(--accent-soft) !important;
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* A hairline between groups, not a floating 20px tick: same height, colour and
+   rhythm as `.toolbar > .toolbar-group + .toolbar-group`'s border-left, which
+   spans the 30px control height and sits 8px clear of the controls on each
+   side. 7px + the row's 1px gap on either side reproduces that 8px. */
+.spreadsheet-container .fortune-toolbar-divider {
+  width: 1px;
+  height: var(--control-h);
+  margin: 0 calc(var(--space-2) - 1px);
+  background: var(--border);
+}
+
+/* The library sets `outline: none` on every toolbar button and wins the
+   source-order tie against our global `:focus-visible`, so a keyboard user got
+   NO ring at all on any of these 19 controls. The roving tabindex another pass
+   added is only half of SC 2.4.7 without this. */
+.spreadsheet-container .fortune-toolbar-button:focus-visible,
+.spreadsheet-container .fortune-toolbar-combo-button:focus-visible,
+.spreadsheet-container .fortune-toolbar-combo-arrow:focus-visible,
+.spreadsheet-container .fortune-sheettab-button:focus-visible,
+.spreadsheet-container .fortune-zoom-button:focus-visible,
+.spreadsheet-container .luckysheet-sheets-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -1px;
+  border-radius: var(--radius-xs);
+}
+
+/* Text inside a control ("Automatic", "10") on the ribbon's own type ramp. */
+.spreadsheet-container .fortune-toolbar-combo-button {
+  height: 100%;
+  padding-inline: var(--space-1);
+  font-size: var(--text-xs);
+  /* A combo shows a VALUE ("Automatic", "10"), not a heading. At 700 — the
+     library's inherited default here — these two were the heaviest marks on
+     either row, which is a strange thing for a font-size readout to be. */
+  font-weight: 500;
+}
+
+.spreadsheet-container .fortune-toolbar-combo-text {
+  margin: 0 2px;
+}
+
+/* --- icon sizing ---
+   The library's own icon set is not internally consistent: `bold`, `italic`,
+   `merge-all` and friends are drawn inside a 24-unit viewBox with ~20% padding,
+   while `currency-format` (16), `percentage-format`, `number-decrease`,
+   `number-increase`, `text-clip` and `filter` (1024) are full-bleed. Rendered
+   at one box size the second group reads a third larger than the first — which
+   is why `$` and `%` were the loudest things on the row. Sizing the <svg> box
+   scales its viewBox with it, so two sizes bring both families onto the same
+   optical weight as our 18px lucide glyphs.
+
+   `use[*|href]` because React writes the XLink-namespaced `xlink:href`; the
+   `*|` wildcard matches it without declaring a namespace. */
+.spreadsheet-container .fortune-toolbar-button > svg,
+.spreadsheet-container .fortune-toolbar-combo-button > svg {
+  width: 19px;
+  height: 19px;
+}
+
+.spreadsheet-container .fortune-toolbar svg:has(use[*|href="#currency-format"]),
+.spreadsheet-container .fortune-toolbar svg:has(use[*|href="#percentage-format"]),
+.spreadsheet-container .fortune-toolbar svg:has(use[*|href="#number-decrease"]),
+.spreadsheet-container .fortune-toolbar svg:has(use[*|href="#number-increase"]),
+.spreadsheet-container .fortune-toolbar svg:has(use[*|href="#text-clip"]),
+.spreadsheet-container .fortune-toolbar svg:has(use[*|href="#filter"]) {
+  width: 14px;
+  height: 14px;
+}
+
+/* -100..1224, i.e. 1024 of drawing with 8% padding — between the two families. */
+.spreadsheet-container .fortune-toolbar svg:has(use[*|href="#font-color"]),
+.spreadsheet-container .fortune-toolbar svg:has(use[*|href="#background"]) {
+  width: 17px;
+  height: 17px;
+}
+
+/* --- icon INK ---
+   The sprite is hardcoded #525C6F. That is not our --text (#0f172a), and it
+   cannot be recoloured the honest way: the glyphs are `<use>` instances of
+   `<symbol>`s whose paths carry `fill`/`stroke` as PRESENTATION ATTRIBUTES, and
+   CSS cannot select into a use-element shadow tree — proven on the live page,
+   `svg symbol * { fill: red !important }` changed nothing. A filter is
+   therefore the only instrument available.
+
+   `brightness()` rather than a flat recolour because these icons are TWO-TONE:
+   the border and alignment glyphs draw their inactive strokes in #CCCED2 and
+   their active ones in #525C6F, and that relationship has to survive. Scaling
+   both keeps it (#525C6F -> ~#2E333C, #CCCED2 -> ~#747577) while bringing the
+   primary ink to within a hair of --text. The dark theme inverts instead; see
+   styles/dark-mode.css, whose rule is more specific and replaces this one. */
+.spreadsheet-container .fortune-toolbar svg,
+.spreadsheet-container .luckysheet-sheet-area svg {
+  filter: brightness(0.57);
+}
+
+.spreadsheet-container .fortune-toolbar-combo-arrow > svg {
+  width: 10px;
+  height: 18px;
+}
+
+/* The library's overflow popover, given the same shape as
+   `.toolbar-overflow-panel` so "More" means the same thing on both rows. */
+.spreadsheet-container .fortune-toolbar-more-container {
+  top: calc(100% + 4px);
+  padding: var(--space-1);
+  gap: 1px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Dropdowns (font size, format, colour picker) on our popover shape too. */
+.spreadsheet-container .fortune-toolbar-select,
+.spreadsheet-container .fortune-toolbar-color-picker,
+.spreadsheet-container .toolbar-item-sub-menu {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+}
+
+.spreadsheet-container .fortune-toolbar-select-option {
+  font-size: var(--text-sm);
+  border-radius: var(--radius-xs);
+}
+
+.spreadsheet-container .fortune-toolbar-select-option:hover {
+  background: var(--surface-muted);
+}
+
+/* The library's tooltip is a #666 box with a 2px radius that appears next to
+   our own `title` tooltips. */
+.spreadsheet-container .fortune-tooltip {
+  top: calc(100% + 6px);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-xs);
+  background: #1f2937;
+  color: #ffffff;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  box-shadow: var(--shadow-md);
+}
+
+/* -------------------------------------------------------------------------
+   Sheet tabs + zoom — the strip between the grid and OUR status bar.
+   ------------------------------------------------------------------------- */
+
+.spreadsheet-container .luckysheet-sheet-area {
+  /* Border-box, so this is the library's own 31px budget with our hairline
+     folded into it rather than added on top — the grid loses nothing. */
+  height: 31px;
+  padding: 0 var(--space-3);
+  gap: var(--space-1);
+  background: var(--chrome);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* THE DEAD GAP. The library caps this container at `max-width: 54%` while
+   `.fortune-zoom-container` is pushed to the far right, so a workbook with one
+   sheet showed a lone tab, then ~1100px of empty band, then the zoom control —
+   and a workbook with nine sheets scrolled its tabs inside 54% of the width
+   while that same band stayed empty. There is nothing on this row that needs
+   protecting from the tabs: the zoom control is a flex sibling with its own
+   intrinsic width, so it cannot be pushed off. */
+.spreadsheet-container .fortune-sheettab-container {
+  max-width: 100%;
+}
+
+.spreadsheet-container .luckysheet-sheet-area div.luckysheet-sheets-item {
+  height: 24px;
+  line-height: 24px;
+  padding: 0 var(--space-3) 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.spreadsheet-container .luckysheet-sheet-area div.luckysheet-sheets-item:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+/* The selected sheet is the same tint-plus-hairline as `.toolbar-btn.active`
+   and `.workspace-switcher-tab.active`, so "which one is on" is signalled the
+   same way everywhere in the product. */
+.spreadsheet-container .luckysheet-sheet-area div.luckysheet-sheets-item-active,
+.spreadsheet-container .luckysheet-sheet-area div.luckysheet-sheets-item-active:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.spreadsheet-container .fortune-sheettab-button,
+.spreadsheet-container .fortune-zoom-button {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  transition: background var(--transition), color var(--transition);
+}
+
+.spreadsheet-container .fortune-sheettab-button:hover,
+.spreadsheet-container .fortune-zoom-button:hover,
+.spreadsheet-container .fortune-sheettab-scroll:hover,
+.spreadsheet-container .fortune-zoom-ratio-item:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.spreadsheet-container .fortune-sheettab-button > svg,
+.spreadsheet-container .fortune-zoom-button > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.spreadsheet-container .fortune-zoom-ratio {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.spreadsheet-container .fortune-zoom-ratio-menu {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+}
+
+/* The two scroll-affordance fades are a `#4445 -> transparent` gradient painted
+   over a hardcoded `background: rgb(255, 255, 255)`. That opaque white only
+   ever made sense over the library's own #fafafc; over our chrome it is a white
+   smudge, and over the dark theme a bright one. Dropping the fill and keeping
+   the gradient leaves a soft edge shadow that works on both themes — the
+   affordance survives, which matters because these only render when the tabs
+   actually overflow. */
+.spreadsheet-container .fortune-sheettab-container .boundary {
+  background-color: transparent;
+}
+
 .chart-modal {
   position: fixed;
   inset: 0;
@@ -1405,18 +2536,23 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
+  padding: var(--space-4);
   background: rgba(15, 23, 42, 0.52);
 }
 
 .chart-card {
   width: min(720px, 100%);
-  min-height: 360px;
+  /* `min-height` beats `max-height` when they conflict, so the floor has to be
+     clamped too or a 300px-tall viewport still gets a 360px card. */
+  min-height: min(360px, calc(100dvh - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding: 1rem;
-  border-radius: 1.5rem;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
   background: var(--surface-solid);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
@@ -1426,56 +2562,30 @@ a {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
-.selection-summary {
-  display: grid;
-  gap: 0.55rem;
-}
 
-.selection-summary strong {
-  font-size: 1.15rem;
-}
 
-.selection-summary__stats {
-  display: grid;
-  gap: 0.75rem;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
 
-.selection-summary__stats div {
-  padding: 0.8rem;
-  border-radius: var(--radius-md);
-  background: var(--surface-muted);
-  border: 1px solid var(--border);
-}
 
-.selection-summary__stats span {
-  display: block;
-  font-size: 0.76rem;
-  font-weight: 700;
-  color: var(--text-subtle);
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-}
 
-.selection-summary__stats strong {
-  display: block;
-  margin-top: 0.25rem;
-  font-size: 1.1rem;
-}
+
+/* =========================================================================
+   PowerPoint
+   ========================================================================= */
 
 .slides-layout {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   display: flex;
 }
 
 .slide-sidebar {
-  width: 250px;
+  width: 232px;
   flex-shrink: 0;
-  padding: 1rem;
+  min-height: 0;
+  padding: var(--space-4);
   background: var(--surface);
   border-right: 1px solid var(--border);
   overflow: auto;
@@ -1485,14 +2595,14 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 0.9rem;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 
 .slide-list {
   display: flex;
   flex-direction: column;
-  gap: 0.8rem;
+  gap: var(--space-3);
   scroll-snap-type: x proximity;
 }
 
@@ -1500,9 +2610,9 @@ a {
   position: relative;
   width: 100%;
   border: 1px solid var(--border);
-  border-radius: 1rem;
+  border-radius: var(--radius-md);
   background: var(--surface-solid);
-  padding: 0.65rem;
+  padding: var(--space-2);
   box-shadow: var(--shadow-sm);
   text-align: left;
   cursor: pointer;
@@ -1511,18 +2621,16 @@ a {
 
 .slide-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(37, 99, 235, 0.25);
+  border-color: var(--accent);
 }
 
-.slide-card:focus-visible {
-  outline: none;
-  border-color: rgba(37, 99, 235, 0.42);
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12), 0 18px 34px rgba(37, 99, 235, 0.12);
+.slide-card:active {
+  transform: translateY(0) scale(0.99);
 }
 
 .slide-card--active {
-  border-color: rgba(37, 99, 235, 0.45);
-  box-shadow: 0 18px 34px rgba(37, 99, 235, 0.12);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
 }
 
 .slide-card__thumb {
@@ -1531,7 +2639,7 @@ a {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border-radius: 0.8rem;
+  border-radius: var(--radius-xs);
   background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
   border: 1px solid rgba(15, 23, 42, 0.08);
 }
@@ -1540,125 +2648,95 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  margin-top: 0.7rem;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
   color: var(--text-muted);
-  font-size: 0.86rem;
+  font-size: var(--text-sm);
 }
 
-.slide-card__delete {
-  position: absolute;
-  top: 0.95rem;
-  right: 0.95rem;
-  width: 1.9rem;
-  height: 1.9rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: none;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.66);
-  color: #ffffff;
-}
 
-.slide-card__delete:hover {
-  background: rgba(15, 23, 42, 0.82);
-}
+
 
 .presentation-stage {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  padding: 1.25rem;
+  padding: var(--space-5);
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
+/* Flattened: the slide itself carries the single paper shadow, so the shell
+   no longer draws a gradient card around a card.
+
+   The 1000px cap used to be invisible behind the Deck status panel and the
+   full-width notes rail. With those gone it became the binding constraint: at
+   1920x1080 the stage offered 1440px and the slide took 960 of it, so a third
+   of a wide screen was empty desk. 1600px is chosen so that HEIGHT is what
+   binds on every desktop size the product supports (a 16:9 slide needs 1312px
+   of width to fill the stage at 1440x900 and 1632px at 1920x1080), which keeps
+   `fitCanvasToShell`'s min-of-both-axes in charge rather than this number. */
 .canvas-shell {
   position: relative;
-  width: min(100%, 1000px);
+  width: min(100%, 1600px);
   margin: 0 auto;
-  padding: 1rem;
-  border-radius: 1.6rem;
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.08), rgba(255, 255, 255, 0.5));
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  box-shadow: var(--shadow-md);
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+
+/* When height binds, the canvas is narrower than the shell; without this it
+   would sit against the shell's left edge instead of on the stage's centre. */
+.canvas-shell > * {
+  margin-inline: auto;
 }
 
 .canvas-shell--drop-target {
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14), var(--shadow-md);
-}
-
-[data-theme="dark"] .canvas-shell {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(15, 23, 42, 0.22));
-  border-color: rgba(148, 163, 184, 0.15);
+  outline: 3px dashed var(--accent);
+  outline-offset: 6px;
 }
 
 .canvas-shell canvas {
   display: block;
-  width: 100% !important;
-  height: auto !important;
-  border-radius: 1rem;
-  background: #ffffff;
+  border-radius: var(--radius-xs);
 }
 
+/* Fabric stacks an interaction layer (.upper-canvas) over the render layer.
+   Only the render layer may be painted, or the slide is hidden behind opaque white. */
+.canvas-shell canvas.lower-canvas {
+  background: #ffffff;
+  box-shadow: var(--shadow-paper);
+}
+
+/* PowerPoint publishes `--notes-rail-w` on the aside itself (248px open, 52px
+   collapsed) rather than writing a `width`, so the value stays a page-file
+   decision while the PROPERTY stays here. The fallback is the old constant, so
+   any consumer that does not declare the custom property is unchanged.
+   The mobile `width: 100%` below is deliberately still CSS-only: a media query
+   is the one place that can respond to the viewport, and an inline width would
+   outrank it. */
 .notes-sidebar {
-  width: 320px;
+  width: var(--notes-rail-w, 288px);
   flex-shrink: 0;
-  padding: 1rem;
+  min-height: 0;
+  padding: var(--space-4);
   background: var(--surface);
   border-left: 1px solid var(--border);
   overflow: auto;
 }
 
 .notes-textarea {
-  min-height: 180px;
-  resize: vertical;
+  min-height: 160px;
+  /* The native grabber cannot be styled and clashes with the panel edge. */
+  resize: none;
 }
 
-.presenter-shell {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  background: #08101a;
-  color: #edf4ff;
-}
 
-.presenter-stage {
-  flex: 1.2;
-  min-width: 0;
-  padding: 1rem;
-  overflow: auto;
-}
 
-.presenter-sidebar {
-  width: 360px;
-  flex-shrink: 0;
-  padding: 1rem;
-  border-left: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(8, 16, 26, 0.9);
-}
 
-.presenter-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1rem 1.25rem;
-  background: rgba(8, 16, 26, 0.88);
-  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
-}
 
-.presenter-clock {
-  font-size: 1.6rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-}
 
-.slide-nav {
-  display: flex;
-  gap: 0.75rem;
-}
 
 .slide-color-input {
   width: 40px;
@@ -1668,6 +2746,10 @@ a {
   padding: 0;
 }
 
+/* =========================================================================
+   Dialogs
+   ========================================================================= */
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -1675,60 +2757,85 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
+  padding: var(--space-4);
   background: rgba(15, 23, 42, 0.56);
 }
 
 .dialog-card {
   width: min(460px, 100%);
-  padding: 1.25rem;
-  border-radius: 1.5rem;
+  /* Centred in a fixed backdrop, an unbounded card overhangs BOTH edges on a
+     short viewport: the heading is cut off the top and the confirm button sits
+     below the fold with no page scroll to reach it. */
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
   background: var(--surface-solid);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
 }
 
 .dialog-card h2 {
-  margin: 0 0 0.45rem;
-  font-size: 1.2rem;
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-lg);
 }
 
 .dialog-card p {
-  margin: 0 0 1.1rem;
+  margin: 0 0 var(--space-4);
   color: var(--text-muted);
 }
 
 .dialog-card__actions {
   display: flex;
   justify-content: flex-end;
-  gap: 0.75rem;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 
+/* =========================================================================
+   Desktop-only chrome compaction.
+
+   MUST live behind a min-width query. These selectors carry two classes, so
+   unscoped they outrank the single-class `.btn { min-height: 44px }` touch
+   rule below and silently shrank every header and panel button on a phone to
+   30px — measured: four sub-44px targets at 390x844.
+   ========================================================================= */
+
+@media (min-width: 901px) {
+  .suite-header .btn,
+  .find-replace-bar .btn,
+  .insert-image-panel .btn {
+    min-height: var(--control-h);
+    font-size: var(--text-xs);
+  }
+
+  .suite-header .btn-icon {
+    min-width: var(--control-h);
+  }
+
+  .find-replace-bar .form-control,
+  .formula-strip .form-control,
+  .formula-input {
+    min-height: var(--control-h);
+  }
+}
+
+/* =========================================================================
+   Responsive — width
+   ========================================================================= */
+
 @media (max-width: 1080px) {
-  .dashboard-hero-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .launcher-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .workspace-sidebar,
-  .workspace-sidebar--left,
   .notes-sidebar {
-    width: 290px;
+    width: var(--notes-rail-w, 264px);
+  }
+
+  .slide-sidebar {
+    width: 208px;
   }
 }
 
 @media (max-width: 900px) {
-  /* The embedded grid uses percentage heights; mobile's auto-height shell
-     needs a definite grid height to keep the sheet rows visible. */
-  .spreadsheet-shell > .spreadsheet-container {
-    height: 70svh;
-    flex: none;
-  }
-
   .workspace-mobile-switcher {
     display: flex;
   }
@@ -1743,23 +2850,26 @@ a {
 
   .suite-header {
     flex-wrap: wrap;
-    align-items: stretch;
+    align-items: center;
+    row-gap: var(--space-2);
+    padding-inline: var(--space-4);
   }
 
+  /* `width: 100%` alone never took effect: the base rule is `flex: 1`, i.e. a
+     flex-basis of 0, so the group always "fitted" on the first row and then
+     shrank to whatever was left — 53px on PowerPoint, which pushed the save
+     pill 87px outside an `overflow: hidden` shell. A 100% BASIS is what forces
+     the filename onto its own row. */
   .suite-header__document {
+    flex: 1 1 100%;
     width: 100%;
     min-width: 0;
     order: 3;
   }
 
   .header-actions {
-    width: 100%;
-    margin-left: 0;
-    justify-content: space-between;
-  }
-
-  .header-action-cluster {
-    justify-content: flex-start;
+    margin-left: auto;
+    justify-content: flex-end;
   }
 
   .toolbar-shell {
@@ -1775,15 +2885,11 @@ a {
   }
 
   .word-stage,
-  .spreadsheet-shell,
-  .presenter-shell {
+  .spreadsheet-shell {
     flex-direction: column;
   }
 
-  .workspace-sidebar,
-  .workspace-sidebar--left,
-  .notes-sidebar,
-  .presenter-sidebar {
+  .notes-sidebar {
     width: 100%;
     border-left: 0;
     border-right: 0;
@@ -1799,7 +2905,7 @@ a {
   .slide-list {
     flex-direction: row;
     overflow: auto;
-    padding-bottom: 0.2rem;
+    padding-bottom: var(--space-1);
   }
 
   .slide-card {
@@ -1815,58 +2921,146 @@ a {
     grid-column: 1 / -1;
   }
 
-  .metric-grid,
-  .selection-summary__stats {
-    grid-template-columns: 1fr 1fr;
+  /* --- Touch targets: nothing interactive below 44x44 on a phone/tablet. --- */
+  .btn,
+  .mobile-toolbar-toggle,
+  .workspace-switcher-tab,
+  .file-name,
+  .form-control,
+  .formula-input,
+  .dashboard-search,
+  .dashboard-sort {
+    min-height: 44px;
+  }
+
+  .btn-icon {
+    min-width: 44px;
+  }
+
+  .toolbar-btn,
+  .mobile-toolbar-close,
+  .recent-card-btn,
+  .slide-color-input {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* On a phone the LIBRARY's toolbar is the only ribbon Excel has — ours is
+     `display: none` here and lives behind the "Ribbon" launcher — so these 19
+     controls are the whole formatting surface and were 30x30 to a thumb (28x28
+     before this pass). Same 44px floor as `.toolbar-btn` above.
+     Costs 14px of grid; it is the primary control surface and worth it. */
+  .spreadsheet-container .fortune-toolbar-button,
+  .spreadsheet-container .fortune-toolbar-combo {
+    min-width: 44px;
+    height: 44px;
+  }
+
+  /* The two halves of a split control are the elements that actually carry the
+     click, and they sit INSIDE the combo's 1px border, so `height: 100%` gave
+     them 42. The negative margin lets them cover the border box exactly — the
+     border is transparent until the control is pressed, so nothing shifts. */
+  .spreadsheet-container .fortune-toolbar-combo-button,
+  .spreadsheet-container .fortune-toolbar-combo-arrow {
+    height: 44px;
+    margin-block: -1px;
+  }
+
+  /* The arrow was 10x18. It cannot also be 44 WIDE: seven of these on the row,
+     each 88px for two 44px halves, is 616px of controls on a 390px screen and
+     everything past the third would be exiled into the overflow menu. 24px
+     clears SC 2.5.8's 24x24 minimum on both axes and keeps the row usable. */
+  .spreadsheet-container .fortune-toolbar-combo-arrow {
+    width: 24px;
+    justify-content: center;
+  }
+
+  .spreadsheet-container .fortune-toolbar-divider {
+    height: 44px;
+  }
+
+  /* The sheet-tab strip is a fixed 31px in the library and cannot grow without
+     taking that height from the grid on the shortest viewport in the product.
+     The free axis is width, so these take 44px there and the 30px the row
+     allows in height — comfortably past the 24x24 of SC 2.5.8, short of the
+     44x44 of 2.5.5. Called out in the handover as the one target that does not
+     reach 44 in both axes. */
+  .spreadsheet-container .fortune-sheettab-button,
+  .spreadsheet-container .fortune-zoom-button {
+    width: 44px;
+    height: 30px;
+  }
+
+  .spreadsheet-container .luckysheet-sheet-area div.luckysheet-sheets-item {
+    min-width: 44px;
+    height: 30px;
+    line-height: 30px;
+  }
+
+  .suite-home-link {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .formula-coordinate {
+    min-height: 44px;
   }
 }
 
 @media (max-width: 640px) {
   .dashboard-shell {
-    width: min(100%, calc(100% - 1rem));
+    width: min(100%, calc(100% - var(--space-4)));
   }
 
-  .dashboard-hero-copy,
-  .dashboard-hero-panel,
-  .launcher-card,
-  .recent-card,
   .panel-card {
-    padding: 1rem;
+    padding: var(--space-4);
   }
 
-  .dashboard-stat-grid,
-  .metric-grid,
-  .selection-summary__stats {
-    grid-template-columns: 1fr;
+  /* Brand + theme toggle on one row, the three create actions on the next.
+     Below this width they cannot share a line without one of them falling off
+     the edge of a shell that has no page scroll to recover it. */
+  .dashboard-topbar__inner {
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
   }
 
-  .dashboard-topbar {
-    padding-top: 0.75rem;
+  .dashboard-create {
+    order: 3;
+    width: 100%;
   }
 
-  .dashboard-hero {
-    padding-bottom: 1.25rem;
+  .dashboard-create__btn {
+    flex: 1 1 0;
+    min-width: 0;
   }
 
-  .workspace {
-    background: transparent;
+  .dashboard-create__label {
+    display: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .dashboard-create__label--short {
+    display: block;
+  }
+
+  .dashboard-section {
+    padding-top: var(--space-4);
   }
 
   .word-stage,
   .presentation-stage,
   .document-stage {
-    padding: 0.75rem;
+    padding: var(--space-3);
   }
 
-  .document-shell,
-  .canvas-shell {
-    padding: 0.65rem;
-    border-radius: 1.1rem;
+  .document-shell {
+    padding: 0;
   }
 
   .document-page {
     min-height: auto;
-    border-radius: 0.8rem;
   }
 
   .formula-strip,
@@ -1874,7 +3068,7 @@ a {
   .insert-image-panel,
   .editor-banner,
   .workspace-mobile-switcher {
-    padding-inline: 1rem;
+    padding-inline: var(--space-4);
   }
 
   .find-replace-bar,
@@ -1887,18 +3081,42 @@ a {
     width: 100%;
   }
 
-  .header-actions,
-  .header-action-cluster,
-  .dashboard-hero-actions,
   .dialog-card__actions {
     width: 100%;
   }
 
-  .header-actions .btn,
-  .header-action-cluster .btn,
-  .dashboard-hero-actions .btn,
+  /* `width: 100%` USED to live here too, and it was right when the cluster held
+     three labelled export buttons that could not share the filename's row. The
+     header now collapses those into a single `⋯` trigger, so the group is two
+     icon buttons wide and fits beside the filename with room to spare — while
+     the 100% basis was still reserving a whole ~50px row for it and leaving the
+     left 80% of that row blank. Measured on Word at 390x844: header 113px ->
+     63px, i.e. 50px of document back on the smallest viewport in the product.
+     844x390 is unaffected; it is governed by the `max-height` block below,
+     which already keeps everything on one row. */
+  .header-actions {
+    margin-left: auto;
+    flex: 0 1 auto;
+    flex-wrap: nowrap;
+  }
+
+  /* Never a scroll container at this width any more — there is nothing left to
+     scroll past. `flex-start` is kept as the safe default for the day another
+     always-visible action is added (see the note on the base rule: `flex-end`
+     spills overflow out of the start edge, where scrollLeft cannot reach it). */
+  .header-action-cluster {
+    width: auto;
+    flex: 0 1 auto;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+  }
+
+  .header-action-cluster .btn {
+    flex: 0 0 auto;
+  }
+
   .dialog-card__actions .btn {
-    flex: 1 1 150px;
+    flex: 1 1 100px;
   }
 
   .suite-home-link__text,
@@ -1906,21 +3124,776 @@ a {
     display: none;
   }
 
-  .spreadsheet-shell {
-    min-height: 70svh;
+  .dashboard-file-tools {
+    width: 100%;
+  }
+
+  /* One status line that truncates, rather than two wrapped rows stealing 45px
+     from the editor on a bounded shell. */
+  .status-bar {
+    flex-wrap: nowrap;
+    font-size: var(--text-xs);
+  }
+
+  .status-bar__segment {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .formula-strip {
+    padding-block: var(--space-1);
+    gap: var(--space-1);
   }
 }
 
-.launcher-card__icon.blueline { background: linear-gradient(135deg, #087bb5, #174a84); }
-.btn { text-decoration: none; }
-.suite-app-switcher { max-width: 135px; min-height: 36px; padding: 0.3rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid); color: var(--text); }
-@media (min-width: 981px) and (max-width: 1150px) { .launcher-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 640px) {
-  .header-actions {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 42px;
+/* Below this the three create buttons share ~124px each, and even the SHORT
+   label rendered as "Docum…", "Spread…", "Present…" — the same truncation the
+   header's save pill had, and the same answer: a cut word is worse than no
+   word. The coloured chip is now what identifies each button, and the file list
+   directly beneath spells out "Document" / "Spreadsheet" / "Presentation"
+   beside those exact three chips, so the mapping is taught on the same screen.
+   Nothing is lost to assistive tech: the accessible name is `aria-label="New
+   document"` on the link itself, not this span. */
+@media (max-width: 460px) {
+  .dashboard-create__label--short {
+    display: none;
   }
-  .suite-app-switcher { width: 100%; max-width: 160px; }
-  .header-actions > .btn-icon { grid-column: 2; grid-row: 1; }
-  .header-action-cluster { grid-column: 1 / -1; grid-row: 2; }
+
+  .dashboard-create__btn {
+    justify-content: center;
+  }
+}
+
+/* Very narrow phones: the app title and the filename cannot each own a row. */
+@media (max-width: 420px) {
+  .app-title {
+    display: none;
+  }
+
+  .suite-header__document {
+    order: 0;
+    width: auto;
+    min-width: 0;
+    flex: 1 1 6rem;
+    gap: var(--space-2);
+  }
+
+  .header-actions {
+    order: 3;
+  }
+
+  .status-pill {
+    min-width: 0;
+  }
+
+  .mobile-toolbar-launcher,
+  .workspace-mobile-switcher {
+    padding-top: var(--space-2);
+  }
+}
+
+/* =========================================================================
+   Responsive — HEIGHT. Phone landscape (e.g. 844x390) has less vertical room
+   than any portrait phone, and the width-only breakpoints previously gave it
+   the tallest header in the product.
+   ========================================================================= */
+
+@media (max-height: 560px) {
+  .suite-header {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding: calc(var(--space-1) + env(safe-area-inset-top, 0px)) var(--space-3) var(--space-1);
+  }
+
+  .suite-header__leading {
+    gap: var(--space-2);
+    flex: 0 0 auto;
+  }
+
+  /* Fitting the BOX is not enough — this group has to fit its CONTENT too. A
+     `1 1 8rem` basis squeezed it to 54px while `min-width: 6rem` held the field
+     at 96px, so it overflowed and painted straight over the action buttons. */
+  .suite-header__document {
+    order: 0;
+    width: auto;
+    min-width: 0;
+    flex: 0 1 auto;
+    gap: var(--space-2);
+    overflow: hidden;
+    /* `clip` still lets the 2px focus ring at 2px offset paint outside the box,
+       which plain `hidden` would shave off the filename field. */
+    overflow: clip;
+    overflow-clip-margin: 6px;
+  }
+
+  /* `nowrap` here is what keeps the header one row tall, but on a viewport that
+     is ALSO narrow it used to push Export/theme past the right edge of an
+     `overflow: hidden` shell with no page scroll to recover them. The actions
+     now shrink first (they scroll) — but never below one scrollable button
+     (2.75rem) + gap + the theme toggle, or the group would collapse to nothing
+     and take the toggle off-screen with it. */
+  /* 6rem left the scroll container 75px wide at 360x480 — narrower than any of
+     the buttons inside it, so scrolling could never bring a whole button into
+     view. 9rem is the floor at which one full action is always readable, and it
+     still fits beside the filename at 320px. */
+  .header-actions {
+    order: 0;
+    width: auto;
+    flex: 0 1 auto;
+    min-width: 9rem;
+    flex-wrap: nowrap;
+    margin-left: auto;
+  }
+
+  .header-action-cluster {
+    width: auto;
+    /* Never scroll to nothing: one button's worth always stays on screen. */
+    min-width: 2.75rem;
+    flex: 0 1 auto;
+    flex-wrap: nowrap;
+    /* MUST be flex-start once this is a scroll container: `flex-end` spills the
+       overflow out of the START edge, which scrollLeft can never reach — the
+       buttons then paint over the filename instead of scrolling. */
+    justify-content: flex-start;
+  }
+
+  .header-actions .btn,
+  .header-action-cluster .btn {
+    flex: 0 0 auto;
+    width: auto;
+  }
+
+  /* The toggle is the one action that must never need scrolling to find. */
+  .header-actions > .btn {
+    flex: 0 0 auto;
+  }
+
+  .app-brand__eyebrow,
+  .suite-home-link__text {
+    display: none;
+  }
+
+  .app-logo-icon {
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: var(--radius-xs);
+    font-size: var(--text-sm);
+  }
+
+  .app-title {
+    font-size: var(--text-sm);
+  }
+
+  .mobile-toolbar-launcher {
+    padding: var(--space-1) var(--space-3) 0;
+  }
+
+  .workspace-mobile-switcher {
+    margin-top: var(--space-1);
+  }
+
+  /* The width-only breakpoint stacks the formula strip into three rows, which on
+     a 390px-tall viewport left 32px for the grid. Keep it on one line. */
+  .formula-strip {
+    grid-template-columns: auto minmax(90px, auto) minmax(0, 1fr) auto;
+    padding-block: var(--space-1);
+    gap: var(--space-2);
+  }
+
+  .formula-input {
+    grid-column: auto;
+  }
+
+  .find-replace-bar,
+  .insert-image-panel,
+  .editor-banner {
+    padding-block: var(--space-1);
+  }
+
+  .status-bar {
+    padding-block: var(--space-1);
+    font-size: var(--text-xs);
+  }
+
+  .word-stage,
+  .document-stage {
+    padding: var(--space-2);
+  }
+
+  /* The slide is the ONLY thing on this screen and it is fitted by
+     `fitCanvasToShell`, which subtracts this element's block padding from the
+     height it has to work with. 844x390 is the tightest viewport the product
+     supports and height is what binds there, so every pixel of vertical padding
+     comes straight off the slide: 8px block padding cost 8/540 = 0.0148 of
+     scale, and the canvas measured 0.350 where it used to be 0.365. Inline
+     padding is free here (width is not the binding axis at 844px, which offers
+     828px against the 960px the slide would need) so it keeps the full 8px and
+     the slide still does not touch the pane's edges. */
+  .presentation-stage {
+    padding: var(--space-1) var(--space-2);
+  }
+
+  .dashboard-topbar__inner {
+    padding-block: var(--space-1);
+  }
+
+  .dashboard-section {
+    padding-block: var(--space-3) var(--space-4);
+  }
+
+  .mobile-toolbar-sheet {
+    max-height: 92dvh;
+  }
+}
+
+/* =========================================================================
+   Compact header — applies to NARROW *or* SHORT, because the filename and the
+   save pill compete for the same row in both. Deliberately after both
+   breakpoints above so it wins over either.
+   ========================================================================= */
+
+@media (max-width: 420px), (max-height: 560px) {
+  /* A field is worth what it can SHOW, not what its border box measures.
+     `min-width: 3.5rem` with `padding-inline: var(--space-4)` left 22px of text
+     — two characters — so "Q3 Board Review" rendered as "ew". Buying the
+     padding back and raising the floor gets that to ~9 characters. */
+  .file-name {
+    padding-inline: var(--space-2);
+  }
+
+  .file-name-field {
+    min-width: 5rem;
+  }
+
+  /* A transient save status must never outbid the document's own name for
+     width. Where the pill still shows at all (it does not below — see the next
+     block) it truncates rather than holding its full nowrap width. */
+  .status-pill {
+    min-width: 0;
+    flex: 0 1 auto;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.9;
+  }
+}
+
+/* =========================================================================
+   The header's save pill is DESKTOP-ONLY.
+
+   Measured at 390x844: `scrollWidth > clientWidth` on `.status-pill`, i.e. it
+   rendered as "Not sav…". A truncated status indicator is worse than no
+   indicator, because "Not sav…" is ambiguous where "Not saved yet" is not —
+   and it is not the only copy of the state. `.status-bar` carries the identical
+   string, uncut, at EVERY viewport in all three editors, so nothing is lost by
+   dropping the duplicate exactly where it stops fitting.
+
+   `display: none`, not `visibility`/`clip`: this is a redundant second copy of
+   information that is still on screen, so it should leave the accessibility
+   tree too rather than be read out twice. The element is never removed —
+   cross-tab.spec.ts and storage-resilience.spec.ts assert on its text for
+   "Save failed", "Saved to local backup only" and "Conflict detected", and
+   those specs run at 1280x900, above both of these breakpoints.
+   ========================================================================= */
+
+@media (max-width: 640px), (max-height: 560px) {
+  .status-pill {
+    display: none;
+  }
+}
+
+/* =========================================================================
+   Forced colours (Windows High Contrast / `forced-colors: active`)
+   The OS overrides every colour with a small system palette and DROPS
+   background-image and box-shadow entirely. Any state signalled only by a
+   gradient or a shadow therefore renders as a blank, identical control.
+   `aria-pressed` covers screen-reader users; these rules cover sighted ones.
+   ========================================================================= */
+
+@media (forced-colors: active) {
+  /* The reported failure: `.toolbar-btn.active` said "on" with a gradient plus
+     `color: #fff`. Gradient dropped, text colour forced -> an empty button,
+     icon and all. `forced-color-adjust: none` lets the system pair through. */
+  /* `!important` on purpose: the dark-theme ink correction above is a more
+     specific selector ([data-theme="dark"] .toolbar-btn.active), and an
+     accessibility override must not be defeasible by a theme rule that knows
+     nothing about the system palette. */
+  /* fortune-sheet's pressed button is an inline `background-color`, which the
+     OS palette drops like any other author colour — leaving Bold-on and
+     Bold-off identical. Same treatment, same reason. */
+  .toolbar-btn.active,
+  .workspace-switcher-tab.active,
+  .spreadsheet-container .fortune-toolbar-button[style*="rgb(231, 229, 235)"],
+  .spreadsheet-container .luckysheet-sheet-area div.luckysheet-sheets-item-active,
+  .btn-primary {
+    forced-color-adjust: none;
+    background: Highlight !important;
+    color: HighlightText !important;
+    border-color: Highlight !important;
+  }
+
+  .toolbar-btn.active svg,
+  .workspace-switcher-tab.active svg,
+  .btn-primary svg {
+    color: HighlightText !important;
+    stroke: HighlightText !important;
+  }
+
+  /* Selection carried only by border-colour plus a shadow: the shadow goes and
+     every border in the product is forced to the same system colour. */
+  .slide-card--active {
+    outline: 3px solid Highlight;
+    outline-offset: -3px;
+  }
+
+  /* Surfaces that float purely on a shadow need a real edge to stay readable. */
+  .mobile-toolbar-sheet,
+  .app-loading__card {
+    border: 1px solid CanvasText;
+  }
+
+  /* NOT FIXABLE FROM THIS FILE, recorded so the next pass does not retry it:
+     every fortune-sheet toolbar icon is a `<use>` of a `<symbol>` whose paths
+     carry `fill="#525C6F"` as a PRESENTATION ATTRIBUTE. Forced colours rewrite
+     `color`/`background-color`, not `fill`, and CSS cannot reach into a
+     use-element shadow tree to override the attribute — verified by screenshot
+     with `svg symbol * { fill: red !important }`, which changed nothing. A
+     `filter` would need to know whether Canvas is black or white, which no
+     media query exposes. The fix is to make the sprite use `currentColor`,
+     which is a change to the library or to a JS-side sprite override. */
+
+  /* Two-tone rings and alpha halos collapse; keep one unambiguous indicator. */
+  :focus-visible,
+  .skip-link:focus-visible {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+    box-shadow: none;
+  }
+
+  /* Opacity is not forced, so a 0.48 control stays a faint version of the same
+     colour instead of reading as disabled. */
+  .btn:disabled,
+  .toolbar-btn:disabled {
+    color: GrayText;
+    opacity: 1;
+  }
+}
+
+/* =========================================================================
+   Motion
+   ========================================================================= */
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .btn:active:not(:disabled),
+  .slide-card:hover,
+  .slide-card:active,
+  .recent-card-btn:active,
+  .mobile-toolbar-close:active,
+  .mobile-toolbar-toggle:active {
+    transform: none;
+  }
+}
+
+/* =========================================================================
+   Print — and, through the browser's own "Save as PDF" destination, PDF.
+
+   There is deliberately no PDF library here. `window.print()` plus this
+   stylesheet produces both outputs from one implementation, works with no
+   network, and adds nothing at all to the bundle. A client-side PDF writer
+   would have to re-implement pagination, web fonts, and image embedding, and
+   would still print worse than the engine already rendering the page.
+
+   Everything below is inside `@media print` (or an `@page` rule, which only
+   ever applies to paged media). None of it can reach the screen, which is what
+   makes it safe to unpick the `overflow: hidden` viewport shell that the
+   on-screen layout depends on.
+   ========================================================================= */
+
+/* On screen the generated print roots do not exist as far as layout, the tab
+   order and the accessibility tree are concerned. This is the ONLY rule in this
+   section outside a paged context, and it is the one that keeps the feature
+   free on screen. */
+.print-doc {
+  display: none;
+}
+
+@page {
+  size: letter;
+  margin: 0.75in;
+}
+
+/* A named page is the only way for one shared stylesheet to give the sheet and
+   the deck a different orientation from the document. Applied by the `page`
+   property on the print roots below. */
+@page ninja-landscape {
+  size: letter landscape;
+  margin: 0.45in;
+}
+
+@media print {
+  /* ---------------------------------------------------------------------
+     1. The shell stops being a viewport.
+
+     On screen `.app` is exactly one viewport tall with `overflow: hidden`, and
+     only `.workspace-center` scrolls. Printed as-is that yields ONE page: the
+     first screenful, with the rest of the document clipped away. Each of these
+     is the print-media counterpart of a screen rule a few hundred lines above,
+     and none of them exists outside this block.
+     --------------------------------------------------------------------- */
+  html,
+  body,
+  #root {
+    height: auto;
+    overflow: visible;
+  }
+
+  /* Paper is white. `body` carries `background: var(--app-bg)`, which is #0b1119
+     in dark mode — with "Background graphics" enabled in the print dialog that
+     prints a black page and drains a cartridge. The dark-mode selector is listed
+     explicitly because `styles/dark-mode.css` loads after this file and would
+     otherwise win the tie on `color`. Printing is always light. */
+  body,
+  html body.dark-mode {
+    background: #ffffff;
+    color: #111111;
+  }
+
+  .app {
+    height: auto;
+    min-height: 0;
+    display: block;
+    overflow: visible;
+  }
+
+  .app-main,
+  .app-container {
+    height: auto;
+    min-height: 0;
+    display: block;
+    overflow: visible;
+  }
+
+  .workspace {
+    display: block;
+    background: #ffffff;
+  }
+
+  .workspace-center {
+    overflow: visible;
+  }
+
+  /* ---------------------------------------------------------------------
+     2. Chrome is not the document.
+     --------------------------------------------------------------------- */
+  .skip-link,
+  .suite-header,
+  .toolbar-shell,
+  .toolbar-overflow-panel,
+  .mobile-toolbar-launcher,
+  .mobile-toolbar-modal,
+  .workspace-mobile-switcher,
+  .status-bar,
+  .editor-banner,
+  .find-replace-bar,
+  .insert-image-panel,
+  .formula-strip,
+  .chart-modal,
+  .dialog-backdrop,
+  .drop-target-hint,
+  .canvas-drop-target-hint {
+    display: none;
+  }
+
+  /* Editor furniture that is drawn INSIDE the document. The find highlight is
+     applied by ProseMirror as an inline `style`, so a print-only `!important`
+     is the only thing that can beat it — there is no screen rule competing for
+     this property, so nothing to escalate against. */
+  .word-find-match {
+    background-color: transparent !important;
+    color: inherit !important;
+  }
+
+  /* ---------------------------------------------------------------------
+     3. Word — the sheet of paper becomes the page.
+
+     `@page` already supplies the margin, so the on-screen 1in padding and the
+     11in minimum (which would emit a blank page after a one-line document) are
+     both dropped. `.document-page` is already white-on-near-black in every
+     theme, so dark mode needs nothing extra here.
+     --------------------------------------------------------------------- */
+  .word-stage {
+    display: block;
+    min-height: 0;
+    padding: 0;
+  }
+
+  .document-stage {
+    display: block;
+  }
+
+  .document-shell {
+    width: auto;
+  }
+
+  .document-page {
+    width: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .ProseMirror {
+    min-height: 0;
+  }
+
+  /* ProseMirror keeps an empty paragraph at the end of the document as a place to
+     put the caret after a table or an image. It is editor scaffolding, and on a
+     document that ends within ~40px of the bottom of the page it was buying a
+     whole extra sheet of paper (measured: content ended at 921px against a 912px
+     page box). Same `:has` hook the placeholder rule above uses. */
+  .ProseMirror > p:last-child:has(> br.ProseMirror-trailingBreak:only-child) {
+    display: none;
+  }
+
+  /* A heading at the foot of a page with its section overleaf, a single line of
+     a paragraph stranded, or a table row split down the middle — the three
+     things that make a browser print look like a browser print. */
+  .ProseMirror h1,
+  .ProseMirror h2,
+  .ProseMirror h3,
+  .ProseMirror h4 {
+    break-after: avoid;
+    break-inside: avoid;
+  }
+
+  .ProseMirror p,
+  .ProseMirror li {
+    orphans: 2;
+    widows: 2;
+  }
+
+  .ProseMirror img {
+    /* Capped so a tall image is scaled onto one page instead of being sliced by
+       the page break. `object-fit` preserves the aspect ratio the width still
+       dictates, rather than squashing it into the shorter box. */
+    max-height: 8.5in;
+    object-fit: contain;
+    break-inside: avoid;
+  }
+
+  .ProseMirror table {
+    break-inside: auto;
+  }
+
+  .ProseMirror tr,
+  .ProseMirror th,
+  .ProseMirror td {
+    break-inside: avoid;
+  }
+
+  .ProseMirror thead {
+    display: table-header-group;
+  }
+
+  .ProseMirror table th {
+    /* The screen fill is a background, and backgrounds are off by default in the
+       print dialog — which left header cells indistinguishable from body cells.
+       A border reads either way. */
+    background: transparent;
+    border-bottom-width: 2px;
+    font-weight: 700;
+  }
+
+  /* ---------------------------------------------------------------------
+     4. The generated print roots (Excel's table, PowerPoint's slides).
+
+     Both editors render a document that CANNOT be printed from the screen DOM —
+     one is a canvas grid, the other a canvas slide — so each builds a paged
+     representation into a `.print-doc` and this rule swaps the two over.
+     --------------------------------------------------------------------- */
+  .print-doc {
+    display: block;
+    background: #ffffff;
+    color: #111111;
+  }
+
+  .app-container:has(> .print-doc) > :not(.print-doc) {
+    display: none;
+  }
+
+  .print-doc--landscape {
+    page: ninja-landscape;
+  }
+
+  .print-doc__title {
+    margin: 0 0 10pt;
+    font-size: 14pt;
+    letter-spacing: -0.01em;
+  }
+
+  .print-doc__sheet {
+    /* Every sheet after the first starts on a fresh page, the way a workbook
+       print does; `:first-of-type` keeps a blank leading page from appearing. */
+    break-before: page;
+  }
+
+  .print-doc__sheet:first-of-type {
+    break-before: auto;
+  }
+
+  .print-doc__sheet-name {
+    margin: 0 0 6pt;
+    font-size: 10pt;
+    font-weight: 700;
+    color: #444444;
+  }
+
+  .print-doc__note {
+    margin: 8pt 0 0;
+    font-size: 8pt;
+    color: #555555;
+    break-inside: avoid;
+  }
+
+  /* ---------------------------------------------------------------------
+     5. Excel's printed grid.
+     --------------------------------------------------------------------- */
+  .print-table {
+    border-collapse: collapse;
+    table-layout: fixed;
+    max-width: 100%;
+    font-variant-numeric: tabular-nums;
+    /* Cell fills are real data — a highlighted row means something — so this one
+       table opts out of the dialog's "no backgrounds" default. Scoped here and
+       nowhere else, so the page itself is still plain white. */
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .print-table th,
+  .print-table td {
+    border: 0.5pt solid #9aa3b2;
+    /*
+     * The horizontal padding is deliberately mean. A fortune-sheet column is 73px
+     * (54.7pt) and its default text is 10pt, so an eight-character figure such as
+     * `24975.00` needs ~48pt of ink; at 3pt of padding a side plus the borders that
+     * came to 55pt and every such number wrapped onto a second line, doubling the
+     * height of every row in the sheet. 2pt leaves it fitting on one.
+     */
+    padding: 0.75pt 2pt;
+    vertical-align: top;
+    /* Anything that still does not fit wraps inside its column rather than widening
+       the table past the page. Combined with the fitted column widths, that means no
+       value is ever clipped — the sheet stays complete even where it is not pretty. */
+    overflow-wrap: anywhere;
+  }
+
+  .print-table thead {
+    display: table-header-group;
+  }
+
+  .print-table tr {
+    break-inside: avoid;
+  }
+
+  /* The A/B/C and 1/2/3 gutters, so a printed extract can still be talked about
+     by cell reference. Grey enough to stay clearly separate from the data. */
+  .print-table__corner,
+  .print-table__colhead,
+  .print-table__rowhead {
+    background: #e8ebf0;
+    color: #333333;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  /* ---------------------------------------------------------------------
+     6. PowerPoint's printed slides.
+     --------------------------------------------------------------------- */
+  /*
+   * One slide per sheet of paper.
+   *
+   * The height is deliberately left to the content, and that is load-bearing rather
+   * than lazy. Giving this box ANY explicit height — 7.2in, 6.5in, even 6in against a
+   * 7.6in page box it comfortably fits inside — makes Chromium emit a blank leading
+   * page and push the whole deck back by one (measured: 5 pages for a 4-slide deck at
+   * every height tried, 4 pages with `auto`, `min-height` worse still at 8). The slide
+   * therefore sits at the top of its page instead of being centred on it, which is a
+   * cosmetic price worth paying to not ship a blank first page in every PDF.
+   */
+  .print-slide {
+    break-after: page;
+    break-inside: avoid;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .print-slide:last-child {
+    break-after: auto;
+  }
+
+  /* Notes are unbounded user text, so this variant is allowed to spill onto a second
+     page rather than clipping what the presenter wrote. */
+  .print-slide--with-notes {
+    break-inside: auto;
+  }
+
+  .print-slide__image {
+    max-width: 100%;
+    /* A percentage would resolve against an auto-height parent and be ignored, so the
+       cap is absolute: the page box is 7.6in and the slide number sits below. A 16:9
+       slide is width-bound at ~5.7in and never reaches this, but a squarer one would. */
+    max-height: 6.8in;
+    width: auto;
+    /* A slide is artwork edge to edge; without an outline a white slide has no
+       discernible boundary on a white page. */
+    border: 0.5pt solid #b6bdc9;
+  }
+
+  .print-slide--with-notes .print-slide__image {
+    max-height: 4.5in;
+  }
+
+  .print-slide__notes {
+    width: 100%;
+    margin-top: 12pt;
+    padding-top: 8pt;
+    border-top: 0.5pt solid #c4cad4;
+    font-size: 10pt;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .print-slide__number {
+    margin-top: 6pt;
+    font-size: 8pt;
+    color: #555555;
+  }
+}
+
+/* Four create actions have room for readable labels in the two-column phone layout. */
+@media (max-width: 640px) {
+  .dashboard-create__label--short { display: block; }
 }

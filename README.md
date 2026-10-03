@@ -12,17 +12,13 @@ Both `npm run dev` and `npm run build` first build Blueline into `suite/public/b
 
 Run `npm run build:pages` from `suite/`. This builds the complete application and copies it into the tracked `docs/` directory, preserving `docs/CNAME`. Commit the source and generated `docs/` changes together. GitHub Pages serves `docs/` on the default branch.
 
-The root HTML files and `public/` directory are legacy implementations; the active suite is `suite/` and its published output is `docs/`. The optional root HTTPS server serves `suite/dist/` and requires local certificates.
+The active suite is `suite/` and its published output is `docs/`. The optional root HTTPS server serves `suite/dist/` and requires local certificates. The root service worker is a compatibility tombstone for legacy clients.
 
 ## Verification
 
-Run `npm run build`, then `npm run preview` in one terminal. In another, from `suite/`:
+From `suite/`, run `npm run test:typecheck`, `npm run lint`, and `npm test`. Playwright builds the production app and starts its own server, with one worker. Use `PLAYWRIGHT_BASE_URL` only to target another local production build. See `suite/tests/README.md` for the complete test contract.
 
-```sh
-npx playwright test tests/blueline-integration.spec.ts tests/performance-accessibility.spec.ts tests/persistence-dnd.spec.ts tests/word-robustness.spec.ts --workers=1
-```
-
-Tests default to `http://127.0.0.1:4173`; set `BASE_URL` to check another local build. Integration tests capture desktop/mobile screenshots in both themes under the ignored `suite/test-results/` directory. Some older test files still target the optional HTTPS server and historical controls.
+Blueline integration tests capture desktop/mobile screenshots in both themes under the ignored `suite/test-results/` directory. Offline navigation is tested with a real service worker; the editor is cached separately from the React shell. External fonts, paper.js, and optional remote collaboration still need their network dependencies.
 
 Blueline keeps its native `blueline` IndexedDB store. The workspace lists and deletes designs directly from that store; existing office document storage is unchanged. Local file links work only in the browser containing those files. Export files to back them up or move them between devices. Optional collaboration and AI transports require the user to connect; they are not enabled by suite integration.
 
