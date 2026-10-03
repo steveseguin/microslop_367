@@ -1,0 +1,25 @@
+# Blueline
+
+> Blueline is a browser-only design tool (frames, auto layout, components, vectors, text, prototypes). An open Blueline tab can be read and edited by AI agents through 36 JSON tools. The tools are reachable over a VDO.Ninja WebRTC room (ninja-p2p commands, the @vdoninja/mcp bridge's JSON-RPC, or SDK request/onRequest), WebMCP, window.blueline, or postMessage.
+
+How to work with it:
+1. Call `get_capabilities` first. It returns the conventions, the layer spec format and every tool schema.
+2. Read before writing. `get_tree` with `format: "outline"` is the cheapest; also `find_nodes` and `get_selection`.
+3. Write with `create` (nested specs), `update` (only the fields you pass), `delete` and `move`. `batch` runs several calls as one undo step, and `"$0"` refers to an earlier step's id.
+4. Look at the result with `screenshot`, using `max_size` 512–768.
+5. Tell the designer what changed with `notify`. Every edit can be undone by the designer.
+
+Conventions:
+- Units are CSS px, and x/y are relative to the parent.
+- Rotation is in degrees, counter-clockwise.
+- Colors are hex, e.g. "#1F6B4F" or "#1F6B4F80".
+- Children of an auto layout frame ignore x/y; use `sizing` instead.
+
+## Docs
+- [README](README.md): hosting, transports and the security model
+- [AI control message formats](docs/ai-control.md): ninja-p2p envelopes, JSON-RPC, SDK RPC, postMessage, WebMCP
+- [tools.json](tools.json): every tool's JSON schema plus the spec reference
+
+## Examples
+- [Node agent over the VDO.Ninja SDK](examples/agent-node.mjs)
+- [Embedding with postMessage](examples/embed.html)

@@ -2,18 +2,41 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#2563eb" />
     <meta
       name="description"
-      content="OfficeNinja is a browser office suite with document, spreadsheet, and presentation editors that save locally."
+      content="Free browser office and design tools: NinjaWord documents, NinjaCalc spreadsheets, NinjaSlides presentations, and Blueline, a Figma alternative. No account required."
     />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <title>OfficeNinja Suite</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <title>OfficeNinja | Free Office &amp; Design Tools</title>
+    <link rel="canonical" href="https://microslop.xyz/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="OfficeNinja" />
+    <meta property="og:title" content="OfficeNinja ? Free Office &amp; Design Tools" />
+    <meta property="og:description" content="Write, calculate, present, and design. Four free browser tools with local autosave and no account required." />
+    <meta property="og:url" content="https://microslop.xyz/" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="OfficeNinja ? Free Office &amp; Design Tools" />
+    <meta name="twitter:description" content="Documents, spreadsheets, presentations, and Blueline designs in one browser workspace." />
+    <script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"WebApplication","name":"OfficeNinja","alternateName":"Microslop 367","url":"https://microslop.xyz/","applicationCategory":"BusinessApplication","operatingSystem":"Web browser","description":"Free document, spreadsheet, presentation and vector design editors with local autosave.","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"featureList":["NinjaWord document editor","NinjaCalc spreadsheets","NinjaSlides presentations","Blueline vector design and prototyping","Light and dark themes","Local file storage"]}
+    </script>
+    <script>
+      try {
+        var theme = localStorage.getItem('officeninja_theme');
+        document.documentElement.dataset.theme = theme === 'dark' || (theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+      } catch (e) { /* The app also resolves the system theme. */ }
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <h1>OfficeNinja: free office and design tools</h1>
+      <p>Create documents with NinjaWord, spreadsheets with NinjaCalc, presentations with NinjaSlides, and vector designs and prototypes with Blueline. Files save locally in your browser. No account required.</p>
+      <nav aria-label="OfficeNinja tools"><a href="#/word">NinjaWord</a> ? <a href="#/excel">NinjaCalc</a> ? <a href="#/powerpoint">NinjaSlides</a> ? <a href="./blueline/">Blueline design editor</a></nav>
+      <noscript><p>Enable JavaScript to use the editors. Your files stay in this browser unless you export or share them.</p></noscript>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

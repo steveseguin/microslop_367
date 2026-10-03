@@ -1,0 +1,66 @@
+<nav id="suiteNav" aria-label="OfficeNinja apps">
+  <a href="../#/" data-suite-link class="suite-home">&#8592; <span>Workspace</span></a>
+  <span class="suite-label">OfficeNinja</span>
+  <select id="suiteApp" aria-label="Switch app">
+    <option value="word">NinjaWord</option><option value="excel">NinjaCalc</option><option value="powerpoint">NinjaSlides</option><option value="blueline" selected>Blueline</option>
+  </select>
+  <button id="suiteTheme" type="button" aria-label="Switch to dark theme">Dark mode</button>
+</nav>
+<div id="app">
+  <header id="topbar">
+    <button class="ib ptoggle" data-panel-toggle="left" title="Layers"><svg viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5zM3 13l9 5 9-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></button>
+    <button id="mainMenu" title="Main menu"><span class="mark" aria-hidden="true"></span>Blueline</button>
+    <div class="tcenter">
+      <input id="fileName" aria-label="File name" spellcheck="false" autocomplete="off">
+      <span id="saveBadge" role="status" aria-live="polite" data-state="saved">Saved in this browser</span>
+    </div>
+    <div class="tright">
+      <button id="peers" title="Live collaboration"></button>
+      <button id="zoomLabel" title="Zoom">100%</button>
+      <button class="tb primary" id="presentBtn" title="Present prototype"><svg viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="currentColor"/></svg><span class="hide-sm">Present</span></button>
+      <button class="ib ptoggle" data-panel-toggle="right" title="Properties"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" stroke="currentColor" stroke-width="1.6"/><circle cx="16" cy="7" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="17" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+    </div>
+  </header>
+  <aside id="left">
+    <div class="tabs"><button data-ltab="layers" class="on">Layers</button><button data-ltab="assets">Assets</button></div>
+    <div id="layersPane">
+      <div class="phead"><span>Pages</span><button class="ib" id="addPage" title="Add page"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8"/></svg></button></div>
+      <div id="pageList"></div>
+      <div class="phead"><span>Layers</span></div>
+      <div id="layerTree"></div>
+    </div>
+    <div id="assetsPane" hidden>
+      <div class="searchbox"><input id="assetSearch" placeholder="Search components" spellcheck="false" autocomplete="off"></div>
+      <div id="assetList"></div>
+    </div>
+  </aside>
+  <main id="stage" data-tool="move">
+    <svg id="canvas" xmlns="http://www.w3.org/2000/svg"><g id="vp"><g id="content"></g></g></svg>
+    <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+    <textarea id="texted" hidden spellcheck="false" aria-label="Edit text"></textarea>
+    <div id="toolbar" class="floating" role="toolbar" aria-label="Tools">
+      <button data-tool="move" title="Move (V)"></button>
+      <button data-tool="hand" title="Hand (H)"></button>
+      <span class="sepv"></span>
+      <button data-tool="frame" title="Frame (F)"></button>
+      <button class="shapes" data-shapes="1" data-group="rect,line,arrow,ellipse,polygon,star" data-tool-display="rect" title="Shape tools"></button>
+      <button data-tool="pen" title="Pen (P)"></button>
+      <button data-tool="pencil" title="Pencil (Shift+P)"></button>
+      <button data-tool="text" title="Text (T)"></button>
+    </div>
+  </main>
+  <aside id="right">
+    <div class="tabs"><button data-rtab="design" class="on">Design</button><button data-rtab="prototype">Prototype</button></div>
+    <div id="designPane"></div>
+  </aside>
+</div>
+<div id="menu" hidden></div>
+<div id="submenu" hidden></div>
+<div id="picker" class="popover" hidden></div>
+<div id="fontpop" class="popover" hidden></div>
+<div id="modal" class="modal" hidden><div id="modalBody" role="dialog" aria-modal="true"></div></div>
+<div id="present" hidden>
+  <div class="pbar"><button class="tb" id="pback" disabled>← Back</button><button class="tb" id="prestart">Restart</button><span id="ptitle"></span><button class="tb" id="pclose">Close <kbd>Esc</kbd></button></div>
+  <div id="pstage"></div>
+</div>
+<div id="toast" hidden></div>

@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Clock3,
+  PenTool,
   FileText,
   LayoutTemplate,
   Moon,
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { deleteDocument, listDocuments } from '../utils/db';
+import { deleteDesign, designUrl, listDesigns } from '../utils/blueline';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 
 interface DashboardProps {
@@ -23,7 +25,7 @@ interface DashboardProps {
 interface DocMeta {
   id: string;
   title: string;
-  type: 'word' | 'excel' | 'powerpoint';
+  type: 'word' | 'excel' | 'powerpoint' | 'blueline';
   updatedAt: number;
 }
 
@@ -52,6 +54,14 @@ const launchCards = [
     icon: Presentation,
     accentClass: 'powerpoint',
   },
+  {
+    type: 'blueline',
+    name: 'Blueline',
+    title: 'Design your next idea',
+    description: 'A browser-based Figma alternative with vector tools, auto layout, reusable components, prototypes, and SVG, PNG, and HTML export.',
+    icon: PenTool,
+    accentClass: 'blueline',
+  },
 ] as const;
 
 export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
@@ -61,15 +71,24 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
 
   async function loadRecentDocs() {
     try {
-      const docs = await listDocuments();
-      setRecentDocs(docs);
+      const results = await Promise.allSettled([listDocuments(), listDesigns()]);
+      const docs = results.flatMap<DocMeta>((result) => result.status === 'fulfilled' ? result.value : []);
+      setRecentDocs(docs.sort((a, b) => b.updatedAt - a.updatedAt));
+      for (const result of results) {
+        if (result.status === 'rejected') console.error('Could not load local files', result.reason);
+      }
     } catch (error) {
       console.error('Failed to load recent documents', error);
     }
   }
 
   useEffect(() => {
+    // Storage reads finish asynchronously before updating the file list.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadRecentDocs();
+    const refresh = () => void loadRecentDocs();
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
   }, []);
 
   const handleDeleteClick = (event: React.MouseEvent, doc: DocMeta) => {
@@ -79,7 +98,11 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
   };
 
   const openDocument = (doc: DocMeta) => {
-    navigate(`/${doc.type}?id=${doc.id}`);
+    if (doc.type === 'blueline') {
+      window.location.assign(designUrl(doc.id));
+      return;
+    }
+    navigate(`/${doc.type}?id=${encodeURIComponent(doc.id)}`);
   };
 
   const handleDeleteConfirm = async () => {
@@ -87,7 +110,8 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
       return;
     }
 
-    await deleteDocument(pendingDelete.id);
+    if (pendingDelete.type === 'blueline') await deleteDesign(pendingDelete.id);
+    else await deleteDocument(pendingDelete.id);
     setPendingDelete(null);
     void loadRecentDocs();
   };
@@ -107,13 +131,13 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
     if (type === 'excel') {
       return 'Spreadsheet';
     }
-    return 'Presentation';
+    return type === 'blueline' ? 'Design' : 'Presentation';
   };
 
   const totalFiles = recentDocs.length;
   const wordFiles = recentDocs.filter((doc) => doc.type === 'word').length;
   const sheetFiles = recentDocs.filter((doc) => doc.type === 'excel').length;
-  const slideFiles = recentDocs.filter((doc) => doc.type === 'powerpoint').length;
+  const visualFiles = recentDocs.filter((doc) => doc.type === 'powerpoint' || doc.type === 'blueline').length;
 
   return (
     <div className="dashboard">
@@ -125,7 +149,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
                 <LayoutTemplate size={28} />
               </div>
               <div>
-                <span className="dashboard-brand__eyebrow">Office Workspace</span>
+                <span className="dashboard-brand__eyebrow">Office & Design Workspace</span>
                 <span className="dashboard-brand__title">OfficeNinja Suite</span>
               </div>
             </div>
@@ -143,12 +167,12 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
             <div className="dashboard-hero-copy">
               <span className="dashboard-kicker">
                 <Sparkles size={14} />
-                Complete browser office suite
+                Your browser office and design suite
               </span>
-              <h1>Work like a real office app, not a prototype.</h1>
+              <h1>Make room for your next idea.</h1>
               <p>
-                Create documents, spreadsheets, and decks from one responsive workspace. Files autosave locally, editors stay
-                focused, and the UI now prioritizes usable mobile workflows instead of fake desktop chrome.
+                Write, calculate, present, and design in one browser workspace. Four focused tools, local autosave,
+                and no account required. Pick an app and make something yours.
               </p>
 
               <div className="dashboard-hero-actions">
@@ -164,6 +188,10 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
                   <Presentation size={16} />
                   New presentation
                 </Link>
+                <a className="btn btn-secondary" href={designUrl()}>
+                  <PenTool size={16} />
+                  New design
+                </a>
               </div>
 
               <div className="dashboard-stat-grid">
@@ -176,35 +204,35 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
                   <span>Docs and sheets ready to reopen</span>
                 </div>
                 <div className="dashboard-stat">
-                  <strong>{slideFiles}</strong>
-                  <span>Presentation decks on hand</span>
+                  <strong>{visualFiles}</strong>
+                  <span>Decks and designs on hand</span>
                 </div>
               </div>
             </div>
 
             <div className="dashboard-hero-panel">
-              <h2>What changed in this review</h2>
-              <p>The suite now behaves more like a working office product instead of a collection of loosely connected demos.</p>
+              <h2>Your work. Your workspace.</h2>
+              <p>From the first draft to the final design, keep your everyday tools together.</p>
               <ul className="dashboard-checklist">
                 <li>
                   <ShieldCheck size={18} />
                   <div>
-                    <strong>Unified app shell</strong>
-                    <span>Consistent headers, ribbon controls, status bars, panels, and mobile layouts across every editor.</span>
+                    <strong>Four tools, one home</strong>
+                    <span>Move between documents, spreadsheets, presentations, and Blueline designs.</span>
                   </div>
                 </li>
                 <li>
                   <Clock3 size={18} />
                   <div>
-                    <strong>Reliable continuation</strong>
-                    <span>Recent files surface immediately and jump back into the exact document type you were editing.</span>
+                    <strong>Pick up where you left off</strong>
+                    <span>Your recent files stay in this browser, ready to reopen when you return.</span>
                   </div>
                 </li>
                 <li>
                   <Sparkles size={18} />
                   <div>
-                    <strong>Less fake UI</strong>
-                    <span>Placeholder controls were removed or replaced with simpler interactions that actually do something.</span>
+                    <strong>Create in your own style</strong>
+                    <span>Choose light or dark mode, then export your work to share or keep a backup.</span>
                   </div>
                 </li>
               </ul>
@@ -218,7 +246,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
           <div className="dashboard-section-header">
             <div>
               <h2>Start something new</h2>
-              <p>Each app opens with the right tools, mobile behavior, and autosave flow already in place.</p>
+              <p>A focused editor for every kind of work. Choose a tool to get started.</p>
             </div>
           </div>
 
@@ -226,7 +254,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
             {launchCards.map((card) => {
               const Icon = card.icon;
               return (
-                <Link key={card.type} to={`/${card.type}`} className="launcher-card">
+                <a key={card.type} href={card.type === 'blueline' ? designUrl() : `#/${card.type}`} className="launcher-card">
                   <div className={`launcher-card__icon ${card.accentClass}`}>
                     <Icon size={26} />
                   </div>
@@ -239,7 +267,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
                     <span>Open editor</span>
                     <span>{formatType(card.type)}</span>
                   </div>
-                </Link>
+                </a>
               );
             })}
           </div>
@@ -256,12 +284,12 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
           </div>
 
           {recentDocs.length === 0 ? (
-            <div className="dashboard-empty">No local documents yet. Start with Word, Calc, or Slides above.</div>
+            <div className="dashboard-empty">No local files yet. Start with Word, Calc, Slides, or Blueline above.</div>
           ) : (
             <div className="recent-grid">
               {recentDocs.slice(0, 8).map((doc) => (
                 <article
-                  key={doc.id}
+                  key={`${doc.type}:${doc.id}`}
                   className="recent-card"
                   onClick={() => openDocument(doc)}
                   onKeyDown={(event) => {
@@ -279,6 +307,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
                       {doc.type === 'word' && <FileText size={14} />}
                       {doc.type === 'excel' && <Table size={14} />}
                       {doc.type === 'powerpoint' && <Presentation size={14} />}
+                      {doc.type === 'blueline' && <PenTool size={14} />}
                       <span>{formatType(doc.type)}</span>
                     </div>
                     <button
@@ -297,6 +326,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
                       {doc.type === 'word' && <FileText size={20} />}
                       {doc.type === 'excel' && <Table size={20} />}
                       {doc.type === 'powerpoint' && <Presentation size={20} />}
+                      {doc.type === 'blueline' && <PenTool size={20} />}
                     </div>
                     <div className="recent-card__meta">
                       <h3>{doc.title}</h3>

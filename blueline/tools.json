@@ -1,0 +1,963 @@
+{
+  "name": "blueline",
+  "version": "1.0",
+  "conventions": {
+    "units": "CSS pixels. x and y are relative to the parent layer; \"abs\" values in get_tree are page coordinates.",
+    "rotation": "degrees, counter-clockwise positive (Figma convention)",
+    "colors": "hex strings: \"#1F6B4F\", or \"#1F6B4F80\" with alpha",
+    "autoLayout": "Children of an auto layout frame are positioned by the layout; their x/y are ignored. Use sizing \"fill\"/\"hug\" and layout gap/padding/align instead.",
+    "instances": "Layers inside an instance can only take overrides (text, fill, stroke, visible). Edit the main component to change structure.",
+    "undo": "Every mutating call is one undo step labelled \"AI \u00b7 <tool>\". batch runs several calls as one step.",
+    "references": "Inside batch, \"$0\", \"$1\"... refer to the id returned by an earlier step."
+  },
+  "spec": {
+    "types": "frame, group, component, instance, rect, image, ellipse, polygon, star, line, arrow, vector, text, boolean",
+    "common": "name, x, y, w, h (numbers; or w/h \"hug\"/\"fill\"), rotation, visible, locked, opacity (0\u20131), blend (\"multiply\"\u2026), children (frames, groups, components, booleans)",
+    "paint": "fill / stroke: \"#RRGGBB\" | \"#RRGGBBAA\" | {type:\"linear\", angle:90, stops:[[0,\"#fff\"],[1,\"#000\"]]} | {type:\"radial\", stops} | {type:\"image\", src:\"data:image/png;base64,\u2026\", fit:\"fill|fit|stretch|tile\"} | an array of these (bottom first) | null to clear",
+    "stroke": "strokeWidth, strokeAlign (\"inside\" | \"center\" | \"outside\"), dash ([dash, gap] or 0), strokeCap, strokeJoin",
+    "effects": "effects: [{type:\"drop-shadow\", x, y, blur, spread, color}, {type:\"inner-shadow\", \u2026}, {type:\"blur\", blur}]  (shorthands: shadow: {...}, blur: 8)",
+    "shape": "radius (number or [tl,tr,br,bl]) for rect/frame; points + innerRadius for polygon/star; path (SVG path data) for vector; from/to [x,y] for line/arrow; startMarker/endMarker (\"arrow\" | \"triangle\" | \"circle\")",
+    "image": "type \"image\" with image: \"data:image/\u2026\" (or an https URL that allows CORS), imageFit",
+    "text": "text, font {family, size, weight (100\u2013900 or \"bold\"), lineHeight (\"auto\" | px | \"150%\"), letterSpacing, italic}, color, textAlign (left|center|right), verticalAlign, textCase (upper|lower|title), decoration (underline|strikethrough). Text hugs its content unless you set w.",
+    "autoLayout": "layout: {mode:\"row\"|\"column\"|\"none\", gap: number | \"auto\" (space between), padding: n | [v,h] | [t,r,b,l], align: start|center|end, crossAlign: start|center|end}; on children: sizing {w:\"fixed|hug|fill\", h:\u2026}, absolute: true to opt out",
+    "frame": "clip (default true), constraints {h:\"left|right|left-right|center|scale\", v:\"top|bottom|top-bottom|center|scale\"} for children of non-auto-layout frames",
+    "components": "type \"instance\" with component: \"<id or name>\" and overrides: {\"<child layer name>\": {text, fill, visible}}; components take description",
+    "styles": "fillStyle / strokeStyle / textStyle: style name or id",
+    "prototype": "link: {to: \"<frame id>\" | \"back\", transition: \"instant|dissolve|slide-left|slide-right|slide-up|push-left|push-right\", duration}",
+    "example": {
+      "type": "frame",
+      "name": "Card",
+      "w": 320,
+      "fill": "#FFFFFF",
+      "radius": 16,
+      "layout": {
+        "mode": "column",
+        "gap": 8,
+        "padding": 20
+      },
+      "effects": [
+        {
+          "type": "drop-shadow",
+          "y": 6,
+          "blur": 18,
+          "color": "#1B243014"
+        }
+      ],
+      "children": [
+        {
+          "type": "text",
+          "text": "Ridge Loop",
+          "font": {
+            "family": "Inter",
+            "size": 18,
+            "weight": 600
+          },
+          "color": "#1B2430"
+        },
+        {
+          "type": "text",
+          "text": "7.4 km \u00b7 2 h 40 min",
+          "font": {
+            "size": 13
+          },
+          "color": "#5B6573"
+        },
+        {
+          "type": "rect",
+          "h": 120,
+          "sizing": {
+            "w": "fill"
+          },
+          "radius": 10,
+          "fill": {
+            "type": "linear",
+            "angle": 120,
+            "stops": [
+              [
+                0,
+                "#8CC9A6"
+              ],
+              [
+                1,
+                "#1F6B4F"
+              ]
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "tools": [
+    {
+      "name": "get_capabilities",
+      "description": "Start here. Returns the app version, the conventions (units, coordinates, colors), the full layer spec reference, and every tool with its input schema.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_document",
+      "description": "File overview: pages, the current page, components, styles, selection and viewport.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_tree",
+      "description": "Layer tree as specs. Without node_id returns the current page's top-level layers. Use depth to limit size; deeper layers report childCount.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "description": "Layer id (from get_tree, find_nodes or get_selection)"
+          },
+          "page_id": {
+            "type": "string",
+            "description": "Page to read (defaults to the current page)"
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50,
+            "description": "Child levels to include (default 3)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "spec",
+              "outline"
+            ],
+            "description": "spec = JSON (default); outline = indented text, cheapest on tokens"
+          },
+          "include_images": {
+            "type": "boolean",
+            "description": "Embed image data URLs (large). Default false: images are returned as asset refs."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_nodes",
+      "description": "Full spec for specific layers, including all children.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          },
+          "include_images": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "find_nodes",
+      "description": "Search layers by name or text content (case-insensitive substring), optionally filtered by type. Searches the current page unless all_pages is true.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Substring of the layer name or text"
+          },
+          "type": {
+            "type": "string",
+            "description": "frame, text, rect, ellipse, vector, group, component, instance, \u2026"
+          },
+          "all_pages": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_selection",
+      "description": "What the designer has selected right now, as specs.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "depth": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_components",
+      "description": "Main components you can instantiate with create {\"type\":\"instance\",\"component\":\"<id or name>\"}.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_styles",
+      "description": "Color and text styles. Apply with fillStyle / strokeStyle / textStyle in a spec.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "screenshot",
+      "description": "Render pixels so you can see the design. target: a layer id, \"selection\", \"page\" or \"viewport\" (default). Over ninja-p2p the image arrives as a file in your inbox; elsewhere it is returned as base64.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string"
+          },
+          "max_size": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 4096,
+            "description": "Longest side in pixels (default 1024; use 512 to save tokens)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "jpg",
+              "png"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "export",
+      "description": "Export layers in an AI- or developer-friendly format. html = standalone HTML+CSS (auto layout becomes flexbox); spec = round-trippable JSON for create; outline = indented text; tokens = design tokens (DTCG JSON + CSS variables); svg; png/jpg = base64 (or a file over ninja-p2p).",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "html",
+              "spec",
+              "outline",
+              "tokens",
+              "svg",
+              "png",
+              "jpg"
+            ]
+          },
+          "scale": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 8
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "create",
+      "description": "Create one layer (with nested children) from a spec. Returns the new id and the ids of every created layer by name path. Frames get a white fill unless you pass fill.",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "spec": {
+            "type": "object",
+            "description": "Layer spec \u2014 see get_capabilities.spec for every field. Minimum: {\"type\":\"rect\"}.",
+            "additionalProperties": true
+          },
+          "parent_id": {
+            "type": "string",
+            "description": "Parent frame/group/component (defaults to the current page)"
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Stacking position inside the parent (0 = bottom; default = top)"
+          },
+          "select": {
+            "type": "boolean",
+            "description": "Select the result (default true)"
+          }
+        },
+        "required": [
+          "spec"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "update",
+      "description": "Change properties on existing layers using spec fields (only the fields you pass change). Works on several layers at once with ids.",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Layer id (from get_tree, find_nodes or get_selection)"
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          },
+          "props": {
+            "type": "object",
+            "description": "Spec fields to change, e.g. {\"fill\":\"#E5484D\",\"radius\":8} or {\"text\":\"New label\"}",
+            "additionalProperties": true
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "delete",
+      "description": "Delete layers (and everything inside them).",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "move",
+      "description": "Move layers into another parent and/or to a stacking position. Keeps their position on the page unless the new parent uses auto layout.",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          },
+          "parent_id": {
+            "type": "string",
+            "description": "Layer id (from get_tree, find_nodes or get_selection)"
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "duplicate",
+      "description": "Duplicate layers in place (top-level frames are placed to the right).",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "group",
+      "description": "Group layers (they must share a parent).",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ungroup",
+      "description": "Ungroup groups, boolean groups or frames, keeping their children.",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "wrap_in_frame",
+      "description": "Wrap layers in a new frame. Pass auto_layout: true to get an auto layout frame whose direction and gap are inferred from the layers.",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          },
+          "name": {
+            "type": "string"
+          },
+          "auto_layout": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "boolean",
+      "description": "Combine shapes with a boolean operation (the result stays editable).",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          },
+          "op": {
+            "type": "string",
+            "enum": [
+              "union",
+              "subtract",
+              "intersect",
+              "exclude"
+            ]
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "flatten",
+      "description": "Flatten shapes, booleans or groups into one vector path.",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "mask",
+      "description": "Use the bottom-most layer as a mask for the others (they are grouped).",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "create_component",
+      "description": "Turn a frame or group into a main component, or wrap several layers in a new component.",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "detach_instance",
+      "description": "Turn instances back into plain frames.",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "reset_overrides",
+      "description": "Clear all overrides on an instance.",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Layer id (from get_tree, find_nodes or get_selection)"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "align",
+      "description": "Align layers to each other (or a single layer to its parent).",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "left",
+              "hcenter",
+              "right",
+              "top",
+              "vcenter",
+              "bottom"
+            ]
+          }
+        },
+        "required": [
+          "ids",
+          "direction"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "distribute",
+      "description": "Space three or more layers evenly.",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          },
+          "axis": {
+            "type": "string",
+            "enum": [
+              "horizontal",
+              "vertical"
+            ]
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "reorder",
+      "description": "Change stacking order.",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          },
+          "to": {
+            "type": "string",
+            "enum": [
+              "front",
+              "forward",
+              "backward",
+              "back"
+            ]
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "import_svg",
+      "description": "Import SVG markup as editable vector layers.",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "svg": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": "string",
+            "description": "Layer id (from get_tree, find_nodes or get_selection)"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "svg"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "create_style",
+      "description": "Create a color style (value = paint) or text style (value = font object).",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "color",
+              "text"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "description": "Paint for color styles; {family,size,weight,lineHeight,letterSpacing} for text styles"
+          }
+        },
+        "required": [
+          "type",
+          "name",
+          "value"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "pages",
+      "description": "Create, rename, switch to, or delete pages.",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "rename",
+              "switch",
+              "delete"
+            ]
+          },
+          "page_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "select",
+      "description": "Set the designer's selection (and optionally zoom to it) so they can see what you are talking about.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          },
+          "zoom": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "view",
+      "description": "Move the designer's viewport: zoom to fit the page, to layers, or set zoom.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fit": {
+            "type": "string",
+            "enum": [
+              "page",
+              "selection"
+            ]
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Layer ids"
+          },
+          "zoom": {
+            "type": "number",
+            "minimum": 0.02,
+            "maximum": 256
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "undo",
+      "description": "Undo the last change (yours or the designer's).",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "steps": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "redo",
+      "description": "Redo.",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "steps": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "notify",
+      "description": "Show a short message to the designer (and log it in the AI panel).",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "batch",
+      "description": "Run several tool calls in order as ONE undo step. Later steps can use \"$0\", \"$1\"\u2026 (or \"$0.created.<path>\") to refer to ids from earlier results. Stops at the first error and rolls everything back.",
+      "readOnly": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tool": {
+                  "type": "string"
+                },
+                "args": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "tool"
+              ]
+            }
+          },
+          "label": {
+            "type": "string",
+            "description": "Undo history label"
+          }
+        },
+        "required": [
+          "steps"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "name": "OfficeNinja",
   "short_name": "OfficeNinja",
-  "description": "A browser office suite with document, spreadsheet, and presentation editors that save locally.",
+  "description": "Free document, spreadsheet, presentation, and Blueline design editors with local autosave.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -17,6 +17,24 @@
       "src": "./favicon.svg",
       "sizes": "512x512",
       "type": "image/svg+xml"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New document",
+      "url": "./#/word"
+    },
+    {
+      "name": "New spreadsheet",
+      "url": "./#/excel"
+    },
+    {
+      "name": "New presentation",
+      "url": "./#/powerpoint"
+    },
+    {
+      "name": "New Blueline design",
+      "url": "./blueline/?new=1"
     }
   ]
 }

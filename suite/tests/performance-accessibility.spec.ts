@@ -1,7 +1,7 @@
 import { devices, expect, test } from '@playwright/test';
 
 const baseUrl = process.env.BASE_URL ?? 'http://127.0.0.1:4173';
-const heavyChunkPattern = /word-editor|excel-workbook|word-io|excel-io|slides-canvas|slides-io/i;
+const heavyChunkPattern = /word-editor|excel-workbook|word-io|excel-io|slides-canvas|slides-io|blueline\/index/i;
 
 function makeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -12,7 +12,7 @@ test.use({ serviceWorkers: 'block' });
 test.describe('Performance and accessibility regressions', () => {
   test('dashboard defers heavy editor bundles until the user opens an editor', async ({ page }) => {
     await page.goto(baseUrl);
-    await expect(page.getByRole('heading', { name: /Work like a real office app/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Make room for your next idea/i })).toBeVisible();
 
     const preloadHrefs = await page.locator('link[rel="modulepreload"]').evaluateAll((elements) =>
       elements.map((element) => element.getAttribute('href') ?? ''),

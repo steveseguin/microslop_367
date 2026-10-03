@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Generated from ../blueline by predev/prebuild
+public/blueline/
+test-results/
+playwright-report/

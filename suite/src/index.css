@@ -87,7 +87,6 @@ body {
     linear-gradient(180deg, #08101a 0%, #0d1522 52%, #111d2d 100%);
 }
 
-body,
 button,
 input,
 textarea,
@@ -1022,7 +1021,7 @@ a {
 .launcher-grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .launcher-card,
@@ -1723,6 +1722,13 @@ a {
 }
 
 @media (max-width: 900px) {
+  /* The embedded grid uses percentage heights; mobile's auto-height shell
+     needs a definite grid height to keep the sheet rows visible. */
+  .spreadsheet-shell > .spreadsheet-container {
+    height: 70svh;
+    flex: none;
+  }
+
   .workspace-mobile-switcher {
     display: flex;
   }
@@ -1903,4 +1909,18 @@ a {
   .spreadsheet-shell {
     min-height: 70svh;
   }
+}
+
+.launcher-card__icon.blueline { background: linear-gradient(135deg, #087bb5, #174a84); }
+.btn { text-decoration: none; }
+.suite-app-switcher { max-width: 135px; min-height: 36px; padding: 0.3rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid); color: var(--text); }
+@media (min-width: 981px) and (max-width: 1150px) { .launcher-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .header-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 42px;
+  }
+  .suite-app-switcher { width: 100%; max-width: 160px; }
+  .header-actions > .btn-icon { grid-column: 2; grid-row: 1; }
+  .header-action-cluster { grid-column: 1 / -1; grid-row: 2; }
 }

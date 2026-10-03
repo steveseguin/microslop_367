@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useLocation } from 'react-router-dom';
 import { Suspense, lazy, useEffect, useState } from 'react';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -21,6 +21,7 @@ function AppLoading() {
 }
 
 function App() {
+  const location = useLocation();
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const savedTheme = localStorage.getItem('officeninja_theme');
     if (savedTheme === 'dark') {
@@ -32,6 +33,23 @@ function App() {
 
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
+
+  useEffect(() => {
+    const names: Record<string, string> = { '/word': 'NinjaWord', '/excel': 'NinjaCalc', '/powerpoint': 'NinjaSlides' };
+    document.title = names[location.pathname]
+      ? `${names[location.pathname]} | OfficeNinja`
+      : 'OfficeNinja | Free Office & Design Tools';
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const syncTheme = (event: StorageEvent) => {
+      if (event.key === 'officeninja_theme') {
+        setIsDarkMode(event.newValue === 'dark' || (event.newValue !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches));
+      }
+    };
+    window.addEventListener('storage', syncTheme);
+    return () => window.removeEventListener('storage', syncTheme);
+  }, []);
 
   useEffect(() => {
     if (isDarkMode) {

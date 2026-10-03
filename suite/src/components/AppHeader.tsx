@@ -1,5 +1,6 @@
 import React, { useId } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { designUrl } from '../utils/blueline';
 import { ChevronLeft, Moon, Sun } from 'lucide-react';
 
 interface AppHeaderProps {
@@ -37,6 +38,7 @@ export function AppHeader({
 }: AppHeaderProps) {
   const { iconLetter, iconClass, suiteLabel } = getAppMeta(appName);
   const saveStatusId = useId();
+  const navigate = useNavigate();
 
   const handleHomeClick = (event: React.MouseEvent) => {
     if (saveStatus !== 'Saving...') {
@@ -99,6 +101,22 @@ export function AppHeader({
       </div>
 
       <div className="header-actions">
+        <select
+          className="suite-app-switcher"
+          aria-label="Switch app"
+          value={appName}
+          onChange={(event) => {
+            if (saveStatus === 'Saving...' && !window.confirm('Changes are still saving. Leave this editor anyway?')) return;
+            const next = event.target.value;
+            if (next === 'Blueline') window.location.assign(designUrl());
+            else navigate(next === 'NinjaWord' ? '/word' : next === 'NinjaCalc' ? '/excel' : '/powerpoint');
+          }}
+        >
+          <option>NinjaWord</option>
+          <option>NinjaCalc</option>
+          <option>NinjaSlides</option>
+          <option>Blueline</option>
+        </select>
         {actions && <div className="header-action-cluster">{actions}</div>}
         {toggleTheme && (
           <button
