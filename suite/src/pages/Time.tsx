@@ -236,6 +236,12 @@ export default function Time(props: ToolProps) {
       setMessage('Timer stopped and saved.');
   };
   const createInvoice = async () => {
+    if (editing) {
+      setMessage(
+        'Save or cancel the current time-entry edit before creating an invoice.',
+      );
+      return;
+    }
     const lines = unbilled.filter((e) => selected.includes(e.id));
     if (!lines.length) {
       setMessage('Select unbilled entries to invoice.');
@@ -553,7 +559,7 @@ export default function Time(props: ToolProps) {
                 </button>
                 <button
                   className="btn btn-primary"
-                  disabled={!store.ready || !selected.length}
+                  disabled={!store.ready || !selected.length || !!editing}
                   onClick={() => void createInvoice()}
                 >
                   <FileText size={15} />
