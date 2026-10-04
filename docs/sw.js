@@ -26,7 +26,7 @@
  * new shell cache containing the new index.html, and the old cache is deleted on activate.
  */
 
-const VERSION = "680221bf24da";
+const VERSION = "90ca85e8a34a";
 const SHELL_CACHE = `officeninja-shell-${VERSION}`;
 const RUNTIME_CACHE = `officeninja-runtime-${VERSION}`;
 
@@ -56,7 +56,7 @@ const SHELL_ASSETS = [
   "./assets/blueline-SIB18Vpb.js",
   "./assets/db-B4V_zDGv.js",
   "./assets/framework-CUtJR0oF.js",
-  "./assets/index-BapzDvt8.js",
+  "./assets/index-BZrixob9.js",
   "./assets/index-D3XK05lP.css",
   "./assets/index-fegnM8dg.js",
   "./assets/inter-latin-wght-italic-DpCbqKDY.woff2",
@@ -80,7 +80,7 @@ const SHELL_ASSETS = [
 const WARM_ASSETS = [
   "./assets/Excel-Bsk4Rnt9.js",
   "./assets/ExcelWorkbook-CnmuuO9V.js",
-  "./assets/Notes-Bz_vOSTf.js",
+  "./assets/Notes-CEjNjyiw.js",
   "./assets/Pdf-CCgjgVBs.js",
   "./assets/PowerPoint-fruhTBNi.js",
   "./assets/SelectionChart-D-hMAlF-.js",
