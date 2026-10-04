@@ -591,7 +591,8 @@ export default function Notes(props: ToolProps) {
                     <div className="tool-row">
                       <button
                         className="btn btn-primary"
-                        disabled={!store.ready || preparing}
+                        // Stopping an active microphone must remain possible after a save fails.
+                        disabled={!listening && (!store.ready || preparing)}
                         onClick={() => (listening ? stop() : void startVoice())}
                       >
                         {listening ? <Square size={15} /> : <Mic size={15} />}
