@@ -387,7 +387,12 @@ test('dictation appends final timestamped transcripts and requires explicit onli
   });
   await ready(page, 'notes');
   await page.getByRole('button', { name: 'New note', exact: true }).click();
+  // New-note creation focuses the title after its asynchronous save. Wait for
+  // that focus handoff before fill() sends keyboard input to the body.
+  await expect(page.getByLabel('Note title')).toBeFocused();
   await page.getByLabel('Note text').fill('Meeting notes');
+  await expect(page.getByLabel('Note text')).toHaveValue('Meeting notes');
+  await expect(page.getByLabel('Note title')).toHaveValue('');
   await page.getByRole('button', { name: 'Start dictation' }).click();
   await expect(
     page.getByRole('button', { name: 'Stop dictation' }),
