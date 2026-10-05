@@ -3,6 +3,17 @@ import { forwardRef, useCallback, useEffect, useRef } from 'react';
 import { Workbook } from '@fortune-sheet/react';
 import type { WorkbookInstance } from '@fortune-sheet/react';
 import '@fortune-sheet/react/dist/index.css';
+import { locale as sheetLocale } from '@fortune-sheet/core';
+
+/* The grid's DEFAULT face is font slot 0, which ships as Times New Roman, so
+   every unformatted cell rendered in a serif that matches nothing else in the
+   suite. Slot 0 is also what "no font set" means, so renaming it changes only
+   the default, never a font a user picked explicitly. */
+for (const lang of ['en', 'zh', 'zh-TW', 'es', 'hi', 'ru']) {
+  const fonts = (sheetLocale({ lang } as never) as { fontarray?: string[] })
+    .fontarray;
+  if (fonts?.[0] === 'Times New Roman') fonts[0] = 'Arial';
+}
 
 /**
  * Curated subset of fortune-sheet's built-in toolbar.

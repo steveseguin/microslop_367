@@ -1,7 +1,8 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import '../styles/tools.css';
 import {
   FolderOpen,
+  Upload,
   Moon,
   Pencil,
   Sun,
@@ -21,6 +22,8 @@ import type { DocumentRecord, OfficeDocumentType } from '../utils/db';
 import { deleteDesign, designUrl, listDesigns, loadDesign, renameDesign, restoreDesign } from '../utils/blueline';
 import type { DesignDocument } from '../utils/blueline';
 import { AppGlyph, AppMark } from '../components/AppMark';
+import { handOff, kindForFile } from '../utils/handoff';
+import { readToolWorkspace } from '../utils/toolStorage';
 
 interface DashboardProps {
   toggleTheme: () => void;
@@ -145,7 +148,77 @@ async function listWorkspaceFiles(): Promise<DocMeta[]> {
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+const OPEN_ACCEPT = '.docx,.xlsx,.xls,.csv,.pptx,.pdf,application/pdf';
+const MAX_OPEN_BYTES = 30_000_000;
+
+function formatHours(seconds: number) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+/** One line of live state per tool, read once from its local workspace. */
+async function readToolSummaries() {
+  const [time, notes, pdf] = await Promise.all([
+    readToolWorkspace<{
+      entries?: { date?: string; seconds?: number; billable?: boolean }[];
+      timer?: { description?: string } | null;
+    }>('time'),
+    readToolWorkspace<{ notes?: { title?: string }[] }>('notes'),
+    readToolWorkspace<{ name?: string; bytes?: Uint8Array | null }>('pdf'),
+  ]);
+  const summary: Partial<Record<'time' | 'notes' | 'pdf', string>> = {};
+  if (time?.timer) summary.time = `Timer running${time.timer.description ? ` · ${time.timer.description}` : ''}`;
+  else if (time?.entries?.length) {
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const seconds = time.entries
+      .filter((e) => e.date === today)
+      .reduce((sum, e) => sum + (e.seconds ?? 0), 0);
+    summary.time = seconds
+      ? `${formatHours(seconds)} tracked today`
+      : `${time.entries.length} time ${time.entries.length === 1 ? 'entry' : 'entries'}`;
+  }
+  if (notes?.notes?.length)
+    summary.notes = `${notes.notes.length} ${notes.notes.length === 1 ? 'note' : 'notes'}`;
+  if (pdf?.bytes) summary.pdf = `Continue editing ${pdf.name || 'your PDF'}`;
+  return summary;
+}
+
 export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
+  const navigate = useNavigate();
+  const openInput = useRef<HTMLInputElement>(null);
+  const [dropping, setDropping] = useState(false);
+  const [openError, setOpenError] = useState('');
+  const [summaries, setSummaries] = useState<
+    Partial<Record<'time' | 'notes' | 'pdf', string>>
+  >({});
+  useEffect(() => {
+    let live = true;
+    void readToolSummaries().then((s) => {
+      if (live) setSummaries(s);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  const openFile = (file: File | undefined) => {
+    if (!file) return;
+    const kind = kindForFile(file);
+    if (!kind) {
+      setOpenError(
+        `“${file.name}” is not a file OfficeNinja opens. Use .docx, .xlsx, .csv, .pptx or .pdf.`,
+      );
+      return;
+    }
+    if (file.size > MAX_OPEN_BYTES) {
+      setOpenError(`“${file.name}” is larger than 30 MB.`);
+      return;
+    }
+    setOpenError('');
+    handOff(kind, file);
+    navigate(`/${kind}`);
+  };
   const [recentDocs, setRecentDocs] = useState<DocMeta[]>([]);
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('recent');
@@ -356,7 +429,31 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
   const hiddenCount = visibleDocs.length - shownDocs.length;
 
   return (
-    <div className="dashboard">
+    <div
+      className="dashboard"
+      data-dropping={dropping || undefined}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        setDropping(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropping(false);
+      }}
+      onDrop={(e) => {
+        if (!e.dataTransfer.files.length) return;
+        e.preventDefault();
+        setDropping(false);
+        openFile(e.dataTransfer.files[0]);
+      }}
+    >
+      {dropping && (
+        <div className="dashboard-dropcue" aria-hidden="true">
+          <Upload size={30} />
+          <strong>Drop to open</strong>
+          <span>Word, Excel, CSV, PowerPoint or PDF</span>
+        </div>
+      )}
       <h1 className="sr-only">OfficeNinja office and design workspace</h1>
       <header className="dashboard-topbar">
         <div className="dashboard-shell dashboard-topbar__inner">
@@ -410,7 +507,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
                 <AppMark app={app} />
                 <span>
                   <strong>{name}</strong>
-                  <small>{blurb}</small>
+                  <small>{summaries[app] ?? blurb}</small>
                 </span>
               </Link>
             ))}
@@ -429,8 +526,30 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
               </p>
             </div>
 
+            <div className="dashboard-file-tools">
+              <button
+                type="button"
+                className="btn btn-secondary dashboard-open"
+                onClick={() => openInput.current?.click()}
+                title="Open a .docx, .xlsx, .csv, .pptx or .pdf file. You can also drop files anywhere on this page."
+              >
+                <Upload size={15} aria-hidden="true" />
+                Open file
+              </button>
+              <input
+                ref={openInput}
+                type="file"
+                hidden
+                accept={OPEN_ACCEPT}
+                aria-label="Open a file from this device"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  openFile(file);
+                }}
+              />
             {recentDocs.length > 0 && (
-              <div className="dashboard-file-tools">
+              <>
                 <input
                   type="search"
                   className="dashboard-search"
@@ -455,16 +574,22 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
                   <option value="name">Name</option>
                   <option value="type">Type</option>
                 </select>
-              </div>
+              </>
             )}
+            </div>
           </div>
+          {openError && (
+            <div className="dashboard-open-error" role="alert">
+              {openError}
+            </div>
+          )}
 
           {recentDocs.length === 0 ? (
             <div className="dashboard-empty">
               <FolderOpen size={22} aria-hidden="true" />
               <p>
-                <strong>No files yet.</strong> Start a document, spreadsheet, presentation or Blueline design — everything you
-                make is saved in this browser as you type.
+                <strong>No files yet.</strong> Start a document, spreadsheet, presentation or Blueline design, or drop a
+                .docx, .xlsx, .pptx or .pdf anywhere on this page to open it. Everything is saved in this browser as you type.
                 {' '}Time entries, notes, and your PDF draft are saved inside their tools above.
               </p>
             </div>

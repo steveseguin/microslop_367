@@ -1,4 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { takeHandoff } from '../utils/handoff';
 import type { CSSProperties } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -2853,6 +2854,16 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
       });
     }
   };
+
+  // A file dropped on the workspace opens straight into this new document.
+  const handoffDone = useRef(false);
+  useEffect(() => {
+    if (!isLoaded || handoffDone.current) return;
+    handoffDone.current = true;
+    const file = takeHandoff('excel');
+    if (file) void importWorkbookFile(file);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded]);
 
   const buildChartFromSelection = () => {
     const workbook = workbookRef.current;

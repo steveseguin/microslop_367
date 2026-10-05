@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { takeHandoff } from '../utils/handoff';
 import { useSearchParams } from 'react-router-dom';
 import * as fabric from 'fabric';
 import {
@@ -2858,6 +2859,16 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       });
     }
   };
+
+  // A file dropped on the workspace opens straight into this new document.
+  const handoffDone = useRef(false);
+  useEffect(() => {
+    if (!isLoaded || handoffDone.current) return;
+    handoffDone.current = true;
+    const file = takeHandoff('powerpoint');
+    if (file) void importPptxFile(file);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded]);
 
   /* ---------------- print ---------------- */
 

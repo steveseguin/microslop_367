@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { takeHandoff } from '../utils/handoff';
 import { useSearchParams } from 'react-router-dom';
 import { EditorContent, useEditor } from '@tiptap/react';
 import type { Editor } from '@tiptap/react';
@@ -1659,6 +1660,16 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
 
   /* ---------------- render guard (all hooks are above) ---------------- */
 
+  // A file dropped on the workspace opens straight into this new document.
+  const handoffDone = useRef(false);
+  useEffect(() => {
+    if (!isLoaded || !editor || handoffDone.current) return;
+    handoffDone.current = true;
+    const file = takeHandoff('word');
+    if (file) void runImport(file);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, editor]);
+
   if (!editor) {
     return null;
   }
@@ -2073,6 +2084,7 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
       });
     }
   };
+
 
   /* ---------------- speech ---------------- */
 

@@ -1,5 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
+import {
+  PDFArray,
+  PDFDocument,
+  PDFRawStream,
+  StandardFonts,
+  decodePDFRawStream,
+} from 'pdf-lib';
 import { readFile } from 'node:fs/promises';
 import { serveStaticBuild } from './helpers/static-build';
 
@@ -413,6 +419,64 @@ test('dictation appends final timestamped transcripts and requires explicit onli
   ).toBeVisible();
 });
 
+test('existing PDF text is replaced in place, not covered', async ({
+  page,
+}) => {
+  await ready(page, 'pdf');
+  await openSample(page);
+  // Edit text is the default tool, and every line is a click target.
+  await page
+    .getByRole('button', {
+      name: 'Edit text: Original text must remain readable.',
+    })
+    .click();
+  const field = page.getByLabel('Edit text', { exact: true });
+  await expect(field).toHaveValue('Original text must remain readable.');
+  await field.fill('Edited text replaced the original.');
+  await field.press('Enter');
+  await expect(
+    page.getByText('Text updated. Download the PDF to keep a file copy.'),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', {
+      name: 'Edit text: Edited text replaced the original.',
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', {
+      name: 'Edit text: OfficeNinja test page 1',
+    }),
+  ).toBeVisible();
+  const edited = await downloadedPdf(page, 'Download PDF');
+  const contents = edited.getPage(0).node.Contents();
+  const streams =
+    contents instanceof PDFArray
+      ? contents.asArray().map((ref) => edited.context.lookup(ref))
+      : [contents];
+  const ops = streams
+    .map((stream) =>
+      stream instanceof PDFRawStream
+        ? new TextDecoder('latin1').decode(decodePDFRawStream(stream).decode())
+        : '',
+    )
+    .join(' ')
+    .toUpperCase();
+  const hex = (text: string) =>
+    Buffer.from(text, 'latin1').toString('hex').toUpperCase();
+  // The old words are gone from the page's content, not hidden under a box.
+  expect(ops).toContain(hex('Edited text replaced'));
+  expect(ops).not.toContain(hex('Original text must'));
+  // Esc cancels without changing anything.
+  await page
+    .getByRole('button', { name: 'Edit text: OfficeNinja test page 1' })
+    .click();
+  await page.getByLabel('Edit text', { exact: true }).fill('Discard me');
+  await page.getByLabel('Edit text', { exact: true }).press('Escape');
+  await expect(
+    page.getByRole('button', { name: 'Edit text: OfficeNinja test page 1' }),
+  ).toBeVisible();
+});
+
 test('PDF edits render, rotate, reorder, extract, merge and reload', async ({
   page,
 }) => {
@@ -424,15 +488,23 @@ test('PDF edits render, rotate, reorder, extract, merge and reload', async ({
   expect(rotated.getPage(0).getRotation().angle).toBe(90);
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(page.getByText('Ready', { exact: true })).toBeVisible();
-  await page.getByLabel('Editing tool').selectOption('text');
-  await page.getByLabel('Text to add').fill('Approved for launch');
+  await page.getByRole('button', { name: 'Add text', exact: true }).click();
   await page
     .getByLabel('PDF annotation surface')
     .click({ position: { x: 80, y: 170 } });
+  await page.getByLabel('New text', { exact: true }).fill('Approved for launch');
+  await page.getByLabel('New text', { exact: true }).press('Enter');
   await expect(
-    page.getByText('Edit saved. Download the PDF to keep a file copy.'),
+    page.getByText('Text added. Download the PDF to keep a file copy.'),
   ).toBeVisible();
-  await page.getByLabel('Editing tool').selectOption('view');
+  await expect(
+    page.getByRole('button', { name: 'Edit text: Approved for launch' }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Edit text', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Edit text: Approved for launch' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Pages only', exact: true }).click();
   await page.getByLabel('Extract pages', { exact: true }).fill('1, 3');
   expect(
     (await downloadedPdf(page, 'Download selected pages')).getPageCount(),
@@ -548,6 +620,18 @@ for (const width of [1440, 390])
         path: info.outputPath(`pdf-${width}-${theme}.png`),
         fullPage: true,
       });
+      await page
+        .getByRole('button', {
+          name: 'Edit text: Original text must remain readable.',
+        })
+        .click();
+      await page
+        .getByLabel('Edit text', { exact: true })
+        .fill('Original text, now edited in place.');
+      await page.screenshot({
+        path: info.outputPath(`pdf-editing-${width}-${theme}.png`),
+      });
+      await page.getByLabel('Edit text', { exact: true }).press('Escape');
       if (width < 600) {
         await page
           .getByLabel('PDF page 1', { exact: true })

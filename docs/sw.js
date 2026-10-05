@@ -26,7 +26,7 @@
  * new shell cache containing the new index.html, and the old cache is deleted on activate.
  */
 
-const VERSION = "5e86a534e44b";
+const VERSION = "752ac5eda2d0";
 const SHELL_CACHE = `officeninja-shell-${VERSION}`;
 const RUNTIME_CACHE = `officeninja-runtime-${VERSION}`;
 
@@ -52,22 +52,24 @@ const LEGACY_CACHE_PATTERN = /^officeninja-v\d+$/;
 /** Precached on install. Kept small on purpose; see the budget check in vite.config.ts. */
 const SHELL_ASSETS = [
   "./.nojekyll",
-  "./assets/AppMark-DlpIoqtu.js",
-  "./assets/Dashboard-DU4PEOsV.js",
+  "./assets/AppMark-D0JwyQT5.js",
+  "./assets/Dashboard-O7ZdP8TN.js",
+  "./assets/ToolShell-B6xlHhNQ.js",
   "./assets/db-B4V_zDGv.js",
   "./assets/framework-CUtJR0oF.js",
-  "./assets/index-BWlSDuth.css",
-  "./assets/index-DRguKGC2.js",
-  "./assets/index-vPZnHHuL.js",
+  "./assets/handoff-DjR3WPON.js",
+  "./assets/index-C5559Z9M.css",
+  "./assets/index-DQy_7KWA.js",
+  "./assets/index-DaxTDwUx.js",
   "./assets/inter-latin-wght-italic-DpCbqKDY.woff2",
   "./assets/inter-latin-wght-normal-Dx4kXJAl.woff2",
   "./assets/route-loader-PPVm8Dsz.js",
-  "./assets/router-CnpH6s5q.js",
+  "./assets/router-DRvEhcA9.js",
   "./assets/storage-Dob3nYDb.js",
   "./assets/suiteApps-BKpEvaCg.js",
-  "./assets/toolStorage-ky9tXYay.js",
-  "./assets/tools-BjEatJSr.css",
-  "./assets/ui-icons-BdRMDqHg.js",
+  "./assets/toolStorage-CcsyUMUW.js",
+  "./assets/toolStorage-CeQwdsA1.css",
+  "./assets/ui-icons-B8lUIzT6.js",
   "./favicon.svg",
   "./index.html",
   "./manifest.webmanifest",
@@ -78,19 +80,21 @@ const SHELL_ASSETS = [
 
 /** Cached on first use, or during the idle warm pass. Multiple megabytes. */
 const WARM_ASSETS = [
-  "./assets/Excel-CL3FYGLc.js",
-  "./assets/ExcelWorkbook-CnmuuO9V.js",
-  "./assets/Notes-BmNYHjtb.js",
-  "./assets/Pdf-Co6pmvGm.js",
-  "./assets/PowerPoint-CygtMp5S.js",
-  "./assets/SelectionChart-BXVW_q3Z.js",
-  "./assets/Time-DoFtBLgw.js",
-  "./assets/Word-CgxUL9ko.js",
+  "./assets/Excel-DjkYmXXs.js",
+  "./assets/ExcelWorkbook-BMlrZp7i.js",
+  "./assets/Notes-BCU4ge1F.css",
+  "./assets/Notes-D5G2eOX9.js",
+  "./assets/Pdf-DgXgryqk.js",
+  "./assets/PowerPoint-CFCNOGhy.js",
+  "./assets/SelectionChart-BSInf9GV.js",
+  "./assets/Time-BNTayqFH.css",
+  "./assets/Time-DbM2blHL.js",
+  "./assets/Word-MG9iTYpN.js",
   "./assets/__vite-browser-external-BIHI7g3E.js",
   "./assets/excel-chart-2uwRaG3y.js",
   "./assets/excel-io-CKwrMZHi.js",
   "./assets/excel-workbook-4zfA6_yO.css",
-  "./assets/excel-workbook-VKOPnvcz.js",
+  "./assets/excel-workbook-BfXoJ_WG.js",
   "./assets/inter-cyrillic-ext-wght-italic-B5xAaiFk.woff2",
   "./assets/inter-cyrillic-ext-wght-normal-BOeWTOD4.woff2",
   "./assets/inter-cyrillic-wght-italic-DzZdc28x.woff2",
@@ -103,8 +107,8 @@ const WARM_ASSETS = [
   "./assets/inter-latin-ext-wght-normal-DO1Apj_S.woff2",
   "./assets/inter-vietnamese-wght-italic-K3WlGtc8.woff2",
   "./assets/inter-vietnamese-wght-normal-CBcvBZtf.woff2",
-  "./assets/pdf-engine-f63K0Pwe.js",
-  "./assets/pdf-renderer-BNqORDF9.js",
+  "./assets/pdf-engine-DsCqmaAI.js",
+  "./assets/pdf-renderer-UIJfzSCB.js",
   "./assets/pdf.worker.min-CjEcRF4W.mjs",
   "./assets/slides-canvas-DGUIQptF.js",
   "./assets/slides-io-BwrBIGXO.js",

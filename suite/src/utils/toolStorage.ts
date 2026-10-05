@@ -156,3 +156,18 @@ export function csvCell(value: unknown) {
   // Prevent imported spreadsheet formulas in user-controlled strings.
   return `"${(/^[=+\-@\t\r]/.test(text) ? "'" : '') + text.replace(/"/g, '""')}"`;
 }
+
+/** Read a tool workspace once, without subscribing (for workspace summaries). */
+export async function readToolWorkspace<T>(key: string): Promise<T | null> {
+  try {
+    const db = await database();
+    try {
+      const record: Stored<T> | undefined = await db.get('workspaces', key);
+      return record?.data ?? null;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return null;
+  }
+}

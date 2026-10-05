@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PDFDocument, StandardFonts, degrees, rgb } from 'pdf-lib';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import type { PageViewport } from 'pdfjs-dist';
@@ -14,12 +14,31 @@ import {
   ArrowDown,
   FilePlus2,
   Trash2,
+  TextCursorInput,
+  Type,
+  Highlighter,
+  PenLine,
+  ImagePlus,
+  MousePointer2,
+  EyeOff,
+  Copy,
+  FilePlus,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import { AppMark } from '../components/AppMark';
+import { takeHandoff } from '../utils/handoff';
 import { ToolShell, type ToolProps } from '../components/ToolShell';
 import { downloadFile, useToolStorage } from '../utils/toolStorage';
 import { fillFields, openPdf, parsePageRange, readFields } from '../utils/pdf';
 import type { PdfField } from '../utils/pdf';
+import {
+  extractLines,
+  removeTextInBox,
+  removeTextInRect,
+  standardFont,
+} from '../utils/pdfText';
+import type { TextLine } from '../utils/pdfText';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 interface PdfWorkspace {
@@ -28,7 +47,95 @@ interface PdfWorkspace {
 }
 const EMPTY: PdfWorkspace = { name: 'document.pdf', bytes: null };
 type Point = { x: number; y: number };
-type Mode = 'view' | 'text' | 'highlight' | 'draw' | 'image';
+type Mode =
+  | 'view'
+  | 'edit'
+  | 'text'
+  | 'highlight'
+  | 'redact'
+  | 'draw'
+  | 'image';
+type Rgb = [number, number, number];
+
+const TOOLS = [
+  { id: 'edit', label: 'Edit text', icon: TextCursorInput },
+  { id: 'text', label: 'Add text', icon: Type },
+  { id: 'highlight', label: 'Highlight', icon: Highlighter },
+  { id: 'redact', label: 'Redact', icon: EyeOff },
+  { id: 'draw', label: 'Draw / sign', icon: PenLine },
+  { id: 'image', label: 'Image', icon: ImagePlus },
+  { id: 'view', label: 'Pages only', icon: MousePointer2 },
+] as const;
+
+const TOOL_HINT: Record<Mode, string> = {
+  edit: 'Click any line of text on the page to change it. Press Enter to apply, Esc to cancel.',
+  text: 'Click anywhere on the page and start typing.',
+  highlight: 'Drag over an area to highlight it. Highlighting does not remove content.',
+  redact:
+    'Drag over text to delete it from the file and black it out. Images underneath are covered, not removed.',
+  draw: 'Draw with your mouse, pen, or finger. Drawn signatures are visual marks, not digital certificates.',
+  image: 'Choose an image in the side panel, then drag a rectangle on the page to place it.',
+  view: 'Rotate, reorder, delete, or extract pages from the side panel.',
+};
+
+const pdfjsOptions = (bytes: Uint8Array) => ({
+  // Copy: PDF.js transfers its input buffer into the worker.
+  data: bytes.slice(),
+  cMapUrl: new URL('pdf-assets/cmaps/', document.baseURI).href,
+  cMapPacked: true,
+  standardFontDataUrl: new URL('pdf-assets/standard_fonts/', document.baseURI)
+    .href,
+  wasmUrl: new URL('pdf-assets/wasm/', document.baseURI).href,
+  iccUrl: new URL('pdf-assets/iccs/', document.baseURI).href,
+});
+
+const hex = (c: Rgb) =>
+  `#${c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
+const compact = (text: string) => text.replace(/\s+/g, '');
+
+/** Sample the rendered page: background is the median of a ring just outside
+ *  the box, ink is the pixel inside it that differs most from that. */
+function sampleColors(
+  canvas: HTMLCanvasElement,
+  box: { left: number; top: number; boxWidth: number; boxHeight: number },
+): { bg: Rgb; ink: Rgb } {
+  const fallback = { bg: [255, 255, 255] as Rgb, ink: [0, 0, 0] as Rgb };
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return fallback;
+  const x0 = Math.max(0, Math.floor(box.left) - 3);
+  const y0 = Math.max(0, Math.floor(box.top) - 3);
+  const x1 = Math.min(canvas.width, Math.ceil(box.left + box.boxWidth) + 3);
+  const y1 = Math.min(canvas.height, Math.ceil(box.top + box.boxHeight) + 3);
+  if (x1 - x0 < 8 || y1 - y0 < 8) return fallback;
+  const { data } = ctx.getImageData(x0, y0, x1 - x0, y1 - y0);
+  const w = x1 - x0;
+  const h = y1 - y0;
+  const px = (x: number, y: number): Rgb => {
+    const i = (y * w + x) * 4;
+    return [data[i], data[i + 1], data[i + 2]];
+  };
+  const ring: Rgb[] = [];
+  for (let x = 0; x < w; x++) ring.push(px(x, 0), px(x, h - 1));
+  for (let y = 0; y < h; y++) ring.push(px(0, y), px(w - 1, y));
+  const median = (k: number) => {
+    const v = ring.map((c) => c[k]).sort((a, b) => a - b);
+    return v[v.length >> 1];
+  };
+  const bg: Rgb = [median(0), median(1), median(2)];
+  let ink = fallback.ink;
+  let best = -1;
+  for (let y = 3; y < h - 3; y++)
+    for (let x = 3; x < w - 3; x++) {
+      const c = px(x, y);
+      const d =
+        (c[0] - bg[0]) ** 2 + (c[1] - bg[1]) ** 2 + (c[2] - bg[2]) ** 2;
+      if (d > best) {
+        best = d;
+        ink = c;
+      }
+    }
+  return { bg, ink: best < 900 ? fallback.ink : ink };
+}
 
 export default function Pdf(props: ToolProps) {
   const store = useToolStorage('pdf', EMPTY);
@@ -39,8 +146,33 @@ export default function Pdf(props: ToolProps) {
   const working = useRef(false);
   const [rendering, setRendering] = useState(false);
   const [message, setMessage] = useState('');
-  const [mode, setMode] = useState<Mode>('view');
-  const [text, setText] = useState('');
+  const [mode, setMode] = useState<Mode>('edit');
+  const [lines, setLines] = useState<{
+    bytes: Uint8Array;
+    page: number;
+    items: TextLine[];
+    view: { width: number; height: number; scale: number };
+  } | null>(null);
+  const [editing, setEditing] = useState<{
+    line: TextLine;
+    value: string;
+    bg: Rgb;
+    ink: Rgb;
+  } | null>(null);
+  const [draft, setDraft] = useState<{
+    x: number;
+    y: number;
+    value: string;
+  } | null>(null);
+  const [cssScale, setCssScale] = useState(1);
+  const [zoom, setZoom] = useState(1);
+  const [baseWidth, setBaseWidth] = useState(0);
+  const [thumbs, setThumbs] = useState<{
+    bytes: Uint8Array;
+    urls: string[];
+  } | null>(null);
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [dropping, setDropping] = useState(false);
   const [size, setSize] = useState(16);
   const [color, setColor] = useState('#2563eb');
   const [range, setRange] = useState('1');
@@ -71,6 +203,7 @@ export default function Pdf(props: ToolProps) {
       .then((pdf) => {
         if (!disposed) {
           setCount(pdf.getPageCount());
+          setPage((p) => Math.min(p, pdf.getPageCount() - 1));
           setFields(readFields(pdf));
           setFieldsDirty(false);
         }
@@ -91,17 +224,7 @@ export default function Pdf(props: ToolProps) {
     let disposed = false;
     let render: { cancel: () => void; promise: Promise<void> } | undefined;
     // Copy: PDF.js transfers its input buffer into the worker.
-    const task = getDocument({
-      data: data.bytes.slice(),
-      cMapUrl: new URL('pdf-assets/cmaps/', document.baseURI).href,
-      cMapPacked: true,
-      standardFontDataUrl: new URL(
-        'pdf-assets/standard_fonts/',
-        document.baseURI,
-      ).href,
-      wasmUrl: new URL('pdf-assets/wasm/', document.baseURI).href,
-      iccUrl: new URL('pdf-assets/iccs/', document.baseURI).href,
-    });
+    const task = getDocument(pdfjsOptions(data.bytes));
     task.promise
       .then(async (pdf) => {
         if (disposed) return;
@@ -109,15 +232,35 @@ export default function Pdf(props: ToolProps) {
         const p = await pdf.getPage(Math.min(page + 1, pdf.numPages));
         if (disposed || !canvas.current) return;
         const natural = p.getViewport({ scale: 1 });
-        const view = p.getViewport({
-          scale: Math.min(1.5, 1000 / Math.max(natural.width, natural.height)),
-        });
+        const base = Math.min(
+          1.5,
+          1000 / Math.max(natural.width, natural.height),
+        );
+        // Render at device resolution and at the zoom level, so zoomed and
+        // high-DPI pages stay sharp; capped to keep the canvas a sane size.
+        const density = Math.min(
+          4,
+          Math.max(1, zoom) * Math.max(1, window.devicePixelRatio || 1),
+          Math.sqrt(16_000_000 / (natural.width * natural.height * base * base)),
+        );
+        const view = p.getViewport({ scale: base * density });
+        setBaseWidth(natural.width * base);
         viewport.current = view;
         canvas.current.width = view.width;
         canvas.current.height = view.height;
         render = p.render({ canvas: canvas.current, viewport: view });
         await render.promise;
+        // A page we cannot read text from still renders and edits as before.
+        const items = await extractLines(p, view).catch(() => []);
         if (!disposed) {
+          setLines({
+            bytes: data.bytes!,
+            page,
+            items,
+            view: { width: view.width, height: view.height, scale: view.scale },
+          });
+          if (canvas.current?.width)
+            setCssScale(canvas.current.clientWidth / canvas.current.width);
           setRendering(false);
           setPreview({ bytes: data.bytes!, page });
           setRenderVersion((v) => v + 1);
@@ -137,7 +280,96 @@ export default function Pdf(props: ToolProps) {
       render?.cancel();
       void task.destroy();
     };
-  }, [data.bytes, page]);
+  }, [data.bytes, page, zoom]);
+
+  // Page thumbnails, rendered after the main page so it is never delayed.
+  useEffect(() => {
+    if (!data.bytes) return;
+    let disposed = false;
+    const bytes = data.bytes;
+    const task = getDocument(pdfjsOptions(bytes));
+    const timer = window.setTimeout(() => {
+      task.promise
+        .then(async (pdf) => {
+          const urls: string[] = [];
+          const total = Math.min(pdf.numPages, 300);
+          for (let i = 1; i <= total && !disposed; i++) {
+            const p = await pdf.getPage(i);
+            const natural = p.getViewport({ scale: 1 });
+            const view = p.getViewport({
+              scale: (220 / natural.width) * 1,
+            });
+            const thumb = document.createElement('canvas');
+            thumb.width = view.width;
+            thumb.height = view.height;
+            await p.render({ canvas: thumb, viewport: view }).promise;
+            urls.push(thumb.toDataURL('image/jpeg', 0.8));
+            if (!disposed && (i % 6 === 0 || i === total))
+              setThumbs({ bytes, urls: [...urls] });
+          }
+        })
+        .catch(() => {
+          /* Thumbnails are a convenience; the page view still works. */
+        });
+    }, 150);
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+      void task.destroy();
+    };
+  }, [data.bytes]);
+
+  useEffect(() => {
+    const el = canvas.current;
+    if (!el) return;
+    const observe = new ResizeObserver(() => {
+      if (el.width) setCssScale(el.clientWidth / el.width);
+    });
+    observe.observe(el);
+    return () => observe.disconnect();
+  }, [data.bytes]);
+
+  useEffect(() => {
+    setEditing(null);
+    setDraft(null);
+  }, [data.bytes, page, mode]);
+
+  const undo = useCallback(async () => {
+    const previous = history[history.length - 1];
+    if (!previous || busy || fieldsDirty) return;
+    if (await update((s) => ({ ...s, bytes: previous }))) {
+      setHistory((h) => h.slice(0, -1));
+      setPage((p) => p);
+      setMessage('Last PDF edit undone.');
+    }
+  }, [history, busy, fieldsDirty, update]);
+
+  useEffect(() => {
+    if (!data.bytes) return;
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.closest('input, textarea, select, [contenteditable="true"]')
+      )
+        return;
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        void undo();
+      } else if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+        setPage((p) => Math.min(count - 1, p + 1));
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        setPage((p) => Math.max(0, p - 1));
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        setZoom((z) => Math.min(3, +(z + 0.25).toFixed(2)));
+      } else if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+        e.preventDefault();
+        setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [data.bytes, count, undo]);
 
   useEffect(() => {
     const protect = (event: BeforeUnloadEvent) => {
@@ -153,6 +385,10 @@ export default function Pdf(props: ToolProps) {
   const operation = async (
     edit: (pdf: PDFDocument) => Promise<void> | void,
     success: string,
+    safety?: {
+      verify: (bytes: Uint8Array) => Promise<boolean>;
+      fallback: (pdf: PDFDocument) => Promise<void> | void;
+    },
   ) => {
     if (!data.bytes || working.current || !store.ready) return;
     if (fieldsDirty) {
@@ -166,9 +402,14 @@ export default function Pdf(props: ToolProps) {
     setMessage('');
     try {
       const original = data.bytes;
-      const pdf = await openPdf(original);
+      let pdf = await openPdf(original);
       await edit(pdf);
-      const bytes = await pdf.save();
+      let bytes = await pdf.save();
+      if (safety && !(await safety.verify(bytes).catch(() => false))) {
+        pdf = await openPdf(original);
+        await safety.fallback(pdf);
+        bytes = await pdf.save();
+      }
       if (await update((s) => ({ ...s, bytes }))) {
         setHistory((h) => [...h.slice(-4), original]);
         setPage((p) => Math.min(p, pdf.getPageCount() - 1));
@@ -206,7 +447,7 @@ export default function Pdf(props: ToolProps) {
       if (await update(() => ({ name: file.name, bytes }))) {
         setPage(0);
         setHistory([]);
-        setMode('view');
+        setMode('edit');
         setMessage(
           'PDF opened. Edits save locally; your original file is unchanged.',
         );
@@ -220,6 +461,13 @@ export default function Pdf(props: ToolProps) {
       working.current = false;
     }
   };
+  // A PDF dropped on the workspace opens here once local storage is ready.
+  useEffect(() => {
+    if (!store.ready) return;
+    const file = takeHandoff('pdf');
+    if (file) void loadFile(file);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.ready]);
   const requireStatic = (pdf: PDFDocument) => {
     if (pdf.getForm().getFields().length)
       throw new Error(
@@ -268,6 +516,10 @@ export default function Pdf(props: ToolProps) {
   };
   const annotate = async (stroke: Point[]) => {
     if (!stroke.length || !viewport.current) return;
+    if (mode === 'redact') {
+      await redact(stroke[0], stroke[stroke.length - 1]);
+      return;
+    }
     const start = coordinate(stroke[0]),
       end = coordinate(stroke[stroke.length - 1]);
     const pdfPoints = stroke.map(coordinate);
@@ -284,28 +536,7 @@ export default function Pdf(props: ToolProps) {
     });
     await operation(async (pdf) => {
       const p = pdf.getPage(page);
-      if (mode === 'text') {
-        if (!text.trim())
-          throw new Error(
-            'Enter the text to add, then click its position on the page.',
-          );
-        const font = await pdf.embedFont(StandardFonts.Helvetica);
-        try {
-          font.encodeText(text);
-        } catch {
-          throw new Error(
-            'Added text currently supports Latin characters. Use a PNG image for other scripts; your text has been kept.',
-          );
-        }
-        p.drawText(text, {
-          x: start.x,
-          y: start.y,
-          size,
-          font,
-          color: ink,
-          rotate: p.getRotation(),
-        });
-      } else if (mode === 'highlight') {
+      if (mode === 'highlight') {
         if (Math.abs(end.x - start.x) < 2 || Math.abs(end.y - start.y) < 2)
           throw new Error('Drag across the area to highlight.');
         p.drawRectangle({
@@ -343,6 +574,230 @@ export default function Pdf(props: ToolProps) {
       }
     }, 'Edit saved. Download the PDF to keep a file copy.');
   };
+  const redact = async (a: Point, b: Point) => {
+    const view = viewport.current;
+    if (!view || !data.bytes) return;
+    const p0 = coordinate({ x: Math.min(a.x, b.x), y: Math.max(a.y, b.y) });
+    const p1 = coordinate({ x: Math.max(a.x, b.x), y: Math.min(a.y, b.y) });
+    const rect = {
+      x0: Math.min(p0.x, p1.x),
+      y0: Math.min(p0.y, p1.y),
+      x1: Math.max(p0.x, p1.x),
+      y1: Math.max(p0.y, p1.y),
+    };
+    if (rect.x1 - rect.x0 < 2 || rect.y1 - rect.y0 < 2) {
+      setMessage('Drag across the text you want to redact.');
+      return;
+    }
+    const original = data.bytes;
+    let coveredOnly = false;
+    const box = (pdf: PDFDocument) =>
+      pdf.getPage(page).drawRectangle({
+        x: rect.x0,
+        y: rect.y0,
+        width: rect.x1 - rect.x0,
+        height: rect.y1 - rect.y0,
+        color: rgb(0, 0, 0),
+      });
+    const pageText = async (bytes: Uint8Array) => {
+      const task = getDocument(pdfjsOptions(bytes));
+      try {
+        const doc = await task.promise;
+        const content = await (await doc.getPage(page + 1)).getTextContent();
+        return content.items.flatMap((i) =>
+          'str' in i && i.str.trim() ? [i] : [],
+        );
+      } finally {
+        void task.destroy();
+      }
+    };
+    await operation(
+      (pdf) => {
+        removeTextInRect(pdf, page, rect);
+        box(pdf);
+      },
+      'Redacted. The text under the box was deleted from the file.',
+      {
+        // Text outside the box must survive; otherwise fall back to covering.
+        verify: async (bytes) => {
+          const outside = (await pageText(original)).filter((i) => {
+            const [x, y] = [i.transform[4], i.transform[5]];
+            return !(x >= rect.x0 && x <= rect.x1 && y >= rect.y0 && y <= rect.y1);
+          });
+          const after = compact((await pageText(bytes)).map((i) => i.str).join(''));
+          return outside.every((i) => after.includes(compact(i.str)));
+        },
+        fallback: (pdf) => {
+          coveredOnly = true;
+          box(pdf);
+        },
+      },
+    );
+    if (coveredOnly)
+      setMessage(
+        'This text could not be separated from nearby text, so it was covered but NOT deleted from the file. Do not rely on this for sensitive data.',
+      );
+  };
+
+  const movePage = (from: number, to: number) => {
+    if (from === to || to < 0 || to >= count) return;
+    void operation((pdf) => {
+      const p = pdf.getPage(from);
+      pdf.removePage(from);
+      pdf.insertPage(to, p);
+      setPage(to);
+    }, `Page ${from + 1} moved to position ${to + 1}.`);
+  };
+
+
+  const embedText = async (
+    pdf: PDFDocument,
+    value: string,
+    font: Parameters<PDFDocument['embedFont']>[0],
+  ) => {
+    const embedded = await pdf.embedFont(font);
+    try {
+      embedded.encodeText(value);
+    } catch {
+      throw new Error(
+        'Typed text currently supports Latin characters only. Nothing was changed.',
+      );
+    }
+    return embedded;
+  };
+  const toRgb = (c: Rgb) => rgb(c[0] / 255, c[1] / 255, c[2] / 255);
+
+  // Enter commits and then unmounts the field, which can also fire blur.
+  const committing = useRef(false);
+  const commitLine = async () => {
+    if (!editing || committing.current) return;
+    committing.current = true;
+    const { line, value, bg, ink } = editing;
+    setEditing(null);
+    try {
+      await applyLine(line, value, bg, ink);
+    } finally {
+      committing.current = false;
+    }
+  };
+  const applyLine = async (line: TextLine, value: string, bg: Rgb, ink: Rgb) => {
+    if (value === line.text) return;
+    const others = (lines?.items ?? []).filter((l) => l !== line);
+    const draw = async (pdf: PDFDocument) => {
+      if (!value.trim()) return;
+      const font = await embedText(
+        pdf,
+        value,
+        standardFont(line.kind, line.bold, line.italic),
+      );
+      pdf.getPage(page).drawText(value, {
+        x: line.x,
+        y: line.baseline,
+        size: line.size,
+        font,
+        color: toRgb(ink),
+      });
+    };
+    await operation(
+      async (pdf) => {
+        removeTextInBox(pdf, page, line);
+        await draw(pdf);
+      },
+      value.trim()
+        ? 'Text updated. Download the PDF to keep a file copy.'
+        : 'Text removed. Download the PDF to keep a file copy.',
+      {
+        // Removal is only trusted when every other line is still on the page
+        // and nothing but the new text is left where the old line was.
+        verify: async (bytes) => {
+          const task = getDocument(pdfjsOptions(bytes));
+          try {
+            const doc = await task.promise;
+            const content = await (
+              await doc.getPage(page + 1)
+            ).getTextContent();
+            const items = content.items.flatMap((i) =>
+              'str' in i ? [i] : [],
+            );
+            const all = compact(items.map((i) => i.str).join(''));
+            if (others.some((o) => !all.includes(compact(o.text))))
+              return false;
+            const left = compact(
+              items
+                .filter(
+                  (i) =>
+                    Math.abs(i.transform[5] - line.baseline) <
+                      line.size * 0.4 &&
+                    i.transform[4] >= line.x - line.size * 0.5 &&
+                    i.transform[4] <= line.x + line.width,
+                )
+                .map((i) => i.str)
+                .join(''),
+            );
+            return left === compact(value);
+          } finally {
+            void task.destroy();
+          }
+        },
+        // Text we cannot rewrite in place (e.g. inside a form XObject) is
+        // covered with its own background colour instead.
+        fallback: async (pdf) => {
+          pdf.getPage(page).drawRectangle({
+            x: line.x - 1,
+            y: line.baseline - line.size * 0.26,
+            width: line.width + 2,
+            height: line.size * 1.2,
+            color: toRgb(bg),
+          });
+          await draw(pdf);
+        },
+      },
+    );
+  };
+
+  const startEdit = (line: TextLine) => {
+    if (!canvas.current) return;
+    const { bg, ink } = sampleColors(canvas.current, line);
+    setEditing({ line, value: line.text, bg, ink });
+  };
+
+  const commitDraft = async () => {
+    if (!draft || committing.current) return;
+    const { x, y, value } = draft;
+    setDraft(null);
+    if (!value.trim()) return;
+    committing.current = true;
+    try {
+      await placeText(x, y, value);
+    } finally {
+      committing.current = false;
+    }
+  };
+  const placeText = async (x: number, y: number, value: string) => {
+    const view = viewport.current;
+    if (!view) return;
+    // The box's top-left is where the user clicked; the baseline sits ~0.8em lower.
+    const at = coordinate({
+      x,
+      y: y + (size * 0.8 * view.scale) / view.height,
+    });
+    const components = color
+      .match(/[a-f\d]{2}/gi)!
+      .map((c) => parseInt(c, 16) / 255);
+    await operation(async (pdf) => {
+      const p = pdf.getPage(page);
+      const font = await embedText(pdf, value, StandardFonts.Helvetica);
+      p.drawText(value, {
+        x: at.x,
+        y: at.y,
+        size,
+        font,
+        color: rgb(components[0], components[1], components[2]),
+        rotate: p.getRotation(),
+      });
+    }, 'Text added. Download the PDF to keep a file copy.');
+  };
+
   const pointFor = (e: React.PointerEvent<SVGSVGElement>): Point => {
     const rect = e.currentTarget.getBoundingClientRect();
     return {
@@ -351,6 +806,8 @@ export default function Pdf(props: ToolProps) {
     };
   };
   const previewReady = preview?.bytes === data.bytes && preview?.page === page;
+  const view =
+    lines?.bytes === data.bytes && lines?.page === page ? lines.view : null;
   const canEdit = store.ready && !busy && !rendering && previewReady;
   return (
     <ToolShell
@@ -358,6 +815,7 @@ export default function Pdf(props: ToolProps) {
       name="NinjaPDF"
       subtitle="Organize pages, fill forms, and add the details that matter."
       hasUnsavedChanges={fieldsDirty}
+      compact={!!data.bytes}
       status={
         busy
           ? 'Processing…'
@@ -430,17 +888,8 @@ export default function Pdf(props: ToolProps) {
             <button
               className="btn btn-secondary"
               disabled={!canEdit || !history.length || fieldsDirty}
-              onClick={async () => {
-                const previous = history[history.length - 1];
-                if (
-                  previous &&
-                  (await update((s) => ({ ...s, bytes: previous })))
-                ) {
-                  setHistory((h) => h.slice(0, -1));
-                  setPage(0);
-                  setMessage('Last PDF edit undone.');
-                }
-              }}
+              title="Undo (Ctrl+Z)"
+              onClick={() => void undo()}
             >
               <Undo2 size={16} />
               Undo
@@ -461,14 +910,43 @@ export default function Pdf(props: ToolProps) {
           {message}
         </div>
       )}
+      <div
+        className="tool-pdf-drop"
+        data-dropping={dropping || undefined}
+        onDragOver={(e) => {
+          if (dragFrom !== null || !e.dataTransfer.types.includes('Files')) return;
+          e.preventDefault();
+          setDropping(true);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropping(false);
+        }}
+        onDrop={(e) => {
+          if (dragFrom !== null) return;
+          e.preventDefault();
+          setDropping(false);
+          const file = [...e.dataTransfer.files].find(
+            (f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name),
+          );
+          if (file) void loadFile(file);
+          else if (e.dataTransfer.files.length)
+            setMessage('That is not a PDF. Drop a .pdf file to open it.');
+        }}
+      >
+      {dropping && (
+        <div className="tool-pdf-dropcue" aria-hidden="true">
+          <Upload size={28} />
+          Drop to open this PDF
+        </div>
+      )}
       {!data.bytes ? (
         <section className="tool-panel tool-empty tool-pdf-empty">
           <AppMark app="pdf" size="lg" />
-          <h2>Your PDF, your browser.</h2>
+          <h2>Drop a PDF here to start editing</h2>
           <p>
-            Open a PDF to merge, split, rotate, annotate, or fill standard
-            forms. Files stay on this device, and one working draft is saved
-            automatically.
+            Change existing text, add text and signatures, redact, fill forms,
+            and reorder, rotate, merge or split pages. Files stay on this
+            device, and your working draft is saved automatically.
           </p>
           <button
             className="btn btn-primary"
@@ -479,8 +957,8 @@ export default function Pdf(props: ToolProps) {
             Open PDF
           </button>
           <p className="tool-hint">
-            Up to 30 MB. Existing paragraph text and scanned text are not
-            directly editable.
+            Up to 30 MB. Scanned pages are images, so they have no editable
+            text.
           </p>
         </section>
       ) : (
@@ -496,58 +974,36 @@ export default function Pdf(props: ToolProps) {
                 }
               />
             </label>
-            <label>
-              Editing tool
-              <select
-                value={mode}
-                disabled={!canEdit || fieldsDirty}
-                onChange={(e) => {
-                  setMode(e.target.value as Mode);
-                  setPoints([]);
-                }}
-              >
-                <option value="view">View / organize pages</option>
-                <option value="text">Add text</option>
-                <option value="highlight">Highlight area</option>
-                <option value="draw">Draw / sign</option>
-                <option value="image">Add image</option>
-              </select>
-            </label>
-            {mode === 'text' && (
-              <>
-                <label>
-                  Text to add
-                  <textarea
-                    value={text}
-                    rows={3}
-                    onChange={(e) => setText(e.target.value)}
-                  />
-                </label>
-                <label>
-                  Font size
-                  <input
-                    type="number"
-                    value={size}
-                    min="6"
-                    max="144"
-                    onChange={(e) =>
-                      setSize(
-                        Math.min(144, Math.max(6, Number(e.target.value))),
-                      )
-                    }
-                  />
-                </label>
-              </>
-            )}
             {(mode === 'text' || mode === 'draw') && (
-              <label>
-                Ink color
-                <input
-                  type="color"
-                  value={color}
-                  onChange={(e) => setColor(e.target.value)}
-                />
-              </label>
+              <div className="tool-pdf-options">
+                <h2>{mode === 'text' ? 'New text' : 'Pen'}</h2>
+                <div className="tool-pdf-pair">
+                  {mode === 'text' && (
+                    <label>
+                      Font size
+                      <input
+                        type="number"
+                        value={size}
+                        min="6"
+                        max="144"
+                        onChange={(e) =>
+                          setSize(
+                            Math.min(144, Math.max(6, Number(e.target.value))),
+                          )
+                        }
+                      />
+                    </label>
+                  )}
+                  <label>
+                    Ink color
+                    <input
+                      type="color"
+                      value={color}
+                      onChange={(e) => setColor(e.target.value)}
+                    />
+                  </label>
+                </div>
+              </div>
             )}
             {mode === 'image' && (
               <label>
@@ -573,21 +1029,54 @@ export default function Pdf(props: ToolProps) {
                 />
               </label>
             )}
-            <p className="tool-muted tool-hint">
-              {mode === 'text'
-                ? 'Click the page to place text at its baseline. Latin characters supported.'
-                : mode === 'draw'
-                  ? 'Draw on the page with your mouse, pen, or finger. Drawn signatures are visual marks, not digital certificates.'
-                  : mode === 'highlight'
-                    ? 'Drag over an area to highlight it. Highlighting does not remove or redact content.'
-                    : mode === 'image'
-                      ? 'Choose an image, then drag a rectangle on the page to place it.'
-                      : 'Choose a tool to add content. The original text remains intact.'}
-            </p>
             <hr />
             <h2>
               Page {page + 1} of {count}
             </h2>
+            <ol className="tool-pdf-thumbs" aria-label="Pages">
+              {Array.from({ length: count }, (_, i) => (
+                <li key={i}>
+                  <button
+                    type="button"
+                    className="tool-pdf-thumb"
+                    aria-label={`Go to page ${i + 1}`}
+                    aria-current={i === page ? 'page' : undefined}
+                    draggable={canEdit && !fieldsDirty}
+                    data-drop={
+                      dragFrom !== null && dragFrom !== i ? 'target' : undefined
+                    }
+                    title="Click to view. Drag to reorder."
+                    onClick={() => setPage(i)}
+                    onDragStart={(e) => {
+                      setDragFrom(i);
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('text/plain', String(i));
+                    }}
+                    onDragEnd={() => setDragFrom(null)}
+                    onDragOver={(e) => {
+                      if (dragFrom === null) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                    }}
+                    onDrop={(e) => {
+                      if (dragFrom === null) return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const from = dragFrom;
+                      setDragFrom(null);
+                      movePage(from, i);
+                    }}
+                  >
+                    {thumbs?.bytes === data.bytes && thumbs.urls[i] ? (
+                      <img src={thumbs.urls[i]} alt="" draggable={false} />
+                    ) : (
+                      <span className="tool-pdf-thumb__blank" />
+                    )}
+                    <span className="tool-pdf-thumb__num">{i + 1}</span>
+                  </button>
+                </li>
+              ))}
+            </ol>
             <div className="tool-pdf-pair">
               <button
                 className="btn btn-secondary"
@@ -644,6 +1133,35 @@ export default function Pdf(props: ToolProps) {
               >
                 <ArrowDown size={15} />
                 Move later
+              </button>
+              <button
+                className="btn btn-secondary"
+                disabled={!canEdit || fieldsDirty}
+                onClick={() =>
+                  void operation(async (pdf) => {
+                    requireStatic(pdf);
+                    const [copy] = await pdf.copyPages(pdf, [page]);
+                    pdf.insertPage(page + 1, copy);
+                    setPage(page + 1);
+                  }, 'Page duplicated.')
+                }
+              >
+                <Copy size={15} />
+                Duplicate
+              </button>
+              <button
+                className="btn btn-secondary"
+                disabled={!canEdit || fieldsDirty}
+                onClick={() =>
+                  void operation((pdf) => {
+                    const { width, height } = pdf.getPage(page).getSize();
+                    pdf.insertPage(page + 1, [width, height]);
+                    setPage(page + 1);
+                  }, 'Blank page added after this one.')
+                }
+              >
+                <FilePlus size={15} />
+                Blank page
               </button>
             </div>
             <hr />
@@ -793,6 +1311,33 @@ export default function Pdf(props: ToolProps) {
             )}
           </aside>
           <section>
+            <div
+              className="tool-pdf-tools"
+              role="toolbar"
+              aria-label="Editing tools"
+            >
+              {TOOLS.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  className="tool-pdf-tool"
+                  aria-pressed={mode === id}
+                  disabled={!store.ready || busy || fieldsDirty}
+                  onClick={() => {
+                    setMode(id);
+                    setPoints([]);
+                  }}
+                >
+                  <Icon size={16} aria-hidden="true" />
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="tool-pdf-hint" role="status">
+              {fieldsDirty
+                ? 'Apply or discard your form values to keep editing.'
+                : TOOL_HINT[mode]}
+            </p>
             <div className="tool-pdf-toolbar">
               <button
                 className="btn btn-secondary btn-icon"
@@ -825,6 +1370,38 @@ export default function Pdf(props: ToolProps) {
               >
                 <ChevronRight size={17} />
               </button>
+              <div className="tool-pdf-zoom" role="group" aria-label="Zoom">
+                <button
+                  className="btn btn-secondary btn-icon"
+                  aria-label="Zoom out"
+                  title="Zoom out (Ctrl+-)"
+                  disabled={zoom <= 0.5}
+                  onClick={() =>
+                    setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))
+                  }
+                >
+                  <ZoomOut size={16} />
+                </button>
+                <button
+                  className="btn btn-secondary tool-pdf-zoom__level"
+                  title="Fit to width"
+                  aria-label={`Zoom ${Math.round(zoom * 100)}%, reset to fit`}
+                  onClick={() => setZoom(1)}
+                >
+                  {Math.round(zoom * 100)}%
+                </button>
+                <button
+                  className="btn btn-secondary btn-icon"
+                  aria-label="Zoom in"
+                  title="Zoom in (Ctrl++)"
+                  disabled={zoom >= 3}
+                  onClick={() =>
+                    setZoom((z) => Math.min(3, +(z + 0.25).toFixed(2)))
+                  }
+                >
+                  <ZoomIn size={16} />
+                </button>
+              </div>
               <span className="tool-muted tool-pdf-state" role="status">
                 {rendering || busy || !previewReady
                   ? 'Preparing page…'
@@ -835,9 +1412,119 @@ export default function Pdf(props: ToolProps) {
               <div
                 className="tool-pdf-page"
                 data-render-version={renderVersion}
+                data-zoomed={zoom > 1 || undefined}
+                style={baseWidth ? { width: `${baseWidth * zoom}px` } : undefined}
               >
                 <canvas ref={canvas} aria-label={`PDF page ${page + 1}`} />
-                {mode !== 'view' && canEdit && !fieldsDirty && (
+                {mode === 'edit' && canEdit && !fieldsDirty && view && (
+                  <div className="tool-pdf-textlayer">
+                    {(lines?.bytes === data.bytes && lines?.page === page
+                      ? lines.items
+                      : []
+                    ).map((line) =>
+                      editing?.line === line ? (
+                        <input
+                          key={line.id}
+                          className={`tool-pdf-textedit tool-pdf-font--${line.kind}`}
+                          aria-label="Edit text"
+                          autoFocus
+                          spellCheck
+                          value={editing.value}
+                          style={{
+                            left: `${(line.left / view.width) * 100}%`,
+                            top: `${(line.top / view.height) * 100}%`,
+                            minWidth: `${(line.boxWidth / view.width) * 100}%`,
+                            height: `${(line.boxHeight / view.height) * 100}%`,
+                            fontSize: `${line.size * view.scale * cssScale}px`,
+                            fontWeight: line.bold ? 700 : 400,
+                            fontStyle: line.italic ? 'italic' : 'normal',
+                            color: hex(editing.ink),
+                            background: hex(editing.bg),
+                          }}
+                          onChange={(e) =>
+                            setEditing({ ...editing, value: e.target.value })
+                          }
+                          onBlur={() => void commitLine()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') void commitLine();
+                            if (e.key === 'Escape') {
+                              e.stopPropagation();
+                              setEditing(null);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <button
+                          key={line.id}
+                          type="button"
+                          className="tool-pdf-textline"
+                          aria-label={`Edit text: ${line.text}`}
+                          title="Click to edit"
+                          style={{
+                            left: `${(line.left / view.width) * 100}%`,
+                            top: `${(line.top / view.height) * 100}%`,
+                            width: `${(line.boxWidth / view.width) * 100}%`,
+                            height: `${(line.boxHeight / view.height) * 100}%`,
+                          }}
+                          onClick={() => startEdit(line)}
+                        />
+                      ),
+                    )}
+                  </div>
+                )}
+                {mode === 'text' && canEdit && !fieldsDirty && view && (
+                  <div
+                    className="tool-pdf-textlayer tool-pdf-textlayer--add"
+                    aria-label="PDF annotation surface"
+                    onPointerDown={(e) => {
+                      if (e.target !== e.currentTarget || e.button !== 0) return;
+                      e.preventDefault();
+                      if (draft?.value.trim()) {
+                        void commitDraft();
+                        return;
+                      }
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setDraft({
+                        x: (e.clientX - rect.left) / rect.width,
+                        y: (e.clientY - rect.top) / rect.height,
+                        value: '',
+                      });
+                    }}
+                  >
+                    {draft && (
+                      <input
+                        className="tool-pdf-textedit tool-pdf-font--sans"
+                        aria-label="New text"
+                        placeholder="Type here"
+                        autoFocus
+                        value={draft.value}
+                        style={{
+                          left: `${draft.x * 100}%`,
+                          top: `${draft.y * 100}%`,
+                          fontSize: `${size * view.scale * cssScale}px`,
+                          color,
+                        }}
+                        onChange={(e) =>
+                          setDraft({ ...draft, value: e.target.value })
+                        }
+                        onBlur={() => void commitDraft()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') void commitDraft();
+                          if (e.key === 'Escape') {
+                            e.stopPropagation();
+                            setDraft(null);
+                          }
+                        }}
+                      />
+                    )}
+                  </div>
+                )}
+                {(mode === 'highlight' ||
+                  mode === 'redact' ||
+                  mode === 'draw' ||
+                  mode === 'image') &&
+                  canEdit &&
+                  !fieldsDirty && (
                   <svg
                     className="tool-pdf-overlay"
                     aria-label="PDF annotation surface"
@@ -886,8 +1573,8 @@ export default function Pdf(props: ToolProps) {
                           height={Math.abs(
                             points[points.length - 1].y - points[0].y,
                           )}
-                          fill="#facc15"
-                          opacity=".35"
+                          fill={mode === 'redact' ? '#000' : mode === 'image' ? '#2563eb' : '#facc15'}
+                          opacity={mode === 'redact' ? '.7' : '.35'}
                         />
                       ))}
                   </svg>
@@ -897,6 +1584,7 @@ export default function Pdf(props: ToolProps) {
           </section>
         </div>
       )}
+      </div>
     </ToolShell>
   );
 }

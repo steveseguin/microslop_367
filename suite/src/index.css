@@ -3982,3 +3982,26 @@ input[type="color"]::-moz-color-swatch {
 @media (max-width: 640px) {
   .dashboard-create__label--short { display: block; }
 }
+
+/* Phones: one header row in the editors. The app switcher is a desktop
+   convenience (the back link reaches every app), and it was the control that
+   pushed the actions onto a second, mostly empty row. */
+@media (max-width: 640px) {
+  .suite-header:not(.tool-header) {
+    flex-wrap: nowrap;
+  }
+
+  .suite-header:not(.tool-header) .suite-app-switcher {
+    display: none;
+  }
+
+  .suite-header:not(.tool-header) .suite-header__document {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .suite-header:not(.tool-header) .header-actions {
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
+}

@@ -19,14 +19,32 @@ import {
 } from '../utils/toolStorage';
 import {
   CURRENCIES,
+  dayLabel,
   duration,
   EMPTY_TIME,
+  entryAmount,
+  groupByDay,
+  hoursMinutes,
+  inRange,
   invoiceTotals,
+  lastRateFor,
   lineAmount,
+  minorDigits,
   money,
+  rangeBounds,
+  parseDay,
+  rangeCaption,
+  summarize,
+  TIME_RANGES,
   validTimeBackup,
 } from '../utils/time';
-import type { Invoice, TimeEntry } from '../utils/time';
+import type {
+  Invoice,
+  ReportRow,
+  TimeEntry,
+  TimeRange,
+} from '../utils/time';
+import '../styles/time.css';
 
 function InvoicePaper({ invoice }: { invoice: Invoice }) {
   const total = invoiceTotals(invoice);
@@ -118,14 +136,87 @@ function InvoicePaper({ invoice }: { invoice: Invoice }) {
   );
 }
 
+const shortDate = (date: string) =>
+  parseDay(date).toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+
+function ReportTable({
+  title,
+  column,
+  rows,
+  currency,
+}: {
+  title: string;
+  column: string;
+  rows: ReportRow[];
+  currency: string;
+}) {
+  const max = Math.max(1, ...rows.map((r) => r.seconds));
+  const seconds = rows.reduce((sum, r) => sum + r.seconds, 0);
+  const amount = rows.reduce((sum, r) => sum + r.amount, 0);
+  return (
+    <section className="tool-panel time-report">
+      <h2>{title}</h2>
+      <table className="time-report-table">
+        <thead>
+          <tr>
+            <th scope="col">{column}</th>
+            <th scope="col">Hours</th>
+            <th scope="col">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.key}>
+              <td>
+                <span className="time-report-name">
+                  {row.label}
+                  {row.detail && <small>{row.detail}</small>}
+                </span>
+                <span
+                  className="time-bar"
+                  aria-hidden="true"
+                  style={{ width: `${(row.seconds / max) * 100}%` }}
+                >
+                  <span
+                    className="time-bar__billable"
+                    style={{
+                      width: `${row.seconds ? (row.billableSeconds / row.seconds) * 100 : 0}%`,
+                    }}
+                  />
+                </span>
+              </td>
+              <td>{(row.seconds / 3600).toFixed(2)}</td>
+              <td>{money(row.amount, currency)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th scope="row">Total</th>
+            <td>{(seconds / 3600).toFixed(2)}</td>
+            <td>{money(amount, currency)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </section>
+  );
+}
+
 export default function Time(props: ToolProps) {
   const store = useToolStorage('time', EMPTY_TIME);
   const { data, update } = store;
-  const [tab, setTab] = useState<'time' | 'invoices'>('time');
+  const [tab, setTab] = useState<'time' | 'invoices' | 'reports'>('time');
+  const [range, setRange] = useState<TimeRange>('all');
   const [description, setDescription] = useState('');
   const [client, setClient] = useState('');
   const [project, setProject] = useState('');
   const [rate, setRate] = useState('75');
+  // Once the user types a rate we never overwrite it with a client default.
+  const [rateTouched, setRateTouched] = useState(false);
   const [billable, setBillable] = useState(true);
   const [hours, setHours] = useState('1');
   const [date, setDate] = useState(localDate());
@@ -137,6 +228,8 @@ export default function Time(props: ToolProps) {
   const [now, setNow] = useState(Date.now());
   const [undo, setUndo] = useState<TimeEntry | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLElement>(null);
+  const descriptionRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!data.timer) return;
     const timer = window.setInterval(() => setNow(Date.now()), 500);
@@ -147,14 +240,67 @@ export default function Time(props: ToolProps) {
   const billed = new Set(
     data.invoices.flatMap((item) => item.lines.map((line) => line.id)),
   );
-  const visible = data.entries
-    .filter((entry) =>
-      `${entry.description} ${entry.project} ${entry.client} ${entry.date}`
-        .toLowerCase()
-        .includes(filter.toLowerCase()),
-    )
+  const today = localDate();
+  const bounds = rangeBounds(range);
+  const rangeLabel =
+    TIME_RANGES.find((r) => r.value === range)?.label ?? 'All time';
+  const currency = data.currency;
+  // Newest entries first, both across days and within a day.
+  const inPeriod = [...data.entries]
+    .reverse()
+    .filter((entry) => inRange(entry.date, bounds))
     .sort((a, b) => b.date.localeCompare(a.date));
+  const visible = inPeriod.filter((entry) =>
+    `${entry.description} ${entry.project} ${entry.client} ${entry.date}`
+      .toLowerCase()
+      .includes(filter.toLowerCase()),
+  );
+  const days = groupByDay(visible, currency);
   const unbilled = data.entries.filter((e) => e.billable && !billed.has(e.id));
+  const sumSeconds = (list: TimeEntry[]) =>
+    list.reduce((sum, e) => sum + e.seconds, 0);
+  const periodSeconds = sumSeconds(inPeriod);
+  const todaySeconds =
+    sumSeconds(data.entries.filter((e) => e.date === today)) +
+    (data.timer ? Math.max(0, (now - data.timer.started) / 1000) : 0);
+  const periodBillable = sumSeconds(inPeriod.filter((e) => e.billable));
+  const periodAmount = inPeriod.reduce(
+    (sum, e) => sum + entryAmount(e, currency),
+    0,
+  );
+  const periodUnbilled = inPeriod.filter(
+    (e) => e.billable && !billed.has(e.id),
+  );
+  const unpaid = data.invoices.filter((i) => !i.paid);
+  const outstanding = unpaid
+    .filter((i) => i.currency === currency)
+    .reduce((sum, i) => sum + invoiceTotals(i).total, 0);
+  const clients = [...new Set(data.entries.map((e) => e.client))];
+  const projects = [
+    ...new Set(
+      data.entries
+        .filter(
+          (e) =>
+            e.project &&
+            (!client.trim() ||
+              e.client.trim().toLowerCase() === client.trim().toLowerCase()),
+        )
+        .map((e) => e.project),
+    ),
+  ];
+  const byClient = summarize(inPeriod, 'client', currency);
+  const byProject = summarize(inPeriod, 'project', currency);
+  const resetForm = () => {
+    setDescription('');
+    setEditing(null);
+    setRateTouched(false);
+  };
+  const chooseClient = (value: string) => {
+    setClient(value);
+    if (rateTouched) return;
+    const last = lastRateFor(data.entries, value);
+    if (last !== null) setRate(String(last));
+  };
   const draftEntry = (): TimeEntry | null => {
     if (
       !description.trim() ||
@@ -196,14 +342,12 @@ export default function Time(props: ToolProps) {
           : [...s.entries, entry],
       }))
     ) {
-      setDescription('');
-      setEditing(null);
+      resetForm();
       setMessage('Time entry saved.');
     }
   };
-  const start = async () => {
-    const entry = draftEntry();
-    if (!entry || data.timer) return;
+  const beginTimer = async (entry: TimeEntry) => {
+    if (data.timer) return;
     const started = Date.now();
     setNow(started);
     if (
@@ -211,8 +355,57 @@ export default function Time(props: ToolProps) {
         ...s,
         timer: { ...entry, date: localDate(), started },
       }))
-    )
+    ) {
+      setRateTouched(false);
       setMessage('Timer running. It keeps time even when this tab is closed.');
+    }
+  };
+  const start = async () => {
+    const entry = draftEntry();
+    if (entry) await beginTimer(entry);
+  };
+  const resume = async (source: TimeEntry) => {
+    // Prefill the form too, so it shows what is being tracked.
+    setEditing(null);
+    setDescription(source.description);
+    setClient(source.client);
+    setProject(source.project);
+    setRate(String(source.rate));
+    setBillable(source.billable);
+    await beginTimer({
+      id: crypto.randomUUID(),
+      description: source.description,
+      client: source.client,
+      project: source.project,
+      rate: source.rate,
+      billable: source.billable,
+      date: localDate(),
+      seconds: 0,
+    });
+  };
+  const exportReport = () => {
+    const rows: (string | number)[][] = [
+      ['Group', 'Client', 'Project', 'Hours', 'Billable hours', `Amount (${currency})`],
+    ];
+    const digits = minorDigits(currency);
+    for (const [group, list] of [
+      ['Client', byClient],
+      ['Project', byProject],
+    ] as const)
+      for (const r of list)
+        rows.push([
+          group,
+          group === 'Client' ? r.label : r.detail,
+          group === 'Project' ? r.label : '',
+          (r.seconds / 3600).toFixed(2),
+          (r.billableSeconds / 3600).toFixed(2),
+          (r.amount / 10 ** digits).toFixed(digits),
+        ]);
+    downloadFile(
+      `ninjatime-report-${range}.csv`,
+      '﻿' + rows.map((row) => row.map(csvCell).join(',')).join('\r\n'),
+      'text/csv;charset=utf-8',
+    );
   };
   const stop = async () => {
     if (!data.timer) return;
@@ -233,8 +426,10 @@ export default function Time(props: ToolProps) {
         timer: null,
         entries: [...s.entries, entry],
       }))
-    )
+    ) {
+      setDescription('');
       setMessage('Timer stopped and saved.');
+    }
   };
   const createInvoice = async () => {
     const lines = unbilled.filter((e) => selected.includes(e.id));
@@ -339,6 +534,13 @@ export default function Time(props: ToolProps) {
           >
             Invoices ({data.invoices.length})
           </button>
+          <button
+            role="tab"
+            aria-selected={tab === 'reports'}
+            onClick={() => setTab('reports')}
+          >
+            Reports
+          </button>
         </div>
         <div className="tool-row">
           <button
@@ -394,33 +596,70 @@ export default function Time(props: ToolProps) {
           {message}
         </div>
       )}
-      {tab === 'time' ? (
-        <div className="tool-stack">
-          <div className="tool-metrics">
-            <div className="tool-metric">
-              <span>Today</span>
-              <strong>
-                {duration(
-                  data.entries
-                    .filter((e) => e.date === localDate())
-                    .reduce((sum, e) => sum + e.seconds, 0),
-                )}
-              </strong>
-            </div>
-            <div className="tool-metric">
-              <span>Unbilled hours</span>
-              <strong>
-                {(
-                  unbilled.reduce((sum, e) => sum + e.seconds, 0) / 3600
-                ).toFixed(2)}
-              </strong>
-            </div>
-            <div className="tool-metric">
-              <span>Invoices unpaid</span>
-              <strong>{data.invoices.filter((i) => !i.paid).length}</strong>
-            </div>
+      {(tab === 'time' || tab === 'reports') && (
+        <div className="time-rangebar">
+          <label className="time-range">
+            <span>Date range</span>
+            <select
+              value={range}
+              onChange={(e) => setRange(e.target.value as TimeRange)}
+            >
+              {TIME_RANGES.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="tool-muted time-range__caption">
+            {rangeCaption(bounds)}
+          </span>
+          {tab === 'reports' && (
+            <button
+              className="btn btn-secondary time-rangebar__action"
+              disabled={!inPeriod.length}
+              onClick={exportReport}
+            >
+              <Download size={15} /> Export report CSV
+            </button>
+          )}
+        </div>
+      )}
+      {(tab === 'time' || tab === 'reports') && (
+        <div className="tool-metrics time-metrics">
+          <div className="tool-metric">
+            <span>Today</span>
+            <strong>{hoursMinutes(todaySeconds)} h</strong>
+            <small>{data.timer ? 'Including running timer' : ' '}</small>
           </div>
-          <section className="tool-panel">
+          <div className="tool-metric">
+            <span>Tracked · {rangeLabel}</span>
+            <strong>{hoursMinutes(periodSeconds)} h</strong>
+            <small>
+              {periodSeconds
+                ? `${Math.round((periodBillable / periodSeconds) * 100)}% billable`
+                : 'No time yet'}
+            </small>
+          </div>
+          <div className="tool-metric">
+            <span>Billable · {rangeLabel}</span>
+            <strong>{money(periodAmount, currency)}</strong>
+            <small>
+              {(sumSeconds(periodUnbilled) / 3600).toFixed(2)} h not invoiced
+            </small>
+          </div>
+          <div className="tool-metric">
+            <span>Unpaid invoices</span>
+            <strong>{unpaid.length}</strong>
+            <small>
+              {unpaid.length ? `${money(outstanding, currency)} due` : 'All paid up'}
+            </small>
+          </div>
+        </div>
+      )}
+      {tab === 'time' && (
+        <div className="tool-stack">
+          <section className="tool-panel time-entry-panel" ref={formRef}>
             <h2>{editing ? 'Edit time entry' : 'What are you working on?'}</h2>
             <fieldset
               className="tool-fieldset"
@@ -430,8 +669,16 @@ export default function Time(props: ToolProps) {
                 <label>
                   Description
                   <input
+                    ref={descriptionRef}
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' || e.nativeEvent.isComposing)
+                        return;
+                      e.preventDefault();
+                      void (editing ? addManual() : start());
+                    }}
+                    enterKeyHint={editing ? 'done' : 'go'}
                     placeholder="Website design"
                   />
                 </label>
@@ -439,7 +686,7 @@ export default function Time(props: ToolProps) {
                   Client
                   <input
                     value={client}
-                    onChange={(e) => setClient(e.target.value)}
+                    onChange={(e) => chooseClient(e.target.value)}
                     list="time-clients"
                     placeholder="Client name"
                   />
@@ -449,6 +696,7 @@ export default function Time(props: ToolProps) {
                   <input
                     value={project}
                     onChange={(e) => setProject(e.target.value)}
+                    list="time-projects"
                     placeholder="Optional"
                   />
                 </label>
@@ -460,13 +708,21 @@ export default function Time(props: ToolProps) {
                     max="1000000"
                     step="0.01"
                     value={rate}
-                    onChange={(e) => setRate(e.target.value)}
+                    onChange={(e) => {
+                      setRate(e.target.value);
+                      setRateTouched(true);
+                    }}
                   />
                 </label>
               </div>
               <datalist id="time-clients">
-                {[...new Set(data.entries.map((e) => e.client))].map((c) => (
+                {clients.map((c) => (
                   <option key={c}>{c}</option>
+                ))}
+              </datalist>
+              <datalist id="time-projects">
+                {projects.map((p) => (
+                  <option key={p}>{p}</option>
                 ))}
               </datalist>
               <label className="tool-check">
@@ -479,15 +735,17 @@ export default function Time(props: ToolProps) {
               </label>
             </fieldset>
             {!editing && (
-              <div className="tool-timer-bar">
+              <div
+                className={`tool-timer-bar${data.timer ? ' time-timer--running' : ''}`}
+              >
                 <strong className="tool-timer" aria-label="Elapsed time">
                   {duration(data.timer ? (now - data.timer.started) / 1000 : 0)}
                 </strong>
-                {data.timer && (
-                  <span className="tool-muted tool-timer-label">
-                    {data.timer.description} · {data.timer.client}
-                  </span>
-                )}
+                <span className="tool-muted tool-timer-label">
+                  {data.timer
+                    ? `${data.timer.description} · ${data.timer.client}${data.timer.project ? ` · ${data.timer.project}` : ''}`
+                    : 'Press Enter in Description to start'}
+                </span>
                 <button
                   className={`btn ${data.timer ? 'btn-danger' : 'btn-primary'}`}
                   disabled={!store.ready}
@@ -532,13 +790,7 @@ export default function Time(props: ToolProps) {
                     {editing ? 'Save entry' : 'Add manual entry'}
                   </button>
                   {editing && (
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => {
-                        setEditing(null);
-                        setDescription('');
-                      }}
-                    >
+                    <button className="btn btn-secondary" onClick={resetForm}>
                       Cancel edit
                     </button>
                   )}
@@ -593,116 +845,241 @@ export default function Time(props: ToolProps) {
             )}
             {!visible.length ? (
               <div className="tool-empty">
-                {data.entries.length
-                  ? 'No entries match your search.'
-                  : 'Start a timer or add your first time entry.'}
+                {!data.entries.length ? (
+                  'Start a timer or add your first time entry.'
+                ) : !inPeriod.length ? (
+                  <>
+                    <p>No time entries {rangeLabel.toLowerCase()}.</p>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => setRange('all')}
+                    >
+                      Show all time
+                    </button>
+                  </>
+                ) : (
+                  'No entries match your search.'
+                )}
               </div>
             ) : (
               <div className="tool-table-wrap">
-                <table className="tool-table">
+                <table className="tool-table time-entries">
                   <thead>
                     <tr>
-                      <th>Select</th>
-                      <th>Work</th>
-                      <th>Date</th>
-                      <th>Hours</th>
-                      <th>Rate</th>
-                      <th>Status</th>
-                      <th>Actions</th>
+                      <th scope="col">
+                        <span className="time-sr">Select</span>
+                      </th>
+                      <th scope="col">Work</th>
+                      <th scope="col" className="time-num">
+                        Duration
+                      </th>
+                      <th scope="col" className="time-num">
+                        Amount
+                      </th>
+                      <th scope="col">Status</th>
+                      <th scope="col">
+                        <span className="time-sr">Actions</span>
+                      </th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {visible.map((entry) => (
-                      <tr key={entry.id}>
-                        <td>
-                          <input
-                            aria-label={`Select ${entry.description}`}
-                            type="checkbox"
-                            disabled={!entry.billable || billed.has(entry.id)}
-                            checked={selected.includes(entry.id)}
-                            onChange={(e) =>
-                              setSelected((s) =>
-                                e.target.checked
-                                  ? [...s, entry.id]
-                                  : s.filter((id) => id !== entry.id),
-                              )
-                            }
-                          />
-                        </td>
-                        <td>
-                          {entry.description}
-                          <small>
-                            {entry.client}
-                            {entry.project ? ` / ${entry.project}` : ''}
-                          </small>
-                        </td>
-                        <td>{entry.date}</td>
-                        <td>{(entry.seconds / 3600).toFixed(2)}</td>
-                        <td>{entry.rate.toFixed(2)}</td>
-                        <td>
-                          {billed.has(entry.id)
-                            ? 'Invoiced'
-                            : entry.billable
-                              ? 'Unbilled'
-                              : 'Non-billable'}
-                        </td>
-                        <td>
-                          <div className="tool-row">
-                            <button
-                              className="btn btn-secondary btn-icon"
-                              disabled={
-                                billed.has(entry.id) ||
-                                !!data.timer ||
-                                !store.ready
-                              }
-                              aria-label={`Edit ${entry.description}`}
-                              onClick={() => {
-                                setEditing(entry.id);
-                                setDescription(entry.description);
-                                setClient(entry.client);
-                                setProject(entry.project);
-                                setRate(String(entry.rate));
-                                setBillable(entry.billable);
-                                setDate(entry.date);
-                                setHours(String(entry.seconds / 3600));
-                              }}
-                            >
-                              <Pencil size={14} />
-                            </button>
-                            <button
-                              className="btn btn-secondary btn-icon"
-                              disabled={billed.has(entry.id) || !store.ready}
-                              aria-label={`Delete ${entry.description}`}
-                              onClick={async () => {
-                                if (
-                                  await update((s) => ({
-                                    ...s,
-                                    entries: s.entries.filter(
-                                      (e) => e.id !== entry.id,
-                                    ),
-                                  }))
-                                ) {
-                                  setUndo(entry);
-                                  setSelected((s) =>
-                                    s.filter((id) => id !== entry.id),
-                                  );
-                                  if (editing === entry.id) setEditing(null);
-                                }
-                              }}
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </td>
+                  {days.map((day) => (
+                    <tbody key={day.date}>
+                      <tr className="time-day">
+                        <th scope="rowgroup" colSpan={6}>
+                          <span className="time-day__label">
+                            {dayLabel(day.date)}
+                            {day.date === today ||
+                            dayLabel(day.date) === 'Yesterday' ? (
+                              <small>{shortDate(day.date)}</small>
+                            ) : null}
+                          </span>
+                          <span className="time-day__total">
+                            {hoursMinutes(day.seconds)} h
+                            {day.amount > 0 && (
+                              <> · {money(day.amount, currency)}</>
+                            )}
+                          </span>
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
+                      {day.entries.map((entry) => {
+                        const isBilled = billed.has(entry.id);
+                        const status = isBilled
+                          ? 'Invoiced'
+                          : entry.billable
+                            ? 'Unbilled'
+                            : 'Non-billable';
+                        return (
+                          <tr
+                            key={entry.id}
+                            className={`time-entry${editing === entry.id ? ' time-entry--editing' : ''}`}
+                          >
+                            <td className="time-entry__select">
+                              <input
+                                aria-label={`Select ${entry.description}`}
+                                type="checkbox"
+                                disabled={!entry.billable || isBilled}
+                                checked={selected.includes(entry.id)}
+                                onChange={(e) =>
+                                  setSelected((s) =>
+                                    e.target.checked
+                                      ? [...s, entry.id]
+                                      : s.filter((id) => id !== entry.id),
+                                  )
+                                }
+                              />
+                            </td>
+                            <td className="time-entry__work">
+                              <span className="time-entry__desc">
+                                {entry.description}
+                              </span>
+                              <small>
+                                {entry.client}
+                                {entry.project ? ` · ${entry.project}` : ''}
+                              </small>
+                            </td>
+                            <td className="time-num time-entry__hours">
+                              {duration(entry.seconds)}
+                            </td>
+                            <td className="time-num time-entry__amount">
+                              {entry.billable ? (
+                                money(entryAmount(entry, currency), currency)
+                              ) : (
+                                <span className="tool-muted">—</span>
+                              )}
+                              <small>
+                                {money(
+                                  Math.round(
+                                    entry.rate * 10 ** minorDigits(currency),
+                                  ),
+                                  currency,
+                                )}
+                                /h
+                              </small>
+                            </td>
+                            <td className="time-entry__status">
+                              <span
+                                className={`time-status time-status--${status.toLowerCase()}`}
+                              >
+                                {status}
+                              </span>
+                            </td>
+                            <td className="time-entry__actions">
+                              <div className="time-actions">
+                                <button
+                                  className="btn btn-secondary btn-icon"
+                                  disabled={!!data.timer || !store.ready}
+                                  aria-label={`Resume ${entry.description}`}
+                                  title="Start a timer for this again"
+                                  onClick={() => void resume(entry)}
+                                >
+                                  <Play size={14} />
+                                </button>
+                                <button
+                                  className="btn btn-secondary btn-icon"
+                                  disabled={
+                                    isBilled || !!data.timer || !store.ready
+                                  }
+                                  aria-label={`Edit ${entry.description}`}
+                                  title="Edit"
+                                  onClick={() => {
+                                    setEditing(entry.id);
+                                    setDescription(entry.description);
+                                    setClient(entry.client);
+                                    setProject(entry.project);
+                                    setRate(String(entry.rate));
+                                    setRateTouched(true);
+                                    setBillable(entry.billable);
+                                    setDate(entry.date);
+                                    setHours(String(entry.seconds / 3600));
+                                    formRef.current?.scrollIntoView({
+                                      behavior: 'smooth',
+                                      block: 'start',
+                                    });
+                                    descriptionRef.current?.focus({
+                                      preventScroll: true,
+                                    });
+                                  }}
+                                >
+                                  <Pencil size={14} />
+                                </button>
+                                <button
+                                  className="btn btn-secondary btn-icon"
+                                  disabled={isBilled || !store.ready}
+                                  aria-label={`Delete ${entry.description}`}
+                                  title="Delete"
+                                  onClick={async () => {
+                                    if (
+                                      await update((s) => ({
+                                        ...s,
+                                        entries: s.entries.filter(
+                                          (e) => e.id !== entry.id,
+                                        ),
+                                      }))
+                                    ) {
+                                      setUndo(entry);
+                                      setSelected((s) =>
+                                        s.filter((id) => id !== entry.id),
+                                      );
+                                      if (editing === entry.id) resetForm();
+                                    }
+                                  }}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  ))}
                 </table>
               </div>
             )}
           </section>
         </div>
-      ) : (
+      )}
+      {tab === 'reports' &&
+        (inPeriod.length ? (
+          <div className="time-report-grid">
+            <ReportTable
+              title="By client"
+              column="Client"
+              rows={byClient}
+              currency={currency}
+            />
+            <ReportTable
+              title="By project"
+              column="Project"
+              rows={byProject}
+              currency={currency}
+            />
+            <p className="tool-hint time-report-legend">
+              <span className="time-legend-item">
+                <span className="time-legend time-legend--billable" />
+                Billable
+              </span>
+              <span className="time-legend-item">
+                <span className="time-legend" />
+                Non-billable
+              </span>
+              <span>Amounts in {currency} at each entry&apos;s rate.</span>
+            </p>
+          </div>
+        ) : (
+          <div className="tool-panel tool-empty">
+            <p>No time tracked {rangeLabel.toLowerCase()}.</p>
+            {range !== 'all' && (
+              <button
+                className="btn btn-secondary"
+                onClick={() => setRange('all')}
+              >
+                Show all time
+              </button>
+            )}
+          </div>
+        ))}
+      {tab === 'invoices' && (
         <div className="tool-stack">
           <section className="tool-panel">
             <h2>Business defaults</h2>

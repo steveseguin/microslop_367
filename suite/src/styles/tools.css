@@ -557,6 +557,9 @@
   gap: var(--space-4);
   align-items: start;
 }
+.tool-pdf-layout > * {
+  min-width: 0;
+}
 .tool-pdf-preview {
   overflow: auto;
   padding: var(--space-5);
@@ -579,6 +582,99 @@
   width: 100%;
   height: auto;
 }
+.tool-pdf-page[data-zoomed] {
+  max-width: none;
+}
+.tool-pdf-drop {
+  position: relative;
+}
+.tool-pdf-drop[data-dropping] > :not(.tool-pdf-dropcue) {
+  opacity: 0.35;
+}
+.tool-pdf-dropcue {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 12rem;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-weight: 650;
+  pointer-events: none;
+}
+.tool-pdf-thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4.25rem, 1fr));
+  gap: var(--space-2);
+  max-height: 26rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: 2px;
+  list-style: none;
+}
+.tool-pdf-thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.tool-pdf-thumb:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.tool-pdf-thumb[aria-current='page'] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  color: var(--accent-ink);
+}
+.tool-pdf-thumb[data-drop] {
+  border-style: dashed;
+}
+.tool-pdf-thumb[data-drop]:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.tool-pdf-thumb img,
+.tool-pdf-thumb__blank {
+  display: block;
+  width: 100%;
+  aspect-ratio: 0.77;
+  object-fit: contain;
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+}
+.tool-pdf-thumb img {
+  aspect-ratio: auto;
+}
+.tool-pdf-thumb__num {
+  font-size: var(--text-2xs);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.tool-pdf-zoom {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: var(--space-2);
+}
+.tool-content .tool-pdf-zoom__level {
+  min-width: 3.75rem;
+  padding-inline: var(--space-2);
+  font-variant-numeric: tabular-nums;
+}
 .tool-pdf-overlay {
   position: absolute;
   inset: 0;
@@ -594,6 +690,104 @@
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-bottom: var(--space-3);
+}
+.tool-pdf-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.tool-pdf-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 2.25rem;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.tool-pdf-tool:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-muted);
+}
+.tool-pdf-tool[aria-pressed='true'] {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.tool-pdf-hint {
+  margin: var(--space-2) 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.tool-pdf-options {
+  display: grid;
+  gap: var(--space-2);
+}
+/* Click-to-edit layer over the rendered page. */
+.tool-pdf-textlayer {
+  position: absolute;
+  inset: 0;
+  line-height: normal;
+  text-align: left;
+}
+.tool-pdf-textlayer--add {
+  cursor: text;
+}
+.tool-pdf-textline {
+  position: absolute;
+  padding: 0;
+  border: 1px dashed transparent;
+  border-radius: 2px;
+  background: transparent;
+  cursor: text;
+}
+.tool-pdf-textlayer:not(:has(.tool-pdf-textedit)) .tool-pdf-textline {
+  border-color: rgba(37, 99, 235, 0.4);
+}
+.tool-pdf-textline:hover,
+.tool-pdf-textline:focus-visible {
+  border-color: #2563eb;
+  border-style: solid;
+  background: rgba(37, 99, 235, 0.08);
+}
+.tool-app .tool-pdf-textedit {
+  position: absolute;
+  min-height: 0;
+  margin: 0;
+  padding: 0 1px;
+  border: 0;
+  border-radius: 2px;
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+  background: #fff;
+  line-height: 1;
+  field-sizing: content;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.18);
+}
+.tool-pdf-textlayer--add .tool-pdf-textedit {
+  min-width: 6ch;
+  height: auto;
+  padding: 2px 3px;
+  background: rgba(255, 255, 255, 0.92);
+}
+.tool-pdf-font--sans {
+  font-family: Helvetica, Arial, 'Liberation Sans', sans-serif !important;
+}
+.tool-pdf-font--serif {
+  font-family: 'Times New Roman', Times, 'Liberation Serif', serif !important;
+}
+.tool-pdf-font--mono {
+  font-family: 'Courier New', Courier, monospace !important;
 }
 .tool-inline-label {
   flex-direction: row !important;
@@ -788,6 +982,13 @@
   .tool-launcher {
     padding: 14px;
   }
+  /* On a phone the page you are editing comes first; page tools follow. */
+  .tool-pdf-layout > section {
+    order: -1;
+  }
+  .tool-pdf-tool {
+    padding: 0 var(--space-2);
+  }
   .tool-pdf-preview {
     padding: 10px;
     min-height: 250px;
@@ -829,4 +1030,61 @@
   .tool-print thead {
     display: table-header-group;
   }
+}
+
+/* Workspace: open-file affordances (Dashboard.tsx). */
+.dashboard[data-dropping] {
+  position: relative;
+}
+.dashboard-dropcue {
+  position: fixed;
+  inset: var(--space-4);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--app-bg) 85%, transparent);
+  color: var(--accent-ink);
+  font-size: var(--text-md);
+  pointer-events: none;
+}
+.dashboard-dropcue span {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.dashboard-open {
+  min-height: 34px;
+  white-space: nowrap;
+}
+.dashboard-open-error {
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
+
+/* An inline text action inside a hint line. */
+.tool-linkbtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.tool-linkbtn:disabled {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.tool-dictation {
+  padding: var(--space-2) var(--space-3);
 }

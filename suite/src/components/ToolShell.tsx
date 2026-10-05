@@ -40,6 +40,7 @@ export function ToolShell({
   children,
   print,
   hasUnsavedChanges,
+  compact,
   toggleTheme,
   isDarkMode,
 }: ToolProps & {
@@ -50,6 +51,8 @@ export function ToolShell({
   children: ReactNode;
   print?: ReactNode;
   hasUnsavedChanges?: boolean;
+  /** Drop the page heading once a document is open and space matters. */
+  compact?: boolean;
 }) {
   const navigate = useNavigate();
   const canLeave = () =>
@@ -120,7 +123,7 @@ export function ToolShell({
         </div>
       </header>
       <div className="tool-content">
-        <div className="tool-heading">
+        <div className={compact ? 'sr-only' : 'tool-heading'}>
           <h1>{HEADLINE[name]}</h1>
           <p>{subtitle}</p>
         </div>
