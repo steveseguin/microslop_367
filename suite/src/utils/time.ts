@@ -33,6 +33,8 @@ export interface Invoice {
 export interface TimeWorkspace {
   version: 1;
   entries: TimeEntry[];
+  /** id -> when an entry or invoice was deleted, so device sync does not revive it. */
+  deleted?: Record<string, number>;
   timer: Timer | null;
   invoices: Invoice[];
   business: string;

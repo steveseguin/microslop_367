@@ -70,6 +70,8 @@
   --brand-pdf: #6d28d9;
   --brand-image: #be185d;
   --brand-svg: #4d7c0f;
+  --brand-meet: #0369a1;
+  --brand-sync: #334155;
   /* Blueline's own palette (blueline/src/style.css --sel / --fg / --bg). */
   --brand-blueline: #0a8bd6;
   --brand-blueline-ink: #15181c;
@@ -130,6 +132,8 @@
   --brand-pdf: #b9a2f7;
   --brand-image: #f490bd;
   --brand-svg: #a7d566;
+  --brand-meet: #7cc4f2;
+  --brand-sync: #b6c2d3;
   --brand-blueline: #2ea8ee;
   --brand-blueline-ink: #e9ebee;
   --brand-blueline-bar: #1a1c20;
@@ -1704,6 +1708,8 @@ input[type="color"]::-moz-color-swatch {
 .app-mark--pdf { --app-brand: var(--brand-pdf); }
 .app-mark--image { --app-brand: var(--brand-image); }
 .app-mark--svg { --app-brand: var(--brand-svg); }
+.app-mark--meet { --app-brand: var(--brand-meet); }
+.app-mark--sync { --app-brand: var(--brand-sync); }
 
 /* Blueline's mark IS the tile, exactly as the editor draws it. */
 .app-mark--blueline {

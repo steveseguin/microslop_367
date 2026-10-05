@@ -1168,6 +1168,9 @@ export default function Time(props: ToolProps) {
                       await update((s) => ({
                         ...s,
                         entries: [...s.entries, undo],
+                        deleted: Object.fromEntries(
+                          Object.entries(s.deleted ?? {}).filter(([id]) => id !== undo.id),
+                        ),
                       }))
                     )
                       setUndo(null);
@@ -1348,6 +1351,7 @@ export default function Time(props: ToolProps) {
                                         entries: s.entries.filter(
                                           (e) => e.id !== entry.id,
                                         ),
+                                        deleted: { ...(s.deleted ?? {}), [entry.id]: Date.now() },
                                       }))
                                     ) {
                                       setUndo(entry);
@@ -1614,6 +1618,7 @@ export default function Time(props: ToolProps) {
                               invoices: s.invoices.filter(
                                 (i) => i.id !== invoice.id,
                               ),
+                              deleted: { ...(s.deleted ?? {}), [invoice.id]: Date.now() },
                             }))
                           ) {
                             setInvoiceId(null);

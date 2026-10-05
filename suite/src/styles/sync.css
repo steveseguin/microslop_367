@@ -1,0 +1,162 @@
+/* NinjaSync (pages/Sync.tsx) and NinjaMeet (pages/Meet.tsx). */
+.sync-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+.sync-card {
+  display: grid;
+  gap: var(--space-3);
+}
+.sync-card__head {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+.sync-card__head h2 {
+  margin: 0 0 var(--space-1);
+}
+.sync-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 2.5rem;
+  height: 2.5rem;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-weight: 600;
+  font-size: var(--text-sm);
+}
+.sync-dot {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.sync-dot--on {
+  background: #16a34a;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.2);
+}
+.sync-dot--idle {
+  background: #f59e0b;
+}
+.sync-dot--bad {
+  background: var(--danger);
+}
+.sync-peers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sync-peers li {
+  padding: 2px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.sync-pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+.sync-qr {
+  width: 8.5rem;
+  height: 8.5rem;
+  flex-shrink: 0;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+.sync-qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.sync-pair__text {
+  display: grid;
+  flex: 1 1 14rem;
+  gap: var(--space-2);
+}
+.sync-pair__text p {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.sync-join {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: flex-end;
+}
+.sync-join label {
+  flex: 1 1 16rem;
+}
+.sync-invite {
+  margin-bottom: var(--space-4);
+}
+.sync-invite h2 {
+  margin-top: 0;
+}
+
+/* NinjaMeet */
+.meet-setup {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 34rem;
+  margin: 0 auto;
+}
+.meet-setup h2 {
+  margin: 0;
+}
+.meet-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.meet-bar strong {
+  font-size: var(--text-sm);
+}
+.meet-frame {
+  display: block;
+  width: 100%;
+  height: clamp(420px, calc(100dvh - 12rem), 1400px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: #0b1119;
+}
+@media (max-width: 640px) {
+  .meet-frame {
+    height: calc(100dvh - 11rem);
+    border-radius: var(--radius-md);
+  }
+}
+
+.sync-card .tool-hint,
+.meet-setup .tool-hint,
+.sync-invite .tool-muted {
+  font-size: var(--text-sm);
+}

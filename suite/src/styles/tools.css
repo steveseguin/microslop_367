@@ -1116,10 +1116,15 @@
 /* Workspace app grid: every app is the same tile (Dashboard.tsx APP_TILES). */
 .app-grid {
   display: grid;
-  /* Three across, three rows: documents, creative tools, productivity. */
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* Five across, two rows: create on top, open tools below. */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: var(--space-2);
   margin-bottom: var(--space-6);
+}
+@media (max-width: 1200px) {
+  .app-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 @media (max-width: 900px) {
   .app-grid {
@@ -1195,5 +1200,30 @@
   }
   .app-tile__text small {
     white-space: normal;
+  }
+}
+
+.dashboard-sync {
+  min-height: 34px;
+  white-space: nowrap;
+  gap: var(--space-2);
+}
+.dashboard-sync .sync-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.dashboard-sync .sync-dot--on {
+  background: #16a34a;
+}
+.dashboard-sync .sync-dot--idle {
+  background: #f59e0b;
+}
+@media (max-width: 480px) {
+  .dashboard-open,
+  .dashboard-sync {
+    padding-inline: var(--space-2);
+    font-size: var(--text-xs);
   }
 }

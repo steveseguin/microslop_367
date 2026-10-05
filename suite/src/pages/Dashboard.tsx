@@ -137,7 +137,8 @@ type AppTile = {
     | 'svg'
     | 'time'
     | 'notes'
-    | 'pdf';
+    | 'pdf'
+    | 'meet';
   name: string;
   line: string;
   /** Accessible name for the create tiles ("New document", ...). */
@@ -148,11 +149,12 @@ const APP_TILES: AppTile[] = [
   { app: 'excel', name: 'NinjaCalc', line: 'New spreadsheet', create: 'New spreadsheet' },
   { app: 'powerpoint', name: 'NinjaSlides', line: 'New presentation', create: 'New presentation' },
   { app: 'blueline', name: 'Blueline', line: 'New design', create: 'New design' },
-  { app: 'image', name: 'NinjaImage', line: 'Crop, adjust & draw on photos' },
-  { app: 'svg', name: 'NinjaSVG', line: 'Edit & convert SVG and images' },
-  { app: 'time', name: 'NinjaTime', line: 'Time tracking & invoices' },
-  { app: 'notes', name: 'NinjaNotes', line: 'Notes & dictation' },
+  { app: 'svg', name: 'NinjaSVG', line: 'Edit & convert SVG' },
+  { app: 'image', name: 'NinjaImage', line: 'Photo editor' },
   { app: 'pdf', name: 'NinjaPDF', line: 'Edit, sign & fill PDFs' },
+  { app: 'time', name: 'NinjaTime', line: 'Time & invoices' },
+  { app: 'notes', name: 'NinjaNotes', line: 'Notes & dictation' },
+  { app: 'meet', name: 'NinjaMeet', line: 'Video calls' },
 ];
 const TYPE_LABEL = { word: 'Document', excel: 'Spreadsheet', powerpoint: 'Presentation', blueline: 'Design' } as const;
 
@@ -206,6 +208,26 @@ async function readToolSummaries() {
 export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
   const navigate = useNavigate();
   const openInput = useRef<HTMLInputElement>(null);
+  const [syncDot, setSyncDot] = useState<'on' | 'idle' | 'off'>('off');
+  useEffect(() => {
+    // Green when devices are connected or a folder backup exists, amber when set
+    // up but idle, grey when nothing protects the data yet.
+    let stop = () => {};
+    void import('../utils/sync/p2p').then((m) => {
+      stop = m.onSyncStatus((s) => {
+        const configured = !!m.syncGroup();
+        let backedUp = false;
+        try {
+          const last = JSON.parse(localStorage.getItem('officeninja_last_backup') || 'null');
+          backedUp = !!last && Date.now() - last.t < 14 * 86_400_000;
+        } catch {
+          backedUp = false;
+        }
+        setSyncDot(s.peers.length || backedUp ? 'on' : configured ? 'idle' : 'off');
+      });
+    });
+    return () => stop();
+  }, []);
   const [dropping, setDropping] = useState(false);
   const [openError, setOpenError] = useState('');
   const [summaries, setSummaries] = useState<
@@ -482,6 +504,14 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
             <span className="dashboard-brand__title">OfficeNinja</span>
           </span>
 
+          <Link
+            to="/sync"
+            className="btn btn-secondary dashboard-sync"
+            title="Back up your work and sync it between your devices"
+          >
+            <span className={`sync-dot sync-dot--${syncDot}`} aria-hidden="true" />
+            Backup &amp; sync
+          </Link>
           <button
             type="button"
             className="btn btn-secondary dashboard-open"
@@ -525,11 +555,12 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
                 app === 'time' || app === 'notes' || app === 'pdf'
                   ? summaries[app]
                   : undefined;
+              const href2 = app === 'meet' ? '#/meet' : href;
               return (
                 <a
                   key={app}
                   className={`app-tile${create ? ' dashboard-create__btn' : ''}`}
-                  href={href}
+                  href={href2}
                   aria-label={create}
                 >
                   <AppMark app={app} />

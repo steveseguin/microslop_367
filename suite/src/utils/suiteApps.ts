@@ -8,4 +8,6 @@ export const SUITE_APPS = [
   ['NinjaPDF', '/pdf'],
   ['NinjaImage', '/image'],
   ['NinjaSVG', '/svg'],
+  ['NinjaMeet', '/meet'],
+  ['NinjaSync', '/sync'],
 ] as const;

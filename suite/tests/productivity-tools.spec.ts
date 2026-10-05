@@ -334,7 +334,7 @@ test('notes capture, group, search, pin, export, import and undo deletion', asyn
   await expect(page.locator('.tool-note-item')).toHaveCount(2);
 });
 
-test('notes never overwrite a newer workspace in another tab', async ({
+test('an idle notes tab picks up a save from another tab instead of overwriting it', async ({
   page,
   context,
 }) => {
@@ -348,17 +348,15 @@ test('notes never overwrite a newer workspace in another tab', async ({
   await expect(
     second.getByText('Saved locally', { exact: true }),
   ).toBeVisible();
-  await page.getByLabel('Note title').fill('Conflicting draft');
-  await expect(page.getByRole('alert')).toContainText('changed in another tab');
+  // The first tab was idle, so it takes the newer version live...
+  await expect(page.getByLabel('Note title')).toHaveValue('Saved in other tab');
+  // ...and its next edit builds on it, reaching the other tab too, with no lock-out.
+  await page.getByLabel('Note title').fill('Edited after the update');
+  await expect(page.getByText('Saved locally', { exact: true })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(second.getByLabel('Note title')).toHaveValue('Edited after the update');
   await second.reload();
-  await expect(second.getByLabel('Note title')).toHaveValue(
-    'Saved in other tab',
-  );
-  const backup = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Backup all notes' }).click();
-  expect(await readFile((await (await backup).path())!, 'utf8')).toContain(
-    'Conflicting draft',
-  );
+  await expect(second.getByLabel('Note title')).toHaveValue('Edited after the update');
 });
 
 test('dictation appends final timestamped transcripts and requires explicit online consent', async ({

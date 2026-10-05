@@ -541,6 +541,14 @@ export function isDocumentTombstoned(id: string) {
   return has(readTombstones(), id);
 }
 
+/** id -> when it was deleted, for backup and device sync (read-only). */
+export function listDocumentTombstones(): Record<string, number> {
+  const out: Record<string, number> = {};
+  const tombstones = readTombstones();
+  for (const id of Object.keys(tombstones)) out[id] = tombstones[id].t;
+  return out;
+}
+
 function readPendingDeletes() {
   return readJsonMap<number>(PENDING_DELETE_STORAGE_KEY, (raw) => (Number.isFinite(raw) ? (raw as number) : undefined));
 }

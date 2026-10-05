@@ -11,6 +11,8 @@ const Notes = lazy(() => import('./pages/Notes'));
 const Pdf = lazy(() => import('./pages/Pdf'));
 const ImageEditor = lazy(() => import('./pages/Image'));
 const Svg = lazy(() => import('./pages/Svg'));
+const Meet = lazy(() => import('./pages/Meet'));
+const Sync = lazy(() => import('./pages/Sync'));
 
 const THEME_KEY = 'officeninja_theme';
 
@@ -59,6 +61,13 @@ function AppLoading() {
 
 function App() {
   const location = useLocation();
+  // Device sync and folder backup run in the background once the app is idle.
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      void import('./utils/sync/background').then((m) => m.startBackgroundSync());
+    }, 2500);
+    return () => window.clearTimeout(t);
+  }, []);
   useEffect(() => {
     const names: Record<string, string> = { '/word': 'NinjaWord', '/excel': 'NinjaCalc', '/powerpoint': 'NinjaSlides', '/time': 'NinjaTime', '/notes': 'NinjaNotes', '/pdf': 'NinjaPDF' };
     document.title = names[location.pathname] ? `${names[location.pathname]} | OfficeNinja` : 'OfficeNinja | Free Office, Design & Productivity Tools';
@@ -130,6 +139,8 @@ function App() {
               <Route path="/pdf" element={<Pdf toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
               <Route path="/image" element={<ImageEditor toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
               <Route path="/svg" element={<Svg toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+              <Route path="/meet" element={<Meet toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+              <Route path="/sync" element={<Sync toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
             </Routes>
           </Suspense>
         </ErrorBoundary>

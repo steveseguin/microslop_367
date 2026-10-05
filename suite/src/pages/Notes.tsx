@@ -48,6 +48,8 @@ interface Note {
 interface NotesWorkspace {
   version: 1;
   notes: Note[];
+  /** id -> when it was deleted, so device sync does not bring it back. */
+  deleted?: Record<string, number>;
 }
 const EMPTY: NotesWorkspace = { version: 1, notes: [] };
 interface RecognitionResult {
@@ -922,7 +924,13 @@ export default function Notes(props: ToolProps) {
             className="btn btn-secondary"
             disabled={!store.ready}
             onClick={async () => {
-              if (await update((s) => ({ ...s, notes: [undo, ...s.notes] }))) {
+              if (
+                await update((s) => {
+                  const deleted = { ...(s.deleted ?? {}) };
+                  delete deleted[undo.id];
+                  return { ...s, notes: [undo, ...s.notes], deleted };
+                })
+              ) {
                 setSelected(undo.id);
                 setUndo(null);
               }
@@ -1214,6 +1222,7 @@ ${note.body}
                         await update((s) => ({
                           ...s,
                           notes: s.notes.filter((n) => n.id !== note.id),
+                          deleted: { ...(s.deleted ?? {}), [note.id]: Date.now() },
                         }))
                       ) {
                         setUndo(note);

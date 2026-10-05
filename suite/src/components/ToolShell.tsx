@@ -11,7 +11,9 @@ type ToolName =
   | 'NinjaNotes'
   | 'NinjaPDF'
   | 'NinjaImage'
-  | 'NinjaSVG';
+  | 'NinjaSVG'
+  | 'NinjaMeet'
+  | 'NinjaSync';
 
 const APP_KIND = {
   NinjaTime: 'time',
@@ -19,6 +21,8 @@ const APP_KIND = {
   NinjaPDF: 'pdf',
   NinjaImage: 'image',
   NinjaSVG: 'svg',
+  NinjaMeet: 'meet',
+  NinjaSync: 'sync',
 } as const;
 
 const HEADLINE = {
@@ -27,6 +31,8 @@ const HEADLINE = {
   NinjaPDF: 'Give your PDFs a finishing touch.',
   NinjaImage: 'Make every photo look its best.',
   NinjaSVG: 'Vector graphics, tweaked and converted.',
+  NinjaMeet: 'Meet face to face, from any browser.',
+  NinjaSync: 'Your work, on every device.',
 } as const;
 
 function statusTone(status: string, error?: string) {

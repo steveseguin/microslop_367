@@ -95,3 +95,37 @@ export async function renameDesign(id: string, name: string) {
     db.close();
   }
 }
+
+/** Every stored design file, as-is (for backup and device sync). */
+export async function allDesignFiles(): Promise<DesignFile[]> {
+  const db = await openDesigns();
+  try {
+    return await db.getAll('files');
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Store a design that came from a backup or another device, but only if it is
+ * newer than the copy here. Returns whether it was written. (An open Blueline
+ * tab of the same design keeps its own copy and saves over this on its next
+ * edit; that is last-writer-wins, the same as two Blueline tabs today.)
+ */
+export async function putDesignIfNewer(file: DesignFile): Promise<boolean> {
+  const db = await openDesigns();
+  try {
+    const tx = db.transaction('files', 'readwrite');
+    const existing: DesignFile | undefined = await tx.store.get(file.id);
+    if (existing && (Number(existing.updated) || 0) >= (Number(file.updated) || 0)) {
+      await tx.done;
+      return false;
+    }
+    await tx.store.put(file);
+    await tx.done;
+    return true;
+  } finally {
+    db.close();
+  }
+}
+export type { DesignFile };
