@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Mic, Pin, Plus, Square, Trash2 } from 'lucide-react';
+import {
+  Download,
+  Mic,
+  Pin,
+  PinOff,
+  Plus,
+  Square,
+  Trash2,
+  Upload,
+} from 'lucide-react';
+import { AppMark } from '../components/AppMark';
 import { ToolShell, type ToolProps } from '../components/ToolShell';
 import {
   downloadFile,
@@ -306,7 +316,7 @@ export default function Notes(props: ToolProps) {
       status={store.status}
       error={store.error}
     >
-      <div className="tool-row tool-row--between" style={{ marginBottom: 20 }}>
+      <div className="tool-toolbar">
         <button
           className="btn btn-primary"
           disabled={!store.ready || listening || preparing}
@@ -320,6 +330,7 @@ export default function Notes(props: ToolProps) {
             className="btn btn-secondary"
             onClick={() => exportJSON('ninjanotes-backup.json', data)}
           >
+            <Download size={15} />
             Backup all notes
           </button>
           <button
@@ -327,6 +338,7 @@ export default function Notes(props: ToolProps) {
             disabled={!store.ready || listening || preparing}
             onClick={() => importRef.current?.click()}
           >
+            <Upload size={15} />
             Import notes
           </button>
           <input
@@ -384,7 +396,7 @@ export default function Notes(props: ToolProps) {
         </div>
       )}
       <div className="tool-note-layout">
-        <aside className="tool-panel">
+        <aside className="tool-panel tool-note-sidebar">
           <label>
             Search notes
             <input
@@ -394,7 +406,7 @@ export default function Notes(props: ToolProps) {
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
-          <label style={{ marginTop: 12 }}>
+          <label>
             Timeline order
             <select value={sort} onChange={(e) => setSort(e.target.value)}>
               <option value="created">Newest captured</option>
@@ -414,7 +426,9 @@ export default function Notes(props: ToolProps) {
                     onClick={() => setSelected(n.id)}
                   >
                     <strong>
-                      {n.pinned ? '● ' : ''}
+                      {n.pinned && (
+                        <Pin size={12} aria-label="Pinned" className="tool-note-pin" />
+                      )}
                       {n.title || 'Untitled note'}
                     </strong>
                     <span>
@@ -437,29 +451,92 @@ export default function Notes(props: ToolProps) {
             )}
           </div>
         </aside>
-        <section className="tool-panel">
+        <section className="tool-panel tool-note-editor">
           {!note ? (
             <div className="tool-empty">
+              <AppMark app="notes" size="lg" />
               <h2>Start with a thought.</h2>
               <p>
                 Create a note to type or dictate. Everything is organized by
                 capture time.
               </p>
+              <button
+                className="btn btn-primary"
+                disabled={!store.ready}
+                onClick={() => void create()}
+              >
+                <Plus size={16} />
+                Create a note
+              </button>
             </div>
           ) : (
             <>
+              <div className="tool-note-head">
               <label>
-                <span className="sr-only">Note title</span>
-                <input
-                  className="tool-note-title"
-                  ref={titleRef}
-                  aria-label="Note title"
-                  placeholder="Untitled note"
-                  disabled={!store.ready}
-                  value={note.title}
-                  onChange={(e) => patchNote({ title: e.target.value })}
-                />
-              </label>
+                  <span className="sr-only">Note title</span>
+                  <input
+                    className="tool-note-title"
+                    ref={titleRef}
+                    aria-label="Note title"
+                    placeholder="Untitled note"
+                    disabled={!store.ready}
+                    value={note.title}
+                    onChange={(e) => patchNote({ title: e.target.value })}
+                  />
+                </label>
+                <div className="tool-row tool-note-tools">
+                  <button
+                    className="btn btn-secondary btn-icon"
+                    disabled={!store.ready}
+                    aria-pressed={note.pinned}
+                    aria-label={note.pinned ? 'Unpin' : 'Pin note'}
+                    title={note.pinned ? 'Unpin' : 'Pin note'}
+                    onClick={() => patchNote({ pinned: !note.pinned })}
+                  >
+                    {note.pinned ? <PinOff size={16} /> : <Pin size={16} />}
+                  </button>
+                  <button
+                    className="btn btn-secondary btn-icon"
+                    aria-label="Export Markdown"
+                    title="Export Markdown"
+                    onClick={() =>
+                      downloadFile(
+                        `${note.title || 'note'}.md`,
+                        `# ${note.title || 'Untitled note'}
+
+Captured: ${new Date(note.created).toISOString()}
+Project: ${note.context}
+Tags: ${note.tags}
+
+${note.body}
+`,
+                        'text/markdown;charset=utf-8',
+                      )
+                    }
+                  >
+                    <Download size={16} />
+                  </button>
+                  <button
+                    className="btn btn-secondary btn-icon"
+                    aria-label="Delete note"
+                    title="Delete note"
+                    disabled={!store.ready || listening || preparing}
+                    onClick={async () => {
+                      if (
+                        await update((s) => ({
+                          ...s,
+                          notes: s.notes.filter((n) => n.id !== note.id),
+                        }))
+                      ) {
+                        setUndo(note);
+                        setSelected(null);
+                      }
+                    }}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </div>
               <div className="tool-note-meta">
                 Captured {new Date(note.created).toLocaleString()} · Edited{' '}
                 {new Date(note.updated).toLocaleString()}
@@ -484,6 +561,81 @@ export default function Notes(props: ToolProps) {
                   />
                 </label>
               </div>
+              <div className="tool-dictation">
+                {!speechAPI() ? (
+                  <p className="tool-muted">
+                    Speech recognition is unavailable in this browser. You can
+                    still type, search, and export notes.
+                  </p>
+                ) : (
+                  <>
+                    <div className="tool-dictation__controls">
+                      <button
+                        className={`btn ${listening ? 'btn-danger' : 'btn-primary'}`}
+                        disabled={!store.ready || preparing}
+                        onClick={() => (listening ? stop() : void startVoice())}
+                      >
+                        {listening ? <Square size={15} /> : <Mic size={15} />}
+                        {listening
+                          ? 'Stop dictation'
+                          : preparing
+                            ? 'Preparing…'
+                            : 'Start dictation'}
+                      </button>
+                      <select
+                        aria-label="Speech processing"
+                        value={mode}
+                        disabled={listening || preparing}
+                        onChange={(e) => setMode(e.target.value)}
+                      >
+                        <option value="local">On-device (when supported)</option>
+                        <option value="online">Online browser service</option>
+                      </select>
+                      <select
+                        aria-label="Language"
+                        value={language}
+                        disabled={listening || preparing}
+                        onChange={(e) => setLanguage(e.target.value)}
+                      >
+                        {[
+                          ['en-US', 'English (US)'],
+                          ['en-GB', 'English (UK)'],
+                          ['fr-FR', 'French'],
+                          ['de-DE', 'German'],
+                          ['es-ES', 'Spanish'],
+                          ['pt-BR', 'Portuguese'],
+                          ['ja-JP', 'Japanese'],
+                        ].map(([code, label]) => (
+                          <option key={code} value={code}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                      {mode === 'local' && (
+                        <button
+                          className="btn btn-secondary"
+                          disabled={preparing || listening}
+                          onClick={() => void installLanguage()}
+                        >
+                          Download language pack
+                        </button>
+                      )}
+                    </div>
+                    <p className="tool-hint tool-muted">
+                      {mode === 'local'
+                        ? 'Requires browser support and a downloaded language pack. Audio is processed on your device.'
+                        : 'Your browser’s speech service may receive audio. You will be asked before recording starts.'}{' '}
+                      Transcripts save in this browser; audio is not saved by
+                      NinjaNotes.
+                    </p>
+                  </>
+                )}
+                {interim && (
+                  <p className="tool-dictation__interim" role="status">
+                    Listening: {interim}
+                  </p>
+                )}
+              </div>
               <label>
                 <span className="sr-only">Note text</span>
                 <textarea
@@ -495,132 +647,6 @@ export default function Notes(props: ToolProps) {
                   onChange={(e) => patchNote({ body: e.target.value })}
                 />
               </label>
-              {interim && (
-                <p className="tool-muted" role="status">
-                  Listening: {interim}
-                </p>
-              )}
-              <div className="tool-row">
-                <button
-                  className="btn btn-secondary"
-                  disabled={!store.ready}
-                  aria-pressed={note.pinned}
-                  onClick={() => patchNote({ pinned: !note.pinned })}
-                >
-                  <Pin size={15} />
-                  {note.pinned ? 'Unpin' : 'Pin note'}
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() =>
-                    downloadFile(
-                      `${note.title || 'note'}.md`,
-                      `# ${note.title || 'Untitled note'}\n\nCaptured: ${new Date(note.created).toISOString()}\nProject: ${note.context}\nTags: ${note.tags}\n\n${note.body}\n`,
-                      'text/markdown;charset=utf-8',
-                    )
-                  }
-                >
-                  <Download size={15} />
-                  Export Markdown
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  disabled={!store.ready || listening || preparing}
-                  onClick={async () => {
-                    if (
-                      await update((s) => ({
-                        ...s,
-                        notes: s.notes.filter((n) => n.id !== note.id),
-                      }))
-                    ) {
-                      setUndo(note);
-                      setSelected(null);
-                    }
-                  }}
-                >
-                  <Trash2 size={15} />
-                  Delete note
-                </button>
-              </div>
-              <div className="tool-note-actions">
-                <h3>Voice to text</h3>
-                {!speechAPI() ? (
-                  <p className="tool-muted">
-                    Speech recognition is unavailable in this browser. You can
-                    still type, search, and export notes.
-                  </p>
-                ) : (
-                  <>
-                    <div className="tool-fields">
-                      <label>
-                        Speech processing
-                        <select
-                          value={mode}
-                          disabled={listening || preparing}
-                          onChange={(e) => setMode(e.target.value)}
-                        >
-                          <option value="local">
-                            On-device (when supported)
-                          </option>
-                          <option value="online">Online browser service</option>
-                        </select>
-                      </label>
-                      <label>
-                        Language
-                        <select
-                          value={language}
-                          disabled={listening || preparing}
-                          onChange={(e) => setLanguage(e.target.value)}
-                        >
-                          {[
-                            ['en-US', 'English (US)'],
-                            ['en-GB', 'English (UK)'],
-                            ['fr-FR', 'French'],
-                            ['de-DE', 'German'],
-                            ['es-ES', 'Spanish'],
-                            ['pt-BR', 'Portuguese'],
-                            ['ja-JP', 'Japanese'],
-                          ].map(([code, label]) => (
-                            <option key={code} value={code}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                    <div className="tool-row">
-                      <button
-                        className="btn btn-primary"
-                        disabled={!store.ready || preparing}
-                        onClick={() => (listening ? stop() : void startVoice())}
-                      >
-                        {listening ? <Square size={15} /> : <Mic size={15} />}
-                        {listening
-                          ? 'Stop dictation'
-                          : preparing
-                            ? 'Preparing…'
-                            : 'Start dictation'}
-                      </button>
-                      {mode === 'local' && (
-                        <button
-                          className="btn btn-secondary"
-                          disabled={preparing || listening}
-                          onClick={() => void installLanguage()}
-                        >
-                          Download language pack
-                        </button>
-                      )}
-                    </div>
-                    <p className="tool-muted" style={{ marginTop: 12 }}>
-                      {mode === 'local'
-                        ? 'Requires browser support and a downloaded language pack. Audio is processed on your device.'
-                        : 'Your browser’s speech service may receive audio. You will be asked before recording starts.'}{' '}
-                      Transcripts save in this browser; audio is not saved by
-                      NinjaNotes.
-                    </p>
-                  </>
-                )}
-              </div>
             </>
           )}
         </section>

@@ -1,17 +1,10 @@
 import { Link } from 'react-router-dom';
 import '../styles/tools.css';
 import {
-  FileText,
-  Clock3,
-  NotebookPen,
-  FilePenLine,
   FolderOpen,
   Moon,
   Pencil,
-  PenTool,
-  Presentation,
   Sun,
-  Table,
   Trash2,
   Undo2,
   X,
@@ -27,6 +20,7 @@ import {
 import type { DocumentRecord, OfficeDocumentType } from '../utils/db';
 import { deleteDesign, designUrl, listDesigns, loadDesign, renameDesign, restoreDesign } from '../utils/blueline';
 import type { DesignDocument } from '../utils/blueline';
+import { AppGlyph, AppMark } from '../components/AppMark';
 
 interface DashboardProps {
   toggleTheme: () => void;
@@ -129,13 +123,17 @@ function writePendingUndos(entries: PendingUndo[]) {
  * reads — which is what made a workspace read as a landing page.
  */
 const CREATE_ACTIONS = [
-  { type: 'word', label: 'Document', icon: FileText },
-  { type: 'excel', label: 'Spreadsheet', icon: Table },
-  { type: 'powerpoint', label: 'Presentation', icon: Presentation },
-  { type: 'blueline', label: 'Design', icon: PenTool },
+  { type: 'word', label: 'Document' },
+  { type: 'excel', label: 'Spreadsheet' },
+  { type: 'powerpoint', label: 'Presentation' },
+  { type: 'blueline', label: 'Design' },
 ] as const;
 
-const TYPE_ICON = { word: FileText, excel: Table, powerpoint: Presentation, blueline: PenTool } as const;
+const TOOL_LAUNCHERS = [
+  { app: 'time', to: '/time', name: 'NinjaTime', blurb: 'Track time & create invoices' },
+  { app: 'notes', to: '/notes', name: 'NinjaNotes', blurb: 'Notes, dictation & a daily timeline' },
+  { app: 'pdf', to: '/pdf', name: 'NinjaPDF', blurb: 'Edit, organize & fill PDFs' },
+] as const;
 const TYPE_LABEL = { word: 'Document', excel: 'Spreadsheet', powerpoint: 'Presentation', blueline: 'Design' } as const;
 
 async function listWorkspaceFiles(): Promise<DocMeta[]> {
@@ -370,7 +368,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
           </span>
 
           <nav className="dashboard-create" aria-label="Create a new file">
-            {CREATE_ACTIONS.map(({ type, label, icon: Icon }, index) => (
+            {CREATE_ACTIONS.map(({ type, label }, index) => (
               <a
                 key={type}
                 // The per-type modifier is what carries the brand colour. The CSS
@@ -380,7 +378,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
                 href={type === 'blueline' ? designUrl() : `#/${type}`} title={type === 'blueline' ? 'Blueline: vector design and prototyping' : undefined}
                 aria-label={`New ${label.toLowerCase()}`}
               >
-                <Icon size={16} aria-hidden="true" />
+                <AppGlyph app={type} size={type === 'blueline' ? 24 : 16} />
                 {/* Two labels, one visible at a time. On a phone the three
                     buttons share one row, and "New presentation" could only
                     ever render as "New pres…"; the accessible name is the same
@@ -407,9 +405,15 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
       <section className="dashboard-section" aria-labelledby="dashboard-recent-title">
         <div className="dashboard-shell">
           <nav className="tool-launchers" aria-label="Productivity tools">
-            <Link className="tool-launcher" to="/time"><Clock3 size={24} /><span><strong>NinjaTime</strong><small>Track time & create invoices</small></span></Link>
-            <Link className="tool-launcher" to="/notes"><NotebookPen size={24} /><span><strong>NinjaNotes</strong><small>Notes, dictation & a daily timeline</small></span></Link>
-            <Link className="tool-launcher" to="/pdf"><FilePenLine size={24} /><span><strong>NinjaPDF</strong><small>Edit, organize & fill PDFs</small></span></Link>
+            {TOOL_LAUNCHERS.map(({ app, to, name, blurb }) => (
+              <Link key={app} className="tool-launcher" to={to}>
+                <AppMark app={app} />
+                <span>
+                  <strong>{name}</strong>
+                  <small>{blurb}</small>
+                </span>
+              </Link>
+            ))}
           </nav>
           <div className="dashboard-section-header">
             {/* One caption, and it earns its line: it is the only place the
@@ -472,13 +476,10 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
             <>
               <div className="recent-grid">
                 {shownDocs.map((doc) => {
-                  const Icon = TYPE_ICON[doc.type];
                   const isRenaming = renamingId === doc.id;
                   return (
                     <article key={doc.id} className="recent-card">
-                      <div className={`file-icon ${doc.type}`} aria-hidden="true">
-                        <Icon size={18} />
-                      </div>
+                      <AppMark app={doc.type} className="file-icon" />
 
                       <div className="recent-card__meta">
                         {isRenaming ? (

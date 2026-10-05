@@ -535,9 +535,7 @@ for (const width of [1440, 390])
         path: info.outputPath(`notes-${width}-${theme}.png`),
         fullPage: true,
       });
-      await page
-        .getByRole('heading', { name: 'Voice to text' })
-        .scrollIntoViewIfNeeded();
+      await page.locator('.tool-dictation').scrollIntoViewIfNeeded();
       await page.screenshot({
         path: info.outputPath(`notes-voice-${width}-${theme}.png`),
       });

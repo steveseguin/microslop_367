@@ -26,7 +26,7 @@
  * new shell cache containing the new index.html, and the old cache is deleted on activate.
  */
 
-const VERSION = "680221bf24da";
+const VERSION = "5e86a534e44b";
 const SHELL_CACHE = `officeninja-shell-${VERSION}`;
 const RUNTIME_CACHE = `officeninja-runtime-${VERSION}`;
 
@@ -52,22 +52,22 @@ const LEGACY_CACHE_PATTERN = /^officeninja-v\d+$/;
 /** Precached on install. Kept small on purpose; see the budget check in vite.config.ts. */
 const SHELL_ASSETS = [
   "./.nojekyll",
-  "./assets/Dashboard-CSrTI36m.js",
-  "./assets/blueline-SIB18Vpb.js",
+  "./assets/AppMark-DlpIoqtu.js",
+  "./assets/Dashboard-DU4PEOsV.js",
   "./assets/db-B4V_zDGv.js",
   "./assets/framework-CUtJR0oF.js",
-  "./assets/index-BapzDvt8.js",
-  "./assets/index-D3XK05lP.css",
-  "./assets/index-fegnM8dg.js",
+  "./assets/index-BWlSDuth.css",
+  "./assets/index-DRguKGC2.js",
+  "./assets/index-vPZnHHuL.js",
   "./assets/inter-latin-wght-italic-DpCbqKDY.woff2",
   "./assets/inter-latin-wght-normal-Dx4kXJAl.woff2",
   "./assets/route-loader-PPVm8Dsz.js",
   "./assets/router-CnpH6s5q.js",
   "./assets/storage-Dob3nYDb.js",
   "./assets/suiteApps-BKpEvaCg.js",
-  "./assets/toolStorage-FI7d0E2a.js",
-  "./assets/tools-y02_wOpZ.css",
-  "./assets/ui-icons-BfaSKI12.js",
+  "./assets/toolStorage-ky9tXYay.js",
+  "./assets/tools-BjEatJSr.css",
+  "./assets/ui-icons-BdRMDqHg.js",
   "./favicon.svg",
   "./index.html",
   "./manifest.webmanifest",
@@ -78,14 +78,14 @@ const SHELL_ASSETS = [
 
 /** Cached on first use, or during the idle warm pass. Multiple megabytes. */
 const WARM_ASSETS = [
-  "./assets/Excel-Bsk4Rnt9.js",
+  "./assets/Excel-CL3FYGLc.js",
   "./assets/ExcelWorkbook-CnmuuO9V.js",
-  "./assets/Notes-Bz_vOSTf.js",
-  "./assets/Pdf-CCgjgVBs.js",
-  "./assets/PowerPoint-fruhTBNi.js",
-  "./assets/SelectionChart-D-hMAlF-.js",
-  "./assets/Time-DpOCGLff.js",
-  "./assets/Word-D9LJYtBA.js",
+  "./assets/Notes-BmNYHjtb.js",
+  "./assets/Pdf-Co6pmvGm.js",
+  "./assets/PowerPoint-CygtMp5S.js",
+  "./assets/SelectionChart-BXVW_q3Z.js",
+  "./assets/Time-DoFtBLgw.js",
+  "./assets/Word-CgxUL9ko.js",
   "./assets/__vite-browser-external-BIHI7g3E.js",
   "./assets/excel-chart-2uwRaG3y.js",
   "./assets/excel-io-CKwrMZHi.js",

@@ -3,6 +3,7 @@ import { designUrl } from '../utils/blueline';
 import { SUITE_APPS } from '../utils/suiteApps';
 import { Link, useNavigate } from 'react-router-dom';
 import { ChevronLeft, MoreHorizontal, Moon, Sun } from 'lucide-react';
+import { AppMark } from './AppMark';
 
 /**
  * Must stay in step with index.css: these are exactly the breakpoints at which
@@ -162,14 +163,14 @@ function statusTone(saveStatus: string) {
 
 function getAppMeta(appName: AppHeaderProps['appName']) {
   if (appName === 'NinjaWord') {
-    return { iconLetter: 'W', iconClass: 'word', suiteLabel: 'Documents' };
+    return { app: 'word', suiteLabel: 'Documents' } as const;
   }
 
   if (appName === 'NinjaCalc') {
-    return { iconLetter: 'X', iconClass: 'excel', suiteLabel: 'Spreadsheets' };
+    return { app: 'excel', suiteLabel: 'Spreadsheets' } as const;
   }
 
-  return { iconLetter: 'P', iconClass: 'powerpoint', suiteLabel: 'Presentations' };
+  return { app: 'powerpoint', suiteLabel: 'Presentations' } as const;
 }
 
 export function AppHeader({
@@ -182,7 +183,7 @@ export function AppHeader({
   isDarkMode,
   saveStatus,
 }: AppHeaderProps) {
-  const { iconLetter, iconClass, suiteLabel } = getAppMeta(appName);
+  const { app, suiteLabel } = getAppMeta(appName);
   const saveStatusId = useId();
   const isCompact = useIsCompact();
   const navigate = useNavigate();
@@ -213,7 +214,7 @@ export function AppHeader({
         </Link>
 
         <div className="app-brand">
-          <div className={`app-logo-icon ${iconClass}`}>{iconLetter}</div>
+          <AppMark app={app} size="sm" className="app-logo-icon" />
           <div className="app-brand__copy">
             <span className="app-brand__eyebrow">{suiteLabel}</span>
             <span className="app-title">{appName}</span>

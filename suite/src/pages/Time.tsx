@@ -7,6 +7,7 @@ import {
   FileText,
   Trash2,
   Pencil,
+  Upload,
 } from 'lucide-react';
 import { ToolShell, type ToolProps } from '../components/ToolShell';
 import {
@@ -322,7 +323,7 @@ export default function Time(props: ToolProps) {
       error={store.error}
       print={invoice ? <InvoicePaper invoice={invoice} /> : undefined}
     >
-      <div className="tool-row tool-row--between" style={{ marginBottom: 18 }}>
+      <div className="tool-tabbar">
         <div className="tool-tabs" role="tablist" aria-label="Time workspace">
           <button
             role="tab"
@@ -351,7 +352,7 @@ export default function Time(props: ToolProps) {
             disabled={!store.ready}
             onClick={() => importRef.current?.click()}
           >
-            Restore backup
+            <Upload size={15} /> Restore backup
           </button>
           <input
             hidden
@@ -422,10 +423,10 @@ export default function Time(props: ToolProps) {
           <section className="tool-panel">
             <h2>{editing ? 'Edit time entry' : 'What are you working on?'}</h2>
             <fieldset
+              className="tool-fieldset"
               disabled={!store.ready || !!data.timer}
-              style={{ border: 0, padding: 0, margin: 0 }}
             >
-              <div className="tool-fields">
+              <div className="tool-fields tool-fields--entry">
                 <label>
                   Description
                   <input
@@ -468,7 +469,41 @@ export default function Time(props: ToolProps) {
                   <option key={c}>{c}</option>
                 ))}
               </datalist>
-              <div className="tool-fields">
+              <label className="tool-check">
+                <input
+                  type="checkbox"
+                  checked={billable}
+                  onChange={(e) => setBillable(e.target.checked)}
+                />
+                Billable
+              </label>
+            </fieldset>
+            {!editing && (
+              <div className="tool-timer-bar">
+                <strong className="tool-timer" aria-label="Elapsed time">
+                  {duration(data.timer ? (now - data.timer.started) / 1000 : 0)}
+                </strong>
+                {data.timer && (
+                  <span className="tool-muted tool-timer-label">
+                    {data.timer.description} · {data.timer.client}
+                  </span>
+                )}
+                <button
+                  className={`btn ${data.timer ? 'btn-danger' : 'btn-primary'}`}
+                  disabled={!store.ready}
+                  onClick={() => void (data.timer ? stop() : start())}
+                >
+                  {data.timer ? <Square size={16} /> : <Play size={16} />}
+                  {data.timer ? 'Stop timer' : 'Start timer'}
+                </button>
+              </div>
+            )}
+            <fieldset
+              className="tool-manual"
+              disabled={!store.ready || !!data.timer}
+            >
+              <h3>{editing ? 'Date and hours' : 'Or log time manually'}</h3>
+              <div className="tool-manual__row">
                 <label>
                   Date
                   <input
@@ -488,20 +523,12 @@ export default function Time(props: ToolProps) {
                     onChange={(e) => setHours(e.target.value)}
                   />
                 </label>
-                <label className="tool-check">
-                  <input
-                    type="checkbox"
-                    checked={billable}
-                    onChange={(e) => setBillable(e.target.checked)}
-                  />
-                  Billable
-                </label>
                 <div className="tool-row">
                   <button
-                    className="btn btn-secondary"
+                    className={`btn ${editing ? 'btn-primary' : 'btn-secondary'}`}
                     onClick={() => void addManual()}
                   >
-                    <Plus size={16} />
+                    {!editing && <Plus size={16} />}
                     {editing ? 'Save entry' : 'Add manual entry'}
                   </button>
                   {editing && (
@@ -518,30 +545,13 @@ export default function Time(props: ToolProps) {
                 </div>
               </div>
             </fieldset>
-            <div className="tool-row">
-              <strong className="tool-timer" aria-label="Elapsed time">
-                {duration(data.timer ? (now - data.timer.started) / 1000 : 0)}
-              </strong>
-              {data.timer && (
-                <span className="tool-muted">
-                  {data.timer.description} · {data.timer.client}
-                </span>
-              )}
-              <button
-                className="btn btn-primary"
-                disabled={!store.ready || !!editing}
-                onClick={() => void (data.timer ? stop() : start())}
-              >
-                {data.timer ? <Square size={16} /> : <Play size={16} />}
-                {data.timer ? 'Stop timer' : 'Start timer'}
-              </button>
-            </div>
           </section>
           <section className="tool-panel">
-            <div className="tool-row tool-row--between">
+            <div className="tool-row tool-row--between tool-panel__head">
               <h2>Time entries</h2>
               <div className="tool-row">
                 <input
+                  className="tool-search"
                   type="search"
                   aria-label="Search time entries"
                   placeholder="Search client, project, date…"
@@ -721,7 +731,7 @@ export default function Time(props: ToolProps) {
                     <option key={c}>{c}</option>
                   ))}
                 </select>
-                <span>
+                <span className="tool-hint">
                   Rates use the currency selected when an invoice is created.
                 </span>
               </label>
@@ -734,8 +744,8 @@ export default function Time(props: ToolProps) {
           ) : (
             <>
               <section className="tool-panel">
-                <div className="tool-row tool-row--between">
-                  <label>
+                <div className="tool-row tool-row--between tool-row--end">
+                  <label className="tool-invoice-pick">
                     Invoice
                     <select
                       value={invoice.id}
@@ -793,7 +803,7 @@ export default function Time(props: ToolProps) {
                 </div>
                 <fieldset
                   disabled={!store.ready}
-                  style={{ border: 0, padding: 0, marginTop: 20 }}
+                  className="tool-fieldset tool-fieldset--spaced"
                 >
                   <div className="tool-fields">
                     <label>

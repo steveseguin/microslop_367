@@ -4,6 +4,28 @@ import { Moon, Sun, ChevronLeft } from 'lucide-react';
 import { designUrl } from '../utils/blueline';
 import '../styles/tools.css';
 import { SUITE_APPS } from '../utils/suiteApps';
+import { AppMark } from './AppMark';
+
+type ToolName = 'NinjaTime' | 'NinjaNotes' | 'NinjaPDF';
+
+const APP_KIND = {
+  NinjaTime: 'time',
+  NinjaNotes: 'notes',
+  NinjaPDF: 'pdf',
+} as const;
+
+const HEADLINE = {
+  NinjaTime: 'Make your time count.',
+  NinjaNotes: 'A place for every thought.',
+  NinjaPDF: 'Give your PDFs a finishing touch.',
+} as const;
+
+function statusTone(status: string, error?: string) {
+  if (error || /fail|error|conflict|not applied|read-only/i.test(status))
+    return 'alert';
+  if (/^saved/i.test(status)) return 'success';
+  return 'pending';
+}
 
 export interface ToolProps {
   toggleTheme: () => void;
@@ -21,7 +43,7 @@ export function ToolShell({
   toggleTheme,
   isDarkMode,
 }: ToolProps & {
-  name: string;
+  name: ToolName;
   subtitle: string;
   status: string;
   error?: string;
@@ -40,66 +62,67 @@ export function ToolShell({
     );
   return (
     <div className="tool-app">
-      <header className="tool-header">
-        <Link
-          className="suite-home-link"
-          to="/"
-          aria-label="Workspace"
-          onClick={(e) => {
-            if (!canLeave()) e.preventDefault();
-          }}
-        >
-          <ChevronLeft size={18} />
-          <span>Workspace</span>
-        </Link>
-        <div className="tool-brand">
-          <span className={`tool-mark tool-mark--${name.toLowerCase()}`}>
-            {name === 'NinjaTime' ? 'T' : name === 'NinjaNotes' ? 'N' : 'P'}
+      <header className="suite-header tool-header">
+        <div className="suite-header__leading">
+          <Link
+            className="suite-home-link"
+            to="/"
+            aria-label="Workspace"
+            onClick={(e) => {
+              if (!canLeave()) e.preventDefault();
+            }}
+          >
+            <span className="suite-home-link__icon">
+              <ChevronLeft size={18} />
+            </span>
+            <span className="suite-home-link__text">Workspace</span>
+          </Link>
+          <div className="app-brand">
+            <AppMark app={APP_KIND[name]} size="sm" className="app-logo-icon" />
+            <span className="tool-title">{name}</span>
+          </div>
+          <span
+            className={`status-pill status-pill--${statusTone(status, error)} tool-save`}
+            role="status"
+          >
+            {status}
           </span>
-          <strong>{name}</strong>
         </div>
-        <span className="tool-save" role="status">
-          {status}
-        </span>
-        <select
-          aria-label="Switch app"
-          value={name}
-          onChange={(e) => {
-            if (!canLeave()) return;
-            const route = SUITE_APPS.find(
-              ([label]) => label === e.target.value,
-            )?.[1];
-            if (route === 'blueline') window.location.assign(designUrl());
-            else if (route) navigate(route);
-          }}
-        >
-          {SUITE_APPS.map(([label]) => (
-            <option key={label}>{label}</option>
-          ))}
-        </select>
-        <button
-          className="btn btn-secondary btn-icon"
-          aria-label={
-            isDarkMode ? 'Switch to light theme' : 'Switch to dark theme'
-          }
-          onClick={toggleTheme}
-        >
-          {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
-        </button>
+        <div className="header-actions">
+          <select
+            className="suite-app-switcher"
+            aria-label="Switch app"
+            value={name}
+            onChange={(e) => {
+              if (!canLeave()) return;
+              const route = SUITE_APPS.find(
+                ([label]) => label === e.target.value,
+              )?.[1];
+              if (route === 'blueline') window.location.assign(designUrl());
+              else if (route) navigate(route);
+            }}
+          >
+            {SUITE_APPS.map(([label]) => (
+              <option key={label}>{label}</option>
+            ))}
+          </select>
+          <button
+            className="btn btn-secondary btn-icon"
+            type="button"
+            aria-label={
+              isDarkMode ? 'Switch to light theme' : 'Switch to dark theme'
+            }
+            title="Toggle theme"
+            onClick={toggleTheme}
+          >
+            {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+        </div>
       </header>
       <div className="tool-content">
         <div className="tool-heading">
-          <div>
-            <h1>
-              {name === 'NinjaTime'
-                ? 'Make your time count.'
-                : name === 'NinjaNotes'
-                  ? 'A place for every thought.'
-                  : 'Give your PDFs a finishing touch.'}
-            </h1>
-            <p>{subtitle}</p>
-          </div>
-          <span className="tool-local">Stored in this browser</span>
+          <h1>{HEADLINE[name]}</h1>
+          <p>{subtitle}</p>
         </div>
         {error && (
           <div className="tool-alert" role="alert">

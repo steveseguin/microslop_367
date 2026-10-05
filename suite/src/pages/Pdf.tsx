@@ -10,7 +10,12 @@ import {
   ChevronLeft,
   ChevronRight,
   RotateCw,
+  ArrowUp,
+  ArrowDown,
+  FilePlus2,
+  Trash2,
 } from 'lucide-react';
+import { AppMark } from '../components/AppMark';
 import { ToolShell, type ToolProps } from '../components/ToolShell';
 import { downloadFile, useToolStorage } from '../utils/toolStorage';
 import { fillFields, openPdf, parsePageRange, readFields } from '../utils/pdf';
@@ -362,10 +367,10 @@ export default function Pdf(props: ToolProps) {
       }
       error={store.error}
     >
-      <div className="tool-row tool-row--between" style={{ marginBottom: 20 }}>
+      <div className="tool-toolbar" hidden={!data.bytes}>
         <div className="tool-row">
           <button
-            className="btn btn-primary"
+            className="btn btn-secondary"
             disabled={!store.ready || busy}
             onClick={() => input.current?.click()}
           >
@@ -390,6 +395,7 @@ export default function Pdf(props: ToolProps) {
               disabled={!canEdit || fieldsDirty}
               onClick={() => mergeInput.current?.click()}
             >
+              <FilePlus2 size={16} />
               Merge PDF
             </button>
           )}
@@ -456,16 +462,23 @@ export default function Pdf(props: ToolProps) {
         </div>
       )}
       {!data.bytes ? (
-        <section className="tool-panel tool-empty">
+        <section className="tool-panel tool-empty tool-pdf-empty">
+          <AppMark app="pdf" size="lg" />
           <h2>Your PDF, your browser.</h2>
           <p>
-            Open a PDF to start. Merge, split, rotate, annotate, or fill
-            standard forms.
+            Open a PDF to merge, split, rotate, annotate, or fill standard
+            forms. Files stay on this device, and one working draft is saved
+            automatically.
           </p>
-          <p>
-            Files stay on this device. One working draft is saved automatically.
-          </p>
-          <p className="tool-muted">
+          <button
+            className="btn btn-primary"
+            disabled={!store.ready || busy}
+            onClick={() => input.current?.click()}
+          >
+            <Upload size={16} />
+            Open PDF
+          </button>
+          <p className="tool-hint">
             Up to 30 MB. Existing paragraph text and scanned text are not
             directly editable.
           </p>
@@ -560,7 +573,7 @@ export default function Pdf(props: ToolProps) {
                 />
               </label>
             )}
-            <p className="tool-muted">
+            <p className="tool-muted tool-hint">
               {mode === 'text'
                 ? 'Click the page to place text at its baseline. Latin characters supported.'
                 : mode === 'draw'
@@ -575,7 +588,7 @@ export default function Pdf(props: ToolProps) {
             <h2>
               Page {page + 1} of {count}
             </h2>
-            <div className="tool-row">
+            <div className="tool-pdf-pair">
               <button
                 className="btn btn-secondary"
                 disabled={!canEdit || fieldsDirty}
@@ -599,10 +612,9 @@ export default function Pdf(props: ToolProps) {
                   }, 'Page removed. Undo is available.')
                 }
               >
+                <Trash2 size={15} />
                 Delete page
               </button>
-            </div>
-            <div className="tool-row">
               <button
                 className="btn btn-secondary"
                 disabled={!canEdit || page === 0 || fieldsDirty}
@@ -615,6 +627,7 @@ export default function Pdf(props: ToolProps) {
                   }, 'Page moved earlier.')
                 }
               >
+                <ArrowUp size={15} />
                 Move earlier
               </button>
               <button
@@ -629,6 +642,7 @@ export default function Pdf(props: ToolProps) {
                   }, 'Page moved later.')
                 }
               >
+                <ArrowDown size={15} />
                 Move later
               </button>
             </div>
@@ -788,8 +802,8 @@ export default function Pdf(props: ToolProps) {
               >
                 <ChevronLeft size={17} />
               </button>
-              <label>
-                Page
+              <label className="tool-inline-label">
+                <span className="sr-only">Page</span>
                 <select
                   aria-label="Current page"
                   disabled={busy || rendering}
@@ -811,7 +825,7 @@ export default function Pdf(props: ToolProps) {
               >
                 <ChevronRight size={17} />
               </button>
-              <span className="tool-muted" role="status">
+              <span className="tool-muted tool-pdf-state" role="status">
                 {rendering || busy || !previewReady
                   ? 'Preparing page…'
                   : 'Ready'}
