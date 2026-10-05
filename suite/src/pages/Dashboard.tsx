@@ -1,7 +1,9 @@
 import { Link, useNavigate } from 'react-router-dom';
 import '../styles/tools.css';
 import {
+  ArrowRight,
   FolderOpen,
+  Plus,
   Upload,
   Moon,
   Pencil,
@@ -21,7 +23,7 @@ import {
 import type { DocumentRecord, OfficeDocumentType } from '../utils/db';
 import { deleteDesign, designUrl, listDesigns, loadDesign, renameDesign, restoreDesign } from '../utils/blueline';
 import type { DesignDocument } from '../utils/blueline';
-import { AppGlyph, AppMark } from '../components/AppMark';
+import { AppMark } from '../components/AppMark';
 import { handOff, kindForFile } from '../utils/handoff';
 import { readToolWorkspace } from '../utils/toolStorage';
 
@@ -120,23 +122,38 @@ function writePendingUndos(entries: PendingUndo[]) {
 }
 
 /**
- * ONE set of create actions for the whole page. There used to be two: three
- * buttons in a 300px marketing hero, and three large launcher cards below it
- * carrying feature-list prose. Same three destinations, twice, plus copy nobody
- * reads — which is what made a workspace read as a landing page.
+ * Every app is one tile of the same shape: brand mark, name, one line. The
+ * four editors create a new file; the three tools open their workspace. They
+ * used to be a filled button, three outlined buttons and three large cards —
+ * three visual languages for seven equivalent entry points.
  */
-const CREATE_ACTIONS = [
-  { type: 'word', label: 'Document' },
-  { type: 'excel', label: 'Spreadsheet' },
-  { type: 'powerpoint', label: 'Presentation' },
-  { type: 'blueline', label: 'Design' },
-] as const;
-
-const TOOL_LAUNCHERS = [
-  { app: 'time', to: '/time', name: 'NinjaTime', blurb: 'Track time & create invoices' },
-  { app: 'notes', to: '/notes', name: 'NinjaNotes', blurb: 'Notes, dictation & a daily timeline' },
-  { app: 'pdf', to: '/pdf', name: 'NinjaPDF', blurb: 'Edit, organize & fill PDFs' },
-] as const;
+type AppTile = {
+  app:
+    | 'word'
+    | 'excel'
+    | 'powerpoint'
+    | 'blueline'
+    | 'image'
+    | 'svg'
+    | 'time'
+    | 'notes'
+    | 'pdf';
+  name: string;
+  line: string;
+  /** Accessible name for the create tiles ("New document", ...). */
+  create?: string;
+};
+const APP_TILES: AppTile[] = [
+  { app: 'word', name: 'NinjaWord', line: 'New document', create: 'New document' },
+  { app: 'excel', name: 'NinjaCalc', line: 'New spreadsheet', create: 'New spreadsheet' },
+  { app: 'powerpoint', name: 'NinjaSlides', line: 'New presentation', create: 'New presentation' },
+  { app: 'blueline', name: 'Blueline', line: 'New design', create: 'New design' },
+  { app: 'image', name: 'NinjaImage', line: 'Crop, adjust & draw on photos' },
+  { app: 'svg', name: 'NinjaSVG', line: 'Edit & convert SVG and images' },
+  { app: 'time', name: 'NinjaTime', line: 'Time tracking & invoices' },
+  { app: 'notes', name: 'NinjaNotes', line: 'Notes & dictation' },
+  { app: 'pdf', name: 'NinjaPDF', line: 'Edit, sign & fill PDFs' },
+];
 const TYPE_LABEL = { word: 'Document', excel: 'Spreadsheet', powerpoint: 'Presentation', blueline: 'Design' } as const;
 
 async function listWorkspaceFiles(): Promise<DocMeta[]> {
@@ -148,7 +165,8 @@ async function listWorkspaceFiles(): Promise<DocMeta[]> {
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-const OPEN_ACCEPT = '.docx,.xlsx,.xls,.csv,.pptx,.pdf,application/pdf';
+const OPEN_ACCEPT =
+  '.docx,.xlsx,.xls,.csv,.pptx,.pdf,application/pdf,.svg,image/*';
 const MAX_OPEN_BYTES = 30_000_000;
 
 function formatHours(seconds: number) {
@@ -207,7 +225,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
     const kind = kindForFile(file);
     if (!kind) {
       setOpenError(
-        `“${file.name}” is not a file OfficeNinja opens. Use .docx, .xlsx, .csv, .pptx or .pdf.`,
+        `“${file.name}” is not a file OfficeNinja opens. Use .docx, .xlsx, .csv, .pptx, .pdf, .svg or an image.`,
       );
       return;
     }
@@ -451,7 +469,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
         <div className="dashboard-dropcue" aria-hidden="true">
           <Upload size={30} />
           <strong>Drop to open</strong>
-          <span>Word, Excel, CSV, PowerPoint or PDF</span>
+          <span>Word, Excel, CSV, PowerPoint, PDF, SVG or an image</span>
         </div>
       )}
       <h1 className="sr-only">OfficeNinja office and design workspace</h1>
@@ -464,29 +482,27 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
             <span className="dashboard-brand__title">OfficeNinja</span>
           </span>
 
-          <nav className="dashboard-create" aria-label="Create a new file">
-            {CREATE_ACTIONS.map(({ type, label }, index) => (
-              <a
-                key={type}
-                // The per-type modifier is what carries the brand colour. The CSS
-                // previously hooked this off `[href$="/word"]`, which worked but lost
-                // the colour silently if a route were ever renamed.
-                className={`btn ${index === 0 ? 'btn-primary' : 'btn-secondary'} dashboard-create__btn dashboard-create__btn--${type}`}
-                href={type === 'blueline' ? designUrl() : `#/${type}`} title={type === 'blueline' ? 'Blueline: vector design and prototyping' : undefined}
-                aria-label={`New ${label.toLowerCase()}`}
-              >
-                <AppGlyph app={type} size={type === 'blueline' ? 24 : 16} />
-                {/* Two labels, one visible at a time. On a phone the three
-                    buttons share one row, and "New presentation" could only
-                    ever render as "New pres…"; the accessible name is the same
-                    either way (aria-label above). */}
-                <span className="dashboard-create__label">New {label.toLowerCase()}</span>
-                <span className="dashboard-create__label dashboard-create__label--short" aria-hidden="true">
-                  {type === 'blueline' ? 'Blueline' : label}
-                </span>
-              </a>
-            ))}
-          </nav>
+          <button
+            type="button"
+            className="btn btn-secondary dashboard-open"
+            onClick={() => openInput.current?.click()}
+            title="Open a .docx, .xlsx, .csv, .pptx or .pdf file. You can also drop files anywhere on this page."
+          >
+            <Upload size={15} aria-hidden="true" />
+            Open file
+          </button>
+          <input
+            ref={openInput}
+            type="file"
+            hidden
+            accept={OPEN_ACCEPT}
+            aria-label="Open a file from this device"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              openFile(file);
+            }}
+          />
 
           <button
             className="btn btn-secondary btn-icon dashboard-theme-toggle"
@@ -501,16 +517,36 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
 
       <section className="dashboard-section" aria-labelledby="dashboard-recent-title">
         <div className="dashboard-shell">
-          <nav className="tool-launchers" aria-label="Productivity tools">
-            {TOOL_LAUNCHERS.map(({ app, to, name, blurb }) => (
-              <Link key={app} className="tool-launcher" to={to}>
-                <AppMark app={app} />
-                <span>
-                  <strong>{name}</strong>
-                  <small>{summaries[app] ?? blurb}</small>
-                </span>
-              </Link>
-            ))}
+          <nav className="app-grid" aria-label="Apps">
+            {APP_TILES.map(({ app, name, line, create }) => {
+              const href =
+                app === 'blueline' ? designUrl() : `#/${app}`;
+              const status =
+                app === 'time' || app === 'notes' || app === 'pdf'
+                  ? summaries[app]
+                  : undefined;
+              return (
+                <a
+                  key={app}
+                  className={`app-tile${create ? ' dashboard-create__btn' : ''}`}
+                  href={href}
+                  aria-label={create}
+                >
+                  <AppMark app={app} />
+                  <span className="app-tile__text">
+                    <strong>{name}</strong>
+                    <small data-live={status ? '' : undefined}>
+                      {status ?? line}
+                    </small>
+                  </span>
+                  {create ? (
+                    <Plus size={16} className="app-tile__go" aria-hidden="true" />
+                  ) : (
+                    <ArrowRight size={16} className="app-tile__go" aria-hidden="true" />
+                  )}
+                </a>
+              );
+            })}
           </nav>
           <div className="dashboard-section-header">
             {/* One caption, and it earns its line: it is the only place the
@@ -527,27 +563,6 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
             </div>
 
             <div className="dashboard-file-tools">
-              <button
-                type="button"
-                className="btn btn-secondary dashboard-open"
-                onClick={() => openInput.current?.click()}
-                title="Open a .docx, .xlsx, .csv, .pptx or .pdf file. You can also drop files anywhere on this page."
-              >
-                <Upload size={15} aria-hidden="true" />
-                Open file
-              </button>
-              <input
-                ref={openInput}
-                type="file"
-                hidden
-                accept={OPEN_ACCEPT}
-                aria-label="Open a file from this device"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = '';
-                  openFile(file);
-                }}
-              />
             {recentDocs.length > 0 && (
               <>
                 <input
@@ -589,7 +604,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
               <FolderOpen size={22} aria-hidden="true" />
               <p>
                 <strong>No files yet.</strong> Start a document, spreadsheet, presentation or Blueline design, or drop a
-                .docx, .xlsx, .pptx or .pdf anywhere on this page to open it. Everything is saved in this browser as you type.
+                document, spreadsheet, presentation, PDF, SVG or photo anywhere on this page to open it. Everything is saved in this browser as you type.
                 {' '}Time entries, notes, and your PDF draft are saved inside their tools above.
               </p>
             </div>

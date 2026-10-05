@@ -642,7 +642,7 @@ for (const width of [1440, 390])
       }
       await page.getByRole('link', { name: 'Workspace', exact: true }).click();
       await expect(
-        page.getByRole('navigation', { name: 'Productivity tools' }),
+        page.getByRole('navigation', { name: 'Apps' }),
       ).toBeVisible();
       await page.screenshot({
         path: info.outputPath(`dashboard-${width}-${theme}.png`),

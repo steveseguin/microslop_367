@@ -1,0 +1,1 @@
+const e=[["NinjaWord","/word"],["NinjaCalc","/excel"],["NinjaSlides","/powerpoint"],["Blueline","blueline"],["NinjaTime","/time"],["NinjaNotes","/notes"],["NinjaPDF","/pdf"],["NinjaImage","/image"],["NinjaSVG","/svg"]];export{e as S};

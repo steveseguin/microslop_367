@@ -7,6 +7,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
+import { DictateField } from '../components/Dictate';
+import { appendSpoken } from '../utils/speech';
 import {
   Copy,
   Download,
@@ -1143,15 +1145,23 @@ export default function Notes(props: ToolProps) {
               <div className="tool-note-head notes-head">
                 <label>
                   <span className="sr-only">Note title</span>
-                  <input
-                    className="tool-note-title"
-                    ref={titleRef}
-                    aria-label="Note title"
-                    placeholder="Untitled note"
+                  <DictateField
+                    label="note title"
                     disabled={!store.ready}
-                    value={note.title}
-                    onChange={(e) => patchNote({ title: e.target.value })}
-                  />
+                    onText={(spoken) =>
+                      patchNote({ title: appendSpoken(note.title, spoken) })
+                    }
+                  >
+                    <input
+                      className="tool-note-title"
+                      ref={titleRef}
+                      aria-label="Note title"
+                      placeholder="Untitled note"
+                      disabled={!store.ready}
+                      value={note.title}
+                      onChange={(e) => patchNote({ title: e.target.value })}
+                    />
+                  </DictateField>
                 </label>
                 <div className="tool-row tool-note-tools">
                   <button
@@ -1239,21 +1249,48 @@ ${note.body}
               <div className="tool-fields">
                 <label>
                   Project / client
-                  <input
-                    placeholder="Optional context"
-                    value={note.context}
+                  <DictateField
+                    label="project or client"
                     disabled={!store.ready}
-                    onChange={(e) => patchNote({ context: e.target.value })}
-                  />
+                    onText={(spoken) =>
+                      patchNote({ context: appendSpoken(note.context, spoken) })
+                    }
+                  >
+                    <input
+                      placeholder="Optional context"
+                      value={note.context}
+                      disabled={!store.ready}
+                      onChange={(e) => patchNote({ context: e.target.value })}
+                    />
+                  </DictateField>
                 </label>
                 <label>
                   Tags
-                  <input
-                    placeholder="meeting, ideas, follow-up"
-                    value={note.tags}
+                  <DictateField
+                    label="tags"
                     disabled={!store.ready}
-                    onChange={(e) => patchNote({ tags: e.target.value })}
-                  />
+                    onText={(spoken) => {
+                      // "meeting and follow up" becomes "meeting, follow up".
+                      const spokenTags = spoken
+                        .toLowerCase()
+                        .split(/,|\band\b/)
+                        .map((t) => t.trim())
+                        .filter(Boolean)
+                        .join(', ');
+                      patchNote({
+                        tags: note.tags.trim()
+                          ? `${note.tags.replace(/[,\s]+$/, '')}, ${spokenTags}`
+                          : spokenTags,
+                      });
+                    }}
+                  >
+                    <input
+                      placeholder="meeting, ideas, follow-up"
+                      value={note.tags}
+                      disabled={!store.ready}
+                      onChange={(e) => patchNote({ tags: e.target.value })}
+                    />
+                  </DictateField>
                 </label>
               </div>
               {noteTags.length > 0 && (

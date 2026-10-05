@@ -1,4 +1,6 @@
 import { memo, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { DictateField } from '../components/Dictate';
+import { appendSpoken } from '../utils/speech';
 import { takeHandoff } from '../utils/handoff';
 import { useSearchParams } from 'react-router-dom';
 import * as fabric from 'fabric';
@@ -3305,14 +3307,21 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
             </button>
           )}
         </div>
-        <textarea
-          className="notes-textarea"
-          style={{ flex: 1, marginTop: '0.5rem' }}
-          value={currentSlide?.notes || ''}
-          onChange={(event) => updateNotes(event.target.value)}
-          placeholder="Outline talking points, reminders, or handoff notes."
-          aria-label="Speaker notes"
-        />
+        <DictateField
+          label="speaker notes"
+          multiline
+          continuous
+          onText={(spoken) => updateNotes(appendSpoken(currentSlide?.notes || '', spoken))}
+        >
+          <textarea
+            className="notes-textarea"
+            style={{ flex: 1, marginTop: '0.5rem' }}
+            value={currentSlide?.notes || ''}
+            onChange={(event) => updateNotes(event.target.value)}
+            placeholder="Outline talking points, reminders, or handoff notes — or tap the mic and speak."
+            aria-label="Speaker notes"
+          />
+        </DictateField>
       </div>
     </div>
   );

@@ -6,18 +6,27 @@ import '../styles/tools.css';
 import { SUITE_APPS } from '../utils/suiteApps';
 import { AppMark } from './AppMark';
 
-type ToolName = 'NinjaTime' | 'NinjaNotes' | 'NinjaPDF';
+type ToolName =
+  | 'NinjaTime'
+  | 'NinjaNotes'
+  | 'NinjaPDF'
+  | 'NinjaImage'
+  | 'NinjaSVG';
 
 const APP_KIND = {
   NinjaTime: 'time',
   NinjaNotes: 'notes',
   NinjaPDF: 'pdf',
+  NinjaImage: 'image',
+  NinjaSVG: 'svg',
 } as const;
 
 const HEADLINE = {
   NinjaTime: 'Make your time count.',
   NinjaNotes: 'A place for every thought.',
   NinjaPDF: 'Give your PDFs a finishing touch.',
+  NinjaImage: 'Make every photo look its best.',
+  NinjaSVG: 'Vector graphics, tweaked and converted.',
 } as const;
 
 function statusTone(status: string, error?: string) {

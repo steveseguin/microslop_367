@@ -19,7 +19,7 @@ import react from '@vitejs/plugin-react'
 const RUNTIME_ONLY_PATTERNS = [
   /^blueline\//,
   /^pdf-assets\//,
-  /^assets\/(Time|Notes|Pdf|pdf-engine|pdf-renderer|pdf.worker)[-.]/,
+  /^assets\/(Time|Notes|Pdf|Image|Svg|svgStl|svgTrace|svgTrace\.worker|pdf-engine|pdf-renderer|pdf.worker)[-.]/,
   /^assets\/(Word|Excel|PowerPoint|ExcelWorkbook|SelectionChart)-/,
   /^assets\/(word-editor|word-io|excel-workbook|excel-io|excel-chart|slides-canvas|slides-io|zip-runtime)[-.]/,
   /^assets\/__vite-browser-external-/,
@@ -140,6 +140,8 @@ function serviceWorkerPlugin(): Plugin {
 
 export default defineConfig({
   base: './',
+  // pdf.js starts its worker as a module worker; ours must be built as one.
+  worker: { format: 'es' },
   build: {
     rollupOptions: {
       output: {

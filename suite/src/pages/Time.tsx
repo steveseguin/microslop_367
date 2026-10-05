@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import type { InputHTMLAttributes, ReactElement, ReactNode } from 'react';
 import {
   Play,
   Square,
@@ -8,8 +9,16 @@ import {
   Trash2,
   Pencil,
   Upload,
+  Copy,
+  Printer,
+  Save,
+  FileDown,
+  FileUp,
+  X,
 } from 'lucide-react';
 import { ToolShell, type ToolProps } from '../components/ToolShell';
+import { DictateField } from '../components/Dictate';
+import { appendSpoken, spokenNumber } from '../utils/speech';
 import {
   csvCell,
   downloadFile,
@@ -20,15 +29,23 @@ import {
 import {
   CURRENCIES,
   dayLabel,
+  detachedLines,
   duration,
   EMPTY_TIME,
   entryAmount,
   groupByDay,
   hoursMinutes,
   inRange,
+  invoiceFile,
+  invoicePdf,
+  invoiceStatus,
   invoiceTotals,
   lastRateFor,
   lineAmount,
+  lineQuantity,
+  lineQuantityText,
+  manualLine,
+  manualSeconds,
   minorDigits,
   money,
   rangeBounds,
@@ -36,6 +53,8 @@ import {
   rangeCaption,
   summarize,
   TIME_RANGES,
+  uniqueNumber,
+  validInvoiceFile,
   validTimeBackup,
 } from '../utils/time';
 import type {
@@ -81,28 +100,35 @@ function InvoicePaper({ invoice }: { invoice: Invoice }) {
         <thead>
           <tr>
             <th>Description</th>
-            <th>Time (h:m:s)</th>
-            <th>Rate / hour</th>
+            <th>Qty / time</th>
+            <th>Rate</th>
             <th>Amount</th>
           </tr>
         </thead>
         <tbody>
+          {!invoice.lines.length && (
+            <tr>
+              <td colSpan={4}>No line items yet.</td>
+            </tr>
+          )}
           {invoice.lines.map((line) => (
             <tr key={line.id}>
               <td>
                 {line.description}
-                <br />
-                <small>
-                  {line.project ? `${line.project} · ` : ''}
-                  {line.date}
-                </small>
+                {!line.manual && (
+                  <>
+                    <br />
+                    <small>
+                      {line.project ? `${line.project} · ` : ''}
+                      {line.date}
+                    </small>
+                  </>
+                )}
               </td>
-              <td>{duration(line.seconds)}</td>
+              <td>{lineQuantityText(line)}</td>
               <td>
                 {money(
-                  Math.round(
-                    line.rate * 10 ** (invoice.currency === 'JPY' ? 0 : 2),
-                  ),
+                  Math.round(line.rate * 10 ** minorDigits(invoice.currency)),
                   invoice.currency,
                 )}
               </td>
@@ -135,6 +161,117 @@ function InvoicePaper({ invoice }: { invoice: Invoice }) {
     </article>
   );
 }
+
+/**
+ * A labelled field. The label points at the control with htmlFor, so the mic
+ * button that DictateField tucks inside the field never becomes part of the
+ * field's accessible name.
+ */
+function Field({
+  id,
+  label,
+  speech,
+  multiline,
+  className,
+  children,
+}: {
+  id: string;
+  label: ReactNode;
+  /** `name` is spoken as "Dictate <name>"; keep it distinct from the label. */
+  speech?: { name: string; onText: (text: string) => void; long?: boolean };
+  multiline?: boolean;
+  className?: string;
+  children: ReactElement;
+}) {
+  return (
+    <div className={`time-field${className ? ` ${className}` : ''}`}>
+      <label htmlFor={id}>{label}</label>
+      {speech ? (
+        <DictateField
+          label={speech.name}
+          onText={speech.onText}
+          multiline={multiline}
+          continuous={speech.long}
+        >
+          {children}
+        </DictateField>
+      ) : (
+        children
+      )}
+    </div>
+  );
+}
+
+/**
+ * Number input that lets the field be cleared or half-typed ("1.") while only
+ * committing valid values, and follows outside changes (e.g. dictation).
+ */
+function NumberInput({
+  value,
+  onValue,
+  min = 0,
+  max,
+  ...rest
+}: {
+  value: number;
+  onValue: (value: number) => void;
+  min?: number;
+  max: number;
+} & Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  'value' | 'onChange' | 'min' | 'max' | 'type'
+>) {
+  const [draft, setDraft] = useState(String(value));
+  const [seen, setSeen] = useState(value);
+  if (seen !== value) {
+    setSeen(value);
+    if (Number(draft) !== value || draft.trim() === '') setDraft(String(value));
+  }
+  return (
+    <input
+      {...rest}
+      type="number"
+      inputMode="decimal"
+      min={min}
+      max={max}
+      value={draft}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        const v = Number(e.target.value);
+        if (
+          e.target.value.trim() !== '' &&
+          Number.isFinite(v) &&
+          v >= min &&
+          v <= max
+        )
+          onValue(v);
+      }}
+      onBlur={() => {
+        if (draft.trim() === '' || Number(draft) !== value)
+          setDraft(String(value));
+      }}
+    />
+  );
+}
+
+const STATUS_CLASS = {
+  Paid: 'time-status--invoiced',
+  Unpaid: 'time-status--open',
+  Overdue: 'time-status--overdue',
+} as const;
+
+const clock = (time: number) =>
+  new Date(time).toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+const longDate = (date: string) =>
+  parseDay(date).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 
 const shortDate = (date: string) =>
   parseDay(date).toLocaleDateString(undefined, {
@@ -230,6 +367,13 @@ export default function Time(props: ToolProps) {
   const importRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
+  const invoiceImportRef = useRef<HTMLInputElement>(null);
+  const editorRef = useRef<HTMLElement>(null);
+  const uid = useId();
+  const fid = (name: string) => `${uid}-${name}`;
+  // When this invoice was last confirmed written to on-device storage.
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
   useEffect(() => {
     if (!data.timer) return;
     const timer = window.setInterval(() => setNow(Date.now()), 500);
@@ -466,19 +610,163 @@ export default function Time(props: ToolProps) {
       }))
     ) {
       setInvoiceId(newInvoice.id);
+      setSavedAt(Date.now());
       setSelected([]);
       setTab('invoices');
       setMessage('Invoice created. Review the details before exporting.');
     }
   };
-  const patchInvoice = (patch: Partial<Invoice>) => {
-    if (invoice)
-      void update((s) => ({
+  const changeInvoice = (change: (item: Invoice) => Invoice) => {
+    if (!invoice) return;
+    const id = invoice.id;
+    void update((s) => ({
+      ...s,
+      invoices: s.invoices.map((item) => (item.id === id ? change(item) : item)),
+    })).then((ok) => {
+      if (ok) setSavedAt(Date.now());
+    });
+  };
+  const patchInvoice = (patch: Partial<Invoice>) =>
+    changeInvoice((item) => ({ ...item, ...patch }));
+  const patchLine = (lineId: string, patch: Partial<TimeEntry>) =>
+    changeInvoice((item) => ({
+      ...item,
+      lines: item.lines.map((line) => {
+        if (line.id !== lineId) return line;
+        const next = { ...line, ...patch };
+        if (next.manual && typeof next.quantity === 'number')
+          next.seconds = manualSeconds(next.quantity);
+        return next;
+      }),
+    }));
+  const openInvoice = (id: string) => {
+    setInvoiceId(id);
+    setSavedAt(null);
+  };
+  const dueIn30 = () => {
+    const due = new Date();
+    due.setDate(due.getDate() + 30);
+    return localDate(due);
+  };
+  const addInvoice = async (
+    make: (number: string) => Invoice,
+    note: string,
+  ) => {
+    let created: Invoice | null = null;
+    const ok = await update((s) => {
+      created = make(`INV-${String(s.nextInvoice).padStart(4, '0')}`);
+      return {
         ...s,
-        invoices: s.invoices.map((item) =>
-          item.id === invoice.id ? { ...item, ...patch } : item,
-        ),
-      }));
+        invoices: [created, ...s.invoices],
+        nextInvoice: s.nextInvoice + 1,
+      };
+    });
+    if (ok && created) {
+      setInvoiceId((created as Invoice).id);
+      setSavedAt(Date.now());
+      setTab('invoices');
+      setMessage(note);
+      requestAnimationFrame(() =>
+        editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      );
+    }
+  };
+  const newInvoice = () =>
+    addInvoice((number) => {
+      const draft: Invoice = {
+        id: crypto.randomUUID(),
+        number,
+        date: localDate(),
+        due: dueIn30(),
+        client: '',
+        from: data.business,
+        address: '',
+        notes: 'Thank you for your business.',
+        currency: data.currency,
+        tax: 0,
+        discount: 0,
+        paid: false,
+        lines: [],
+      };
+      draft.lines = [manualLine(draft)];
+      return draft;
+    }, 'New invoice created. Add the client and line items.');
+  const duplicateInvoice = () => {
+    if (!invoice) return;
+    const source = invoice;
+    void addInvoice(
+      (number) => ({
+        ...source,
+        id: crypto.randomUUID(),
+        number,
+        date: localDate(),
+        due: dueIn30(),
+        paid: false,
+        // Copies never claim the original's time entries.
+        lines: detachedLines(source.lines),
+      }),
+      `Copied ${source.number}. The copy's lines are editable and not linked to time entries.`,
+    );
+  };
+  const saveInvoice = async () => {
+    // Autosave already ran; this writes the current state again and confirms.
+    if (await update((s) => ({ ...s }))) {
+      setSavedAt(Date.now());
+      setMessage(`${invoice?.number ?? 'Invoice'} saved on this device.`);
+    }
+  };
+  const fileBase = (inv: Invoice) =>
+    (inv.number.trim() || 'invoice').replace(/[^\w.-]+/g, '-');
+  const downloadPdf = async () => {
+    if (!invoice) return;
+    setPdfBusy(true);
+    try {
+      const bytes = await invoicePdf(invoice);
+      downloadFile(
+        `${fileBase(invoice)}.pdf`,
+        bytes as Uint8Array<ArrayBuffer>,
+        'application/pdf',
+      );
+      setMessage(`${invoice.number}.pdf downloaded.`);
+    } catch {
+      setMessage('The PDF could not be created. Try Print / Save PDF instead.');
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+  const importInvoice = async (file: File) => {
+    try {
+      if (file.size > 5_000_000) throw new Error('size');
+      const parsed: unknown = JSON.parse(await file.text());
+      if (!validInvoiceFile(parsed)) throw new Error('shape');
+      const source = parsed.invoice;
+      let created: Invoice | null = null;
+      const ok = await update((s) => {
+        created = {
+          ...source,
+          id: crypto.randomUUID(),
+          number: uniqueNumber(
+            source.number,
+            s.invoices.map((i) => i.number),
+          ),
+          // Imported lines are snapshots; they never link to time entries here.
+          lines: detachedLines(source.lines),
+        };
+        return { ...s, invoices: [created, ...s.invoices] };
+      });
+      if (ok && created) {
+        const added: Invoice = created;
+        setInvoiceId(added.id);
+        setSavedAt(Date.now());
+        setMessage(`Imported ${added.number} (${added.lines.length} line${added.lines.length === 1 ? '' : 's'}).`);
+      } else if (!ok) {
+        setMessage('The invoice could not be saved. Nothing was imported.');
+      }
+    } catch {
+      setMessage(
+        'That file is not a NinjaTime invoice (.invoice.json). Nothing was imported.',
+      );
+    }
   };
   const exportCSV = () => {
     const rows = [
@@ -666,9 +954,16 @@ export default function Time(props: ToolProps) {
               disabled={!store.ready || !!data.timer}
             >
               <div className="tool-fields tool-fields--entry">
-                <label>
-                  Description
+                <Field
+                  id={fid('description')}
+                  label="Description"
+                  speech={{
+                    name: 'description',
+                    onText: (t) => setDescription((d) => appendSpoken(d, t)),
+                  }}
+                >
                   <input
+                    id={fid('description')}
                     ref={descriptionRef}
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
@@ -681,29 +976,57 @@ export default function Time(props: ToolProps) {
                     enterKeyHint={editing ? 'done' : 'go'}
                     placeholder="Website design"
                   />
-                </label>
-                <label>
-                  Client
+                </Field>
+                <Field
+                  id={fid('client')}
+                  label="Client"
+                  speech={{
+                    name: 'client',
+                    onText: (t) => chooseClient(t),
+                  }}
+                >
                   <input
+                    id={fid('client')}
                     value={client}
                     onChange={(e) => chooseClient(e.target.value)}
                     list="time-clients"
                     placeholder="Client name"
                   />
-                </label>
-                <label>
-                  Project
+                </Field>
+                <Field
+                  id={fid('project')}
+                  label="Project"
+                  speech={{
+                    name: 'project',
+                    onText: (t) => setProject(t),
+                  }}
+                >
                   <input
+                    id={fid('project')}
                     value={project}
                     onChange={(e) => setProject(e.target.value)}
                     list="time-projects"
                     placeholder="Optional"
                   />
-                </label>
-                <label>
-                  Hourly rate
+                </Field>
+                <Field
+                  id={fid('rate')}
+                  label="Hourly rate"
+                  speech={{
+                    name: 'rate',
+                    onText: (t) => {
+                      const n = spokenNumber(t);
+                      if (n && Number(n) >= 0) {
+                        setRate(n);
+                        setRateTouched(true);
+                      }
+                    },
+                  }}
+                >
                   <input
+                    id={fid('rate')}
                     type="number"
+                    inputMode="decimal"
                     min="0"
                     max="1000000"
                     step="0.01"
@@ -713,7 +1036,7 @@ export default function Time(props: ToolProps) {
                       setRateTouched(true);
                     }}
                   />
-                </label>
+                </Field>
               </div>
               <datalist id="time-clients">
                 {clients.map((c) => (
@@ -770,17 +1093,28 @@ export default function Time(props: ToolProps) {
                     onChange={(e) => setDate(e.target.value)}
                   />
                 </label>
-                <label>
-                  Manual hours
+                <Field
+                  id={fid('hours')}
+                  label="Manual hours"
+                  speech={{
+                    name: 'hours',
+                    onText: (t) => {
+                      const n = spokenNumber(t);
+                      if (n && Number(n) > 0) setHours(n);
+                    },
+                  }}
+                >
                   <input
+                    id={fid('hours')}
                     type="number"
+                    inputMode="decimal"
                     min="0.0003"
                     max="87600"
                     step="any"
                     value={hours}
                     onChange={(e) => setHours(e.target.value)}
                   />
-                </label>
+                </Field>
                 <div className="tool-row">
                   <button
                     className={`btn ${editing ? 'btn-primary' : 'btn-secondary'}`}
@@ -1082,11 +1416,563 @@ export default function Time(props: ToolProps) {
       {tab === 'invoices' && (
         <div className="tool-stack">
           <section className="tool-panel">
+            <div className="tool-row tool-row--between tool-panel__head">
+              <h2>Invoices</h2>
+              <div className="tool-row time-invoices-actions">
+                <button
+                  className="btn btn-secondary"
+                  disabled={!store.ready}
+                  onClick={() => invoiceImportRef.current?.click()}
+                >
+                  <FileUp size={15} /> Import invoice
+                </button>
+                <input
+                  hidden
+                  ref={invoiceImportRef}
+                  type="file"
+                  aria-label="Import invoice file"
+                  accept=".json,application/json"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (file) void importInvoice(file);
+                  }}
+                />
+                <button
+                  className="btn btn-primary"
+                  disabled={!store.ready}
+                  onClick={() => void newInvoice()}
+                >
+                  <Plus size={15} /> New invoice
+                </button>
+              </div>
+            </div>
+            {!data.invoices.length ? (
+              <div className="tool-empty">
+                No invoices yet. Select billable time entries and choose Create
+                invoice, or start a blank one with New invoice.
+              </div>
+            ) : (
+              <div className="tool-table-wrap">
+                <table className="tool-table time-invoices">
+                  <thead>
+                    <tr>
+                      <th scope="col">Invoice</th>
+                      <th scope="col">Client</th>
+                      <th scope="col">Issued</th>
+                      <th scope="col">Due</th>
+                      <th scope="col" className="time-num">
+                        Total
+                      </th>
+                      <th scope="col">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.invoices.map((item) => {
+                      const state = invoiceStatus(item, today);
+                      const current = item.id === invoice?.id;
+                      return (
+                        <tr
+                          key={item.id}
+                          className={`time-invoice-row${current ? ' time-invoice-row--current' : ''}`}
+                          onClick={() => openInvoice(item.id)}
+                        >
+                          <td className="time-invoice__num">
+                            <button
+                              type="button"
+                              className="time-invoice__open"
+                              aria-label={`Open ${item.number || 'untitled invoice'}`}
+                              aria-current={current ? 'true' : undefined}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openInvoice(item.id);
+                              }}
+                            >
+                              {item.number || 'Untitled'}
+                            </button>
+                          </td>
+                          <td className="time-invoice__client">
+                            {item.client || (
+                              <span className="tool-muted">No client</span>
+                            )}
+                          </td>
+                          <td className="time-invoice__date">
+                            <span className="time-invoice__k">Issued </span>
+                            {longDate(item.date)}
+                          </td>
+                          <td className="time-invoice__due">
+                            <span className="time-invoice__k">Due </span>
+                            {longDate(item.due)}
+                          </td>
+                          <td className="time-num time-invoice__total">
+                            {money(invoiceTotals(item).total, item.currency)}
+                          </td>
+                          <td className="time-invoice__status">
+                            <span
+                              className={`time-status ${STATUS_CLASS[state]}`}
+                            >
+                              {state}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+          {invoice && (
+            <>
+              <section
+                className="tool-panel time-invoice-editor"
+                ref={editorRef}
+              >
+                <div className="time-invoice-head">
+                  <div className="time-invoice-head__title">
+                    <h2>{invoice.number || 'Untitled invoice'}</h2>
+                    <span
+                      className={`time-status ${STATUS_CLASS[invoiceStatus(invoice, today)]}`}
+                    >
+                      {invoiceStatus(invoice, today)}
+                    </span>
+                    <span className="time-savestate" aria-live="polite">
+                      {store.status === 'Saving…'
+                        ? 'Saving…'
+                        : savedAt
+                          ? `Saved ${clock(savedAt)}`
+                          : 'Autosaves on this device'}
+                    </span>
+                  </div>
+                  <div className="time-invoice-actions">
+                    <button
+                      className="btn btn-primary"
+                      disabled={!store.ready}
+                      onClick={() => void saveInvoice()}
+                    >
+                      <Save size={15} /> Save
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      disabled={pdfBusy}
+                      onClick={() => void downloadPdf()}
+                    >
+                      <FileDown size={15} /> Download PDF
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        const old = document.title;
+                        document.title = invoice.number;
+                        window.print();
+                        document.title = old;
+                      }}
+                    >
+                      <Printer size={15} /> Print / Save PDF
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        exportJSON(
+                          `${fileBase(invoice)}.invoice.json`,
+                          invoiceFile(invoice),
+                        );
+                        setMessage(
+                          `${invoice.number}.invoice.json exported. Use Import invoice to open it on another device.`,
+                        );
+                      }}
+                    >
+                      <Download size={15} /> Export invoice
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      disabled={!store.ready}
+                      onClick={duplicateInvoice}
+                    >
+                      <Copy size={15} /> Duplicate
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      disabled={!store.ready}
+                      onClick={() => patchInvoice({ paid: !invoice.paid })}
+                    >
+                      {invoice.paid ? 'Mark unpaid' : 'Mark paid'}
+                    </button>
+                    <button
+                      className="btn btn-secondary time-danger"
+                      disabled={!store.ready}
+                      onClick={async () => {
+                        if (
+                          window.confirm(
+                            'Delete this invoice and make its time entries available to invoice again?',
+                          )
+                        ) {
+                          const gone = invoice.number;
+                          if (
+                            await update((s) => ({
+                              ...s,
+                              invoices: s.invoices.filter(
+                                (i) => i.id !== invoice.id,
+                              ),
+                            }))
+                          ) {
+                            setInvoiceId(null);
+                            setSavedAt(null);
+                            setMessage(
+                              `${gone} deleted. Its time entries can be invoiced again.`,
+                            );
+                          }
+                        }
+                      }}
+                    >
+                      <Trash2 size={15} /> Delete invoice
+                    </button>
+                  </div>
+                </div>
+                <fieldset
+                  disabled={!store.ready}
+                  className="tool-fieldset tool-fieldset--spaced"
+                >
+                  <div className="tool-fields time-invoice-facts">
+                    <Field id={fid('inv-number')} label="Invoice number">
+                      <input
+                        id={fid('inv-number')}
+                        value={invoice.number}
+                        onChange={(e) =>
+                          patchInvoice({ number: e.target.value })
+                        }
+                      />
+                    </Field>
+                    <Field id={fid('inv-date')} label="Issue date">
+                      <input
+                        id={fid('inv-date')}
+                        type="date"
+                        value={invoice.date}
+                        onChange={(e) => {
+                          if (e.target.value)
+                            patchInvoice({ date: e.target.value });
+                        }}
+                      />
+                    </Field>
+                    <Field id={fid('inv-due')} label="Due date">
+                      <input
+                        id={fid('inv-due')}
+                        type="date"
+                        value={invoice.due}
+                        onChange={(e) => {
+                          if (e.target.value)
+                            patchInvoice({ due: e.target.value });
+                        }}
+                      />
+                    </Field>
+                    <Field id={fid('inv-tax')} label="Tax %">
+                      <NumberInput
+                        id={fid('inv-tax')}
+                        max={100}
+                        step="0.01"
+                        value={invoice.tax}
+                        onValue={(v) => patchInvoice({ tax: v })}
+                      />
+                    </Field>
+                    <Field
+                      id={fid('inv-discount')}
+                      label={`Discount (${invoice.currency})`}
+                    >
+                      <NumberInput
+                        id={fid('inv-discount')}
+                        max={1e12}
+                        step="0.01"
+                        value={invoice.discount}
+                        onValue={(v) => patchInvoice({ discount: v })}
+                      />
+                    </Field>
+                  </div>
+                  <div className="tool-fields time-invoice-parties">
+                    <Field
+                      id={fid('inv-from')}
+                      label="From"
+                      multiline
+                      speech={{
+                        name: 'your business details',
+                        long: true,
+                        onText: (t) =>
+                          changeInvoice((item) => ({
+                            ...item,
+                            from: appendSpoken(item.from, t),
+                          })),
+                      }}
+                    >
+                      <textarea
+                        id={fid('inv-from')}
+                        rows={3}
+                        placeholder="Your business name and address"
+                        value={invoice.from}
+                        onChange={(e) => patchInvoice({ from: e.target.value })}
+                      />
+                    </Field>
+                    <Field
+                      id={fid('inv-client')}
+                      label="Client name"
+                      speech={{
+                        name: 'client',
+                        onText: (t) =>
+                          changeInvoice((item) => ({
+                            ...item,
+                            client: appendSpoken(item.client, t),
+                          })),
+                      }}
+                    >
+                      <input
+                        id={fid('inv-client')}
+                        value={invoice.client}
+                        list="time-invoice-clients"
+                        placeholder="Who is paying"
+                        onChange={(e) =>
+                          patchInvoice({ client: e.target.value })
+                        }
+                      />
+                    </Field>
+                    <Field
+                      id={fid('inv-address')}
+                      label="Client address"
+                      multiline
+                      speech={{
+                        name: 'bill-to address',
+                        long: true,
+                        onText: (t) =>
+                          changeInvoice((item) => ({
+                            ...item,
+                            address: appendSpoken(item.address, t),
+                          })),
+                      }}
+                    >
+                      <textarea
+                        id={fid('inv-address')}
+                        rows={3}
+                        value={invoice.address}
+                        onChange={(e) =>
+                          patchInvoice({ address: e.target.value })
+                        }
+                      />
+                    </Field>
+                  </div>
+                  <datalist id="time-invoice-clients">
+                    {clients.map((c) => (
+                      <option key={c}>{c}</option>
+                    ))}
+                  </datalist>
+                  <div className="time-lines">
+                    <h3>Line items</h3>
+                    {invoice.lines.length > 0 && (
+                      <div className="time-line time-line--head" aria-hidden="true">
+                        <span>Description</span>
+                        <span>Qty / hours</span>
+                        <span>Rate</span>
+                        <span>Amount</span>
+                        <span />
+                      </div>
+                    )}
+                    {!invoice.lines.length && (
+                      <p className="tool-muted time-lines__empty">
+                        No line items yet. Add one below.
+                      </p>
+                    )}
+                    {invoice.lines.map((line, index) => {
+                      const n = index + 1;
+                      const cur = invoice.currency;
+                      return (
+                        <div className="time-line" key={line.id}>
+                          <div className="time-line__desc">
+                            <DictateField
+                              label={`line ${n}`}
+                              onText={(t) =>
+                                changeInvoice((item) => ({
+                                  ...item,
+                                  lines: item.lines.map((l) =>
+                                    l.id === line.id
+                                      ? {
+                                          ...l,
+                                          description: appendSpoken(
+                                            l.description,
+                                            t,
+                                          ),
+                                        }
+                                      : l,
+                                  ),
+                                }))
+                              }
+                            >
+                              <input
+                                aria-label={`Line ${n} description`}
+                                placeholder="What you are billing for"
+                                value={line.description}
+                                onChange={(e) =>
+                                  patchLine(line.id, {
+                                    description: e.target.value,
+                                  })
+                                }
+                              />
+                            </DictateField>
+                            {!line.manual && (
+                              <small className="time-line__from">
+                                From time entry ·{' '}
+                                {line.project ? `${line.project} · ` : ''}
+                                {line.date}
+                              </small>
+                            )}
+                          </div>
+                          <div className="time-line__qty">
+                            <span className="time-line__k" aria-hidden="true">
+                              {line.manual ? 'Qty' : 'Time'}
+                            </span>
+                            {line.manual ? (
+                              <NumberInput
+                                aria-label={`Line ${n} quantity`}
+                                max={1_000_000}
+                                step="any"
+                                value={lineQuantity(line)}
+                                onValue={(v) =>
+                                  patchLine(line.id, { quantity: v })
+                                }
+                              />
+                            ) : (
+                              <span
+                                className="time-line__static"
+                                aria-label={`Line ${n} time`}
+                                title="Tracked time is fixed. Edit the time entry before invoicing to change it."
+                              >
+                                {duration(line.seconds)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="time-line__rate">
+                            <span className="time-line__k" aria-hidden="true">
+                              Rate
+                            </span>
+                            {line.manual ? (
+                              <NumberInput
+                                aria-label={`Line ${n} rate`}
+                                max={1_000_000}
+                                step="0.01"
+                                value={line.rate}
+                                onValue={(v) => patchLine(line.id, { rate: v })}
+                              />
+                            ) : (
+                              <span
+                                className="time-line__static"
+                                aria-label={`Line ${n} rate`}
+                              >
+                                {money(
+                                  Math.round(line.rate * 10 ** minorDigits(cur)),
+                                  cur,
+                                )}
+                              </span>
+                            )}
+                          </div>
+                          <div className="time-line__amount">
+                            <span className="time-line__k" aria-hidden="true">
+                              Amount
+                            </span>
+                            <strong aria-label={`Line ${n} amount`}>
+                              {money(lineAmount(line, cur), cur)}
+                            </strong>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-icon time-line__remove"
+                            aria-label={`Remove line ${n}`}
+                            title={
+                              line.manual
+                                ? 'Remove line'
+                                : 'Remove line (its time entry can be invoiced again)'
+                            }
+                            onClick={() =>
+                              changeInvoice((item) => ({
+                                ...item,
+                                lines: item.lines.filter(
+                                  (l) => l.id !== line.id,
+                                ),
+                              }))
+                            }
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                    <div className="time-lines__foot">
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => {
+                          changeInvoice((item) => ({
+                            ...item,
+                            lines: [...item.lines, manualLine(item)],
+                          }));
+                          requestAnimationFrame(() => {
+                            const inputs =
+                              editorRef.current?.querySelectorAll<HTMLInputElement>(
+                                '.time-line__desc input',
+                              );
+                            inputs?.[inputs.length - 1]?.focus();
+                          });
+                        }}
+                      >
+                        <Plus size={15} /> Add line
+                      </button>
+                      <p className="time-lines__total">
+                        <span>Total due</span>
+                        <strong>
+                          {money(invoiceTotals(invoice).total, invoice.currency)}
+                        </strong>
+                      </p>
+                    </div>
+                  </div>
+                  <Field
+                    id={fid('inv-notes')}
+                    label="Payment instructions / notes"
+                    multiline
+                    speech={{
+                      name: 'payment notes',
+                      long: true,
+                      onText: (t) =>
+                        changeInvoice((item) => ({
+                          ...item,
+                          notes: appendSpoken(item.notes, t),
+                        })),
+                    }}
+                  >
+                    <textarea
+                      id={fid('inv-notes')}
+                      rows={2}
+                      value={invoice.notes}
+                      onChange={(e) => patchInvoice({ notes: e.target.value })}
+                    />
+                  </Field>
+                </fieldset>
+              </section>
+              <InvoicePaper invoice={invoice} />
+            </>
+          )}
+          <section className="tool-panel">
             <h2>Business defaults</h2>
             <div className="tool-fields">
-              <label>
-                Business name and address
+              <Field
+                id={fid('business')}
+                label="Business name and address"
+                multiline
+                speech={{
+                  name: 'business defaults',
+                  long: true,
+                  onText: (t) =>
+                    void update((s) => ({
+                      ...s,
+                      business: appendSpoken(s.business, t),
+                    })),
+                }}
+              >
                 <textarea
+                  id={fid('business')}
                   rows={3}
                   value={data.business}
                   disabled={!store.ready}
@@ -1094,10 +1980,10 @@ export default function Time(props: ToolProps) {
                     void update((s) => ({ ...s, business: e.target.value }))
                   }
                 />
-              </label>
-              <label>
-                Currency for new invoices
+              </Field>
+              <Field id={fid('currency')} label="Currency for new invoices">
                 <select
+                  id={fid('currency')}
                   value={data.currency}
                   disabled={!store.ready}
                   onChange={(e) =>
@@ -1108,183 +1994,13 @@ export default function Time(props: ToolProps) {
                     <option key={c}>{c}</option>
                   ))}
                 </select>
-                <span className="tool-hint">
-                  Rates use the currency selected when an invoice is created.
-                </span>
-              </label>
+              </Field>
             </div>
+            <p className="tool-hint tool-muted">
+              New invoices start with these details. Each invoice keeps the
+              currency it was created with.
+            </p>
           </section>
-          {!invoice ? (
-            <div className="tool-panel tool-empty">
-              Select billable time entries to create your first invoice.
-            </div>
-          ) : (
-            <>
-              <section className="tool-panel">
-                <div className="tool-row tool-row--between tool-row--end">
-                  <label className="tool-invoice-pick">
-                    Invoice
-                    <select
-                      value={invoice.id}
-                      onChange={(e) => setInvoiceId(e.target.value)}
-                    >
-                      {data.invoices.map((i) => (
-                        <option key={i.id} value={i.id}>
-                          {i.number} · {i.client}
-                          {i.paid ? ' · Paid' : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="tool-row">
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => {
-                        const old = document.title;
-                        document.title = invoice.number;
-                        window.print();
-                        document.title = old;
-                      }}
-                    >
-                      Print / Save PDF
-                    </button>
-                    <button
-                      className="btn btn-secondary"
-                      disabled={!store.ready}
-                      onClick={() => patchInvoice({ paid: !invoice.paid })}
-                    >
-                      {invoice.paid ? 'Mark unpaid' : 'Mark paid'}
-                    </button>
-                    <button
-                      className="btn btn-secondary"
-                      disabled={!store.ready}
-                      onClick={async () => {
-                        if (
-                          window.confirm(
-                            'Delete this invoice and make its time entries available to invoice again?',
-                          )
-                        ) {
-                          await update((s) => ({
-                            ...s,
-                            invoices: s.invoices.filter(
-                              (i) => i.id !== invoice.id,
-                            ),
-                          }));
-                          setInvoiceId(null);
-                        }
-                      }}
-                    >
-                      Delete invoice
-                    </button>
-                  </div>
-                </div>
-                <fieldset
-                  disabled={!store.ready}
-                  className="tool-fieldset tool-fieldset--spaced"
-                >
-                  <div className="tool-fields">
-                    <label>
-                      Invoice number
-                      <input
-                        value={invoice.number}
-                        onChange={(e) =>
-                          patchInvoice({ number: e.target.value })
-                        }
-                      />
-                    </label>
-                    <label>
-                      Issue date
-                      <input
-                        type="date"
-                        value={invoice.date}
-                        onChange={(e) => {
-                          if (e.target.value)
-                            patchInvoice({ date: e.target.value });
-                        }}
-                      />
-                    </label>
-                    <label>
-                      Due date
-                      <input
-                        type="date"
-                        value={invoice.due}
-                        onChange={(e) => {
-                          if (e.target.value)
-                            patchInvoice({ due: e.target.value });
-                        }}
-                      />
-                    </label>
-                    <label>
-                      Tax %
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.01"
-                        value={invoice.tax}
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          if (v >= 0 && v <= 100) patchInvoice({ tax: v });
-                        }}
-                      />
-                    </label>
-                    <label>
-                      Discount ({invoice.currency})
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={invoice.discount}
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          if (Number.isFinite(v) && v >= 0 && v <= 1e12)
-                            patchInvoice({ discount: v });
-                        }}
-                      />
-                    </label>
-                  </div>
-                  <div className="tool-fields">
-                    <label>
-                      From
-                      <textarea
-                        rows={3}
-                        value={invoice.from}
-                        onChange={(e) => patchInvoice({ from: e.target.value })}
-                      />
-                    </label>
-                    <label>
-                      Client name
-                      <input
-                        value={invoice.client}
-                        onChange={(e) =>
-                          patchInvoice({ client: e.target.value })
-                        }
-                      />
-                    </label>
-                    <label>
-                      Client address
-                      <textarea
-                        rows={3}
-                        value={invoice.address}
-                        onChange={(e) =>
-                          patchInvoice({ address: e.target.value })
-                        }
-                      />
-                    </label>
-                  </div>
-                  <label>
-                    Payment instructions / notes
-                    <textarea
-                      rows={2}
-                      value={invoice.notes}
-                      onChange={(e) => patchInvoice({ notes: e.target.value })}
-                    />
-                  </label>
-                </fieldset>
-              </section>
-              <InvoicePaper invoice={invoice} />
-            </>
-          )}
         </div>
       )}
     </ToolShell>

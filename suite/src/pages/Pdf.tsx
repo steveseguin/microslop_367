@@ -1,8 +1,9 @@
+import '../utils/sumPrecise';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PDFDocument, StandardFonts, degrees, rgb } from 'pdf-lib';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import type { PageViewport } from 'pdfjs-dist';
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import workerUrl from '../utils/pdf.worker.ts?worker&url';
 import {
   Download,
   Upload,
@@ -28,6 +29,8 @@ import {
 } from 'lucide-react';
 import { AppMark } from '../components/AppMark';
 import { takeHandoff } from '../utils/handoff';
+import { DictateButton, DictateField } from '../components/Dictate';
+import { appendSpoken, spliceSpoken } from '../utils/speech';
 import { ToolShell, type ToolProps } from '../components/ToolShell';
 import { downloadFile, useToolStorage } from '../utils/toolStorage';
 import { fillFields, openPdf, parsePageRange, readFields } from '../utils/pdf';
@@ -165,6 +168,8 @@ export default function Pdf(props: ToolProps) {
     value: string;
   } | null>(null);
   const [cssScale, setCssScale] = useState(1);
+  const editInput = useRef<HTMLInputElement>(null);
+  const draftInput = useRef<HTMLInputElement>(null);
   const [zoom, setZoom] = useState(1);
   const [baseWidth, setBaseWidth] = useState(0);
   const [thumbs, setThumbs] = useState<{
@@ -698,6 +703,7 @@ export default function Pdf(props: ToolProps) {
         color: toRgb(ink),
       });
     };
+    let coveredOnly = false;
     await operation(
       async (pdf) => {
         removeTextInBox(pdf, page, line);
@@ -742,6 +748,7 @@ export default function Pdf(props: ToolProps) {
         // Text we cannot rewrite in place (e.g. inside a form XObject) is
         // covered with its own background colour instead.
         fallback: async (pdf) => {
+          coveredOnly = true;
           pdf.getPage(page).drawRectangle({
             x: line.x - 1,
             y: line.baseline - line.size * 0.26,
@@ -753,6 +760,10 @@ export default function Pdf(props: ToolProps) {
         },
       },
     );
+    if (coveredOnly)
+      setMessage(
+        'Text updated on the page. This PDF stores that line in a way that cannot be rewritten, so the original is covered rather than deleted; it may still be found by copy or search.',
+      );
   };
 
   const startEdit = (line: TextLine) => {
@@ -1228,22 +1239,41 @@ export default function Pdf(props: ToolProps) {
                         ))}
                       </select>
                     ) : (
-                      <input
+                      <DictateField
+                        label={field.name}
                         disabled={
                           field.readOnly ||
                           field.kind === 'unsupported' ||
                           !canEdit
                         }
-                        value={String(field.value)}
-                        onChange={(e) => {
+                        onText={(spoken) => {
                           setFields((s) =>
                             s.map((f, i) =>
-                              i === index ? { ...f, value: e.target.value } : f,
+                              i === index
+                                ? { ...f, value: appendSpoken(String(f.value), spoken) }
+                                : f,
                             ),
                           );
                           setFieldsDirty(true);
                         }}
-                      />
+                      >
+                        <input
+                          disabled={
+                            field.readOnly ||
+                            field.kind === 'unsupported' ||
+                            !canEdit
+                          }
+                          value={String(field.value)}
+                          onChange={(e) => {
+                            setFields((s) =>
+                              s.map((f, i) =>
+                                i === index ? { ...f, value: e.target.value } : f,
+                              ),
+                            );
+                            setFieldsDirty(true);
+                          }}
+                        />
+                      </DictateField>
                     )}
                   </label>
                 ))}
@@ -1336,7 +1366,9 @@ export default function Pdf(props: ToolProps) {
             <p className="tool-pdf-hint" role="status">
               {fieldsDirty
                 ? 'Apply or discard your form values to keep editing.'
-                : TOOL_HINT[mode]}
+                : mode === 'edit' && view && lines?.items.length === 0
+                  ? 'This page has no editable text — it is probably a scanned image. Use Add text to type on it, or Redact to cover areas.'
+                  : TOOL_HINT[mode]}
             </p>
             <div className="tool-pdf-toolbar">
               <button
@@ -1423,18 +1455,25 @@ export default function Pdf(props: ToolProps) {
                       : []
                     ).map((line) =>
                       editing?.line === line ? (
-                        <input
+                        <span
                           key={line.id}
+                          className="tool-pdf-editwrap"
+                          style={{
+                            left: `${(line.left / view.width) * 100}%`,
+                            top: `${(line.top / view.height) * 100}%`,
+                            height: `${(line.boxHeight / view.height) * 100}%`,
+                          }}
+                        >
+                        <input
+                          ref={editInput}
                           className={`tool-pdf-textedit tool-pdf-font--${line.kind}`}
                           aria-label="Edit text"
                           autoFocus
                           spellCheck
+                          onFocus={(e) => e.currentTarget.select()}
                           value={editing.value}
                           style={{
-                            left: `${(line.left / view.width) * 100}%`,
-                            top: `${(line.top / view.height) * 100}%`,
-                            minWidth: `${(line.boxWidth / view.width) * 100}%`,
-                            height: `${(line.boxHeight / view.height) * 100}%`,
+                            minWidth: `${line.boxWidth * cssScale}px`,
                             fontSize: `${line.size * view.scale * cssScale}px`,
                             fontWeight: line.bold ? 700 : 400,
                             fontStyle: line.italic ? 'italic' : 'normal',
@@ -1453,6 +1492,27 @@ export default function Pdf(props: ToolProps) {
                             }
                           }}
                         />
+                        <DictateButton
+                          label="this text"
+                          className="tool-pdf-mic"
+                          onText={(spoken) => {
+                            const el = editInput.current;
+                            setEditing((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    value: spliceSpoken(
+                                      current.value,
+                                      el?.selectionStart ?? null,
+                                      el?.selectionEnd ?? null,
+                                      spoken,
+                                    ),
+                                  }
+                                : current,
+                            );
+                          }}
+                        />
+                        </span>
                       ) : (
                         <button
                           key={line.id}
@@ -1492,15 +1552,18 @@ export default function Pdf(props: ToolProps) {
                     }}
                   >
                     {draft && (
+                      <span
+                        className="tool-pdf-editwrap"
+                        style={{ left: `${draft.x * 100}%`, top: `${draft.y * 100}%` }}
+                      >
                       <input
+                        ref={draftInput}
                         className="tool-pdf-textedit tool-pdf-font--sans"
                         aria-label="New text"
-                        placeholder="Type here"
+                        placeholder="Type or speak"
                         autoFocus
                         value={draft.value}
                         style={{
-                          left: `${draft.x * 100}%`,
-                          top: `${draft.y * 100}%`,
                           fontSize: `${size * view.scale * cssScale}px`,
                           color,
                         }}
@@ -1516,6 +1579,27 @@ export default function Pdf(props: ToolProps) {
                           }
                         }}
                       />
+                      <DictateButton
+                        label="new text"
+                        className="tool-pdf-mic"
+                        onText={(spoken) => {
+                          const el = draftInput.current;
+                          setDraft((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  value: spliceSpoken(
+                                    current.value,
+                                    el?.selectionStart ?? null,
+                                    el?.selectionEnd ?? null,
+                                    spoken,
+                                  ),
+                                }
+                              : current,
+                          );
+                        }}
+                      />
+                      </span>
                     )}
                   </div>
                 )}

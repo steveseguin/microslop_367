@@ -1,1 +1,0 @@
-let e=null;function r(t,n){e={kind:t,file:n}}function i(t){if(e?.kind!==t)return null;const{file:n}=e;return e=null,n}function f(t){const n=t.name.toLowerCase();return n.endsWith(".pdf")||t.type==="application/pdf"?"pdf":n.endsWith(".docx")?"word":/\.(xlsx|xls|csv)$/.test(n)?"excel":n.endsWith(".pptx")?"powerpoint":null}export{r as h,f as k,i as t};

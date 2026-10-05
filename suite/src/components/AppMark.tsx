@@ -1,5 +1,7 @@
 import { useId } from 'react';
 import {
+  ImageIcon,
+  Spline,
   Clock3,
   FilePenLine,
   FileText,
@@ -21,7 +23,9 @@ export type AppKind =
   | 'blueline'
   | 'time'
   | 'notes'
-  | 'pdf';
+  | 'pdf'
+  | 'image'
+  | 'svg';
 
 const ICONS = {
   word: FileText,
@@ -30,6 +34,8 @@ const ICONS = {
   time: Clock3,
   notes: NotebookPen,
   pdf: FilePenLine,
+  image: ImageIcon,
+  svg: Spline,
 } as const;
 
 /** Blueline's own mark, drawn the same way as `.mark` in blueline/src/style.css. */

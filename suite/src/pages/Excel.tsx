@@ -1,4 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DictateButton } from '../components/Dictate';
+import { appendSpoken } from '../utils/speech';
 import { takeHandoff } from '../utils/handoff';
 import type { CSSProperties } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -1257,6 +1259,7 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
   const fileNameRef = useRef(fileName);
   const lastSelectionRef = useRef<SelectionBounds | null>(null);
   const formulaTargetRef = useRef<SelectionBounds | null>(null);
+  const formulaInputRef = useRef<HTMLInputElement>(null);
   /*
    * The cell a find result is parked on. Because setSelection() is unusable in this
    * fortune-sheet build, a match is only scrolled into view -- the grid's own selection
@@ -3162,6 +3165,7 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
         <div className="formula-coordinate">{selectionSummary.activeCell}</div>
         <div className="formula-helper">fx</div>
         <input
+          ref={formulaInputRef}
           className="formula-input"
           aria-label="Formula input"
           placeholder="Enter a value or formula for the active cell"
@@ -3194,6 +3198,20 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
               formulaTargetRef.current = null;
               refreshSelectionState();
             }
+          }}
+        />
+        {/* Speak a cell value: it lands in the formula bar for the active
+            cell, and Enter writes it, exactly like typed input. */}
+        <DictateButton
+          label="the active cell"
+          className="formula-mic"
+          onText={(spoken) => {
+            if (!formulaTargetRef.current) formulaTargetRef.current = resolveWriteTarget();
+            const wasEditing = isFormulaDirtyRef.current;
+            isFormulaEditingRef.current = true;
+            isFormulaDirtyRef.current = true;
+            setFormulaValue((current) => (wasEditing ? appendSpoken(current, spoken) : appendSpoken('', spoken)));
+            formulaInputRef.current?.focus();
           }}
         />
       </div>

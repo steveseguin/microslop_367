@@ -6,4 +6,6 @@ export const SUITE_APPS = [
   ['NinjaTime', '/time'],
   ['NinjaNotes', '/notes'],
   ['NinjaPDF', '/pdf'],
+  ['NinjaImage', '/image'],
+  ['NinjaSVG', '/svg'],
 ] as const;

@@ -659,6 +659,8 @@
 }
 .tool-pdf-thumb img {
   aspect-ratio: auto;
+  /* Small renders wash thin text out to near-white; lift it back. */
+  filter: contrast(1.25);
 }
 .tool-pdf-thumb__num {
   font-size: var(--text-2xs);
@@ -751,8 +753,17 @@
   background: transparent;
   cursor: text;
 }
-.tool-pdf-textlayer:not(:has(.tool-pdf-textedit)) .tool-pdf-textline {
-  border-color: rgba(37, 99, 235, 0.4);
+/* Mouse: outlines appear while the pointer is over the page, so dense pages
+   stay readable. Touch has no hover, so the outlines are always shown there. */
+@media (hover: hover) {
+  .tool-pdf-textlayer:hover:not(:has(.tool-pdf-textedit)) .tool-pdf-textline {
+    border-color: rgba(37, 99, 235, 0.35);
+  }
+}
+@media (hover: none) {
+  .tool-pdf-textlayer:not(:has(.tool-pdf-textedit)) .tool-pdf-textline {
+    border-color: rgba(37, 99, 235, 0.35);
+  }
 }
 .tool-pdf-textline:hover,
 .tool-pdf-textline:focus-visible {
@@ -760,8 +771,24 @@
   border-style: solid;
   background: rgba(37, 99, 235, 0.08);
 }
-.tool-app .tool-pdf-textedit {
+.tool-pdf-editwrap {
   position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  align-items: stretch;
+  gap: 4px;
+}
+.tool-pdf-editwrap .tool-pdf-mic {
+  align-self: center;
+}
+.tool-pdf-editwrap .dictate__btn {
+  background: var(--surface-solid);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+.tool-app .tool-pdf-textedit {
+  position: relative;
+  height: 100%;
   min-height: 0;
   margin: 0;
   padding: 0 1px;
@@ -775,7 +802,7 @@
   box-shadow: 0 2px 10px rgba(15, 23, 42, 0.18);
 }
 .tool-pdf-textlayer--add .tool-pdf-textedit {
-  min-width: 6ch;
+  min-width: 8ch;
   height: auto;
   padding: 2px 3px;
   background: rgba(255, 255, 255, 0.92);
@@ -826,39 +853,6 @@
   width: 100%;
   font-size: var(--text-xs);
   color: var(--text-muted);
-}
-.tool-launchers {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-2);
-  margin-bottom: var(--space-5);
-}
-.tool-launcher {
-  display: flex;
-  gap: 13px;
-  align-items: center;
-  text-decoration: none;
-  color: var(--text);
-  padding: var(--space-3) var(--space-4);
-  background: var(--surface-solid);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  transition: border-color var(--transition), background var(--transition);
-}
-.tool-launcher:hover {
-  border-color: var(--border-strong);
-  background: var(--surface-muted);
-}
-.tool-launcher strong {
-  display: block;
-  font-size: 14px;
-}
-.tool-launcher small {
-  display: block;
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  margin-top: 2px;
-  line-height: 1.4;
 }
 .invoice-paper {
   overflow-x: auto;
@@ -975,12 +969,42 @@
   .tool-app textarea.tool-note-body {
     min-height: 260px;
   }
-  .tool-launchers {
-    grid-template-columns: 1fr;
-    gap: 8px;
+  /* Editing a line on a phone happens in a bar pinned above the keyboard at a
+     readable size; the page-sized inline field would be ~5px text. 16px also
+     stops iOS zooming the page on focus. */
+  .tool-pdf-editwrap {
+    position: fixed !important;
+    left: 12px !important;
+    right: 12px;
+    top: auto !important;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    height: auto !important;
+    z-index: 60;
+    padding: 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    background: var(--surface-solid);
+    box-shadow: var(--shadow-lg);
   }
-  .tool-launcher {
-    padding: 14px;
+  .tool-app .tool-pdf-editwrap .tool-pdf-textedit {
+    flex: 1 1 auto;
+    min-width: 0 !important;
+    height: 44px;
+    padding: 0 10px;
+    border-radius: var(--radius-sm);
+    outline-offset: 0;
+    box-shadow: none;
+    font-size: 16px !important;
+    color: var(--text) !important;
+    background: var(--field-bg) !important;
+  }
+  .tool-pdf-tools {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tool-pdf-tool {
+    flex: 0 0 auto;
   }
   /* On a phone the page you are editing comes first; page tools follow. */
   .tool-pdf-layout > section {
@@ -1087,4 +1111,89 @@
 }
 .tool-dictation {
   padding: var(--space-2) var(--space-3);
+}
+
+/* Workspace app grid: every app is the same tile (Dashboard.tsx APP_TILES). */
+.app-grid {
+  display: grid;
+  /* Three across, three rows: documents, creative tools, productivity. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
+}
+@media (max-width: 900px) {
+  .app-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.app-tile {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 4.25rem;
+  padding: var(--space-3) var(--space-4) var(--space-3) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-solid);
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color var(--transition), background var(--transition);
+}
+.app-tile:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-muted);
+}
+.app-tile:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.app-tile__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.app-tile__text strong {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+.app-tile__text small {
+  display: block;
+  margin-top: 1px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-tile__text small[data-live] {
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.app-tile__go {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+.app-tile:hover .app-tile__go {
+  color: var(--text);
+  opacity: 1;
+}
+@media (max-width: 640px) {
+  .app-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-bottom: var(--space-5);
+  }
+  .app-tile {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-3);
+  }
+  .app-tile__go {
+    display: none;
+  }
+  .app-tile__text small {
+    white-space: normal;
+  }
 }

@@ -1,0 +1,94 @@
+/* Speech input (components/Dictate.tsx). */
+.dictate {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.dictate__btn {
+  display: inline-grid;
+  place-items: center;
+  width: 1.875rem;
+  height: 1.875rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.dictate__btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-muted);
+}
+.dictate__btn[aria-pressed='true'] {
+  color: #fff;
+  background: #dc2626;
+  border-color: #dc2626;
+  animation: dictate-pulse 1.4s ease-in-out infinite;
+}
+.dictate__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+@keyframes dictate-pulse {
+  50% {
+    box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.25);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dictate__btn[aria-pressed='true'] {
+    animation: none;
+  }
+}
+.dictate__bubble {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  width: max-content;
+  max-width: min(18rem, 80vw);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: normal;
+}
+.dictate__bubble--problem {
+  color: var(--danger);
+}
+/* Mic tucked inside a field's right edge. */
+.dictate-field {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+.dictate-field > input,
+.dictate-field > textarea {
+  width: 100%;
+  padding-right: 2.5rem !important;
+}
+.dictate-field > .dictate {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+}
+.dictate-field--multiline > .dictate {
+  top: 4px;
+  transform: none;
+}
+@media (pointer: coarse) {
+  .dictate__btn {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+  .dictate-field > input,
+  .dictate-field > textarea {
+    padding-right: 2.75rem !important;
+  }
+}

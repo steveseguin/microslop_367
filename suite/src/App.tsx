@@ -9,6 +9,8 @@ const PowerPoint = lazy(() => import('./pages/PowerPoint'));
 const Time = lazy(() => import('./pages/Time'));
 const Notes = lazy(() => import('./pages/Notes'));
 const Pdf = lazy(() => import('./pages/Pdf'));
+const ImageEditor = lazy(() => import('./pages/Image'));
+const Svg = lazy(() => import('./pages/Svg'));
 
 const THEME_KEY = 'officeninja_theme';
 
@@ -126,6 +128,8 @@ function App() {
               <Route path="/time" element={<Time toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
               <Route path="/notes" element={<Notes toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
               <Route path="/pdf" element={<Pdf toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+              <Route path="/image" element={<ImageEditor toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+              <Route path="/svg" element={<Svg toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
             </Routes>
           </Suspense>
         </ErrorBoundary>

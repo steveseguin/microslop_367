@@ -68,6 +68,8 @@
   --brand-time: #0f766e;
   --brand-notes: #a15c07;
   --brand-pdf: #6d28d9;
+  --brand-image: #be185d;
+  --brand-svg: #4d7c0f;
   /* Blueline's own palette (blueline/src/style.css --sel / --fg / --bg). */
   --brand-blueline: #0a8bd6;
   --brand-blueline-ink: #15181c;
@@ -126,6 +128,8 @@
   --brand-time: #4fd1bd;
   --brand-notes: #f2c14e;
   --brand-pdf: #b9a2f7;
+  --brand-image: #f490bd;
+  --brand-svg: #a7d566;
   --brand-blueline: #2ea8ee;
   --brand-blueline-ink: #e9ebee;
   --brand-blueline-bar: #1a1c20;
@@ -1512,94 +1516,13 @@ input[type="color"]::-moz-color-swatch {
   white-space: nowrap;
 }
 
-.dashboard-create {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.dashboard-create__btn {
-  min-height: var(--control-h);
-  font-size: var(--text-xs);
-  white-space: nowrap;
-}
-
-/* --- create actions: recognisable before they are read ---
-
-   These were one `.btn-primary` and two `.btn-secondary`, all three carrying a
-   grey line icon: three identical pills that could only be told apart by
-   reading them. Each now leads with a filled chip in its app's identity colour,
-   the SAME token the file-list row and the editor's app mark use, so the
-   blue/green/red mapping is learned once and holds everywhere.
-
-   Deliberately NOT three primary-weight buttons — that is three things
-   shouting and no default. The surfaces stay neutral and equal; only the 24px
-   chip is coloured, and "New document" keeps `.btn-primary` so one action still
-   reads as the default.
-
-   HOOK: the type is matched off the router's `href` because there is no
-   per-type class on this element. It works (HashRouter renders `to="/word"` as
-   `href="#/word"`) but it silently loses its colour if a route is ever renamed.
-   A `dashboard-create__btn--word|--excel|--powerpoint` class is requested — see
-   the handover note; when it lands these three selectors become one-liners. */
-.dashboard-create__btn {
-  --create-brand: var(--accent);
-}
-
-.dashboard-create__btn[href$="/word"] {
-  --create-brand: var(--brand-word);
-}
-
-.dashboard-create__btn[href$="/excel"] {
-  --create-brand: var(--brand-excel);
-}
-
-.dashboard-create__btn[href$="/powerpoint"] {
-  --create-brand: var(--brand-powerpoint);
-}
-
-.dashboard-create__btn--blueline { --create-brand: var(--brand-blueline); }
-@media (max-width: 640px) {
-  .dashboard-create { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
-.dashboard-create__btn svg {
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
-  padding: 4px;
-  border-radius: var(--radius-xs);
-  background: var(--create-brand);
-  color: var(--brand-ink);
-}
 
 /* The default action stays a filled button — but filled in ITS OWN identity
    colour rather than the generic `--accent`, which put a Word-blue chip on an
    accent-blue field where neither could be seen. Inside a filled button the
    chip inverts: the ink becomes the surface and the brand becomes the glyph, so
    the same two colours are doing the same job either way round. */
-.dashboard-create__btn.btn-primary {
-  background: var(--create-brand);
-  border-color: var(--create-brand);
-  color: var(--brand-ink);
-}
 
-.dashboard-create__btn.btn-primary svg {
-  background: var(--brand-ink);
-  color: var(--create-brand);
-}
-
-.dashboard-create__btn.btn-primary:hover {
-  background: var(--create-brand);
-  /* Dims chip and field together, so the pair keeps its measured ratio instead
-     of needing a second hand-picked hover tone per brand and per theme. */
-  filter: brightness(0.92);
-}
-
-.dashboard-create__label--short {
-  display: none;
-}
 
 .dashboard-theme-toggle {
   flex-shrink: 0;
@@ -1779,6 +1702,8 @@ input[type="color"]::-moz-color-swatch {
 .app-mark--time { --app-brand: var(--brand-time); }
 .app-mark--notes { --app-brand: var(--brand-notes); }
 .app-mark--pdf { --app-brand: var(--brand-pdf); }
+.app-mark--image { --app-brand: var(--brand-image); }
+.app-mark--svg { --app-brand: var(--brand-svg); }
 
 /* Blueline's mark IS the tile, exactly as the editor draws it. */
 .app-mark--blueline {
@@ -1794,11 +1719,6 @@ input[type="color"]::-moz-color-swatch {
 .blueline-glyph__blue { fill: var(--brand-blueline); }
 .blueline-glyph__bar { fill: var(--brand-blueline-bar); }
 
-.dashboard-create__btn .blueline-glyph,
-.dashboard-create__btn.btn-primary .blueline-glyph {
-  padding: 0;
-  background: none;
-}
 
 /* One app switcher, the same in every header. */
 .suite-app-switcher {
@@ -3109,26 +3029,6 @@ input[type="color"]::-moz-color-swatch {
     row-gap: var(--space-2);
   }
 
-  .dashboard-create {
-    order: 3;
-    width: 100%;
-  }
-
-  .dashboard-create__btn {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-
-  .dashboard-create__label {
-    display: none;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .dashboard-create__label--short {
-    display: block;
-  }
 
   .dashboard-section {
     padding-top: var(--space-4);
@@ -3233,23 +3133,7 @@ input[type="color"]::-moz-color-swatch {
   }
 }
 
-/* Below this the three create buttons share ~124px each, and even the SHORT
-   label rendered as "Docum…", "Spread…", "Present…" — the same truncation the
-   header's save pill had, and the same answer: a cut word is worse than no
-   word. The coloured chip is now what identifies each button, and the file list
-   directly beneath spells out "Document" / "Spreadsheet" / "Presentation"
-   beside those exact three chips, so the mapping is taught on the same screen.
-   Nothing is lost to assistive tech: the accessible name is `aria-label="New
-   document"` on the link itself, not this span. */
-@media (max-width: 460px) {
-  .dashboard-create__label--short {
-    display: none;
-  }
 
-  .dashboard-create__btn {
-    justify-content: center;
-  }
-}
 
 /* Very narrow phones: the app title and the filename cannot each own a row. */
 @media (max-width: 420px) {
@@ -3978,10 +3862,7 @@ input[type="color"]::-moz-color-swatch {
   }
 }
 
-/* Four create actions have room for readable labels in the two-column phone layout. */
-@media (max-width: 640px) {
-  .dashboard-create__label--short { display: block; }
-}
+
 
 /* Phones: one header row in the editors. The app switcher is a desktop
    convenience (the back link reaches every app), and it was the control that
