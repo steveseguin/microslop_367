@@ -326,10 +326,12 @@ interface ExcelWorkbookProps {
   onOp?: (operation: unknown) => void;
   hooks?: Record<string, (...args: unknown[]) => void>;
   onReady?: (instance: WorkbookInstance | null) => void;
+  /** Live view-only guests: the grid can be scrolled and selected but not changed. */
+  readOnly?: boolean;
 }
 
 const ExcelWorkbook = forwardRef<WorkbookInstance, ExcelWorkbookProps>(function ExcelWorkbook(
-  { data, onChange, onOp, hooks, onReady },
+  { data, onChange, onOp, hooks, onReady, readOnly },
   ref,
 ) {
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -415,6 +417,7 @@ const ExcelWorkbook = forwardRef<WorkbookInstance, ExcelWorkbookProps>(function 
         onChange={onChange ? (nextData) => onChange(nextData as unknown[]) : undefined}
         onOp={onOp}
         hooks={hooks}
+        allowEdit={!readOnly}
       />
     </div>
   );

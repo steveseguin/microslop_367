@@ -402,7 +402,9 @@ function collabSend(msg, only) {
   if (!only && CO.bc) try { CO.bc.postMessage(msg); } catch (e) { }
   const s = JSON.stringify(msg);
   CO.peers.forEach((p, id) => { if (only && only !== id) return; if (p.dc && p.dc.readyState === 'open') dcSend(p.dc, s); });
+  if (!only && typeof liveSend === 'function') liveSend(msg);
 }
+const liveOn = () => typeof LIVE !== 'undefined' && !!LIVE.sdk;
 function dcSend(dc, s) {
   const CH = 15000;
   if (s.length <= CH) return dc.send(s);
@@ -440,7 +442,7 @@ function collabRecv(msg, via, peerId) {
 }
 listeners.change.push((changes, opts) => {
   if (CO.applying || opts.remote) return;
-  if (!CO.bc && !CO.peers.size) return;
+  if (!CO.bc && !CO.peers.size && !liveOn()) return;
   const out = {}; const imgs = {};
   for (const id in changes) {
     const s = changes[id][1]; out[id] = s;
@@ -449,7 +451,7 @@ listeners.change.push((changes, opts) => {
   collabSend({ t: 'ops', changes: out, images: Object.keys(imgs).length ? imgs : undefined });
 });
 let lastCursorSend = 0;
-function sendCursor(w) { if (!CO.bc && !CO.peers.size) return; const now = Date.now(); if (now - lastCursorSend < 45) return; lastCursorSend = now; collabSend({ t: 'cursor', x: w.x, y: w.y, page: D.page, name: CO.me.name, color: CO.me.color, sel: D.sel.slice(0, 50) }); }
+function sendCursor(w) { if (!CO.bc && !CO.peers.size && !liveOn()) return; const now = Date.now(); if (now - lastCursorSend < 45) return; lastCursorSend = now; collabSend({ t: 'cursor', x: w.x, y: w.y, page: D.page, name: CO.me.name, color: CO.me.color, sel: D.sel.slice(0, 50) }); }
 function sendPresence() { const w = D.lastW || { x: 0, y: 0 }; lastCursorSend = 0; sendCursor(w); }
 function updatePeersBadge() {
   const now = Date.now(); Object.keys(OV.cursors).forEach(k => { if (now - OV.cursors[k].t > 60000) delete OV.cursors[k]; });
@@ -491,17 +493,33 @@ function openCollab() {
   openModal(`<h2>Live collaboration</h2>
   <p class="lead">Edits sync peer-to-peer. Nothing is stored on a server.</p>
   <div class="field"><label for="coName">Your name</label><input id="coName" value="${esc(CO.me.name)}" spellcheck="false"></div>
+  <div class="cocol coshare"><h3>Share with a link</h3>
+    <p class="hint">Anyone with the link opens this design in their browser, no account needed, and sees every change live. Keep this file open while they work.</p>
+    <div class="mbtns left"><button class="tb primary" data-co="share-edit">Copy edit link</button><button class="tb" data-co="share-view">Copy view-only link</button>${LIVE.sdk && LIVE.host ? '<button class="tb" data-co="share-stop">Stop sharing</button>' : ''}</div>
+    <p class="hint" id="liveStatus"></p>
+  </div>
+  <details class="coadvanced"><summary>Other ways to connect</summary>
   <div class="cogrid">
     <div class="cocol"><h3>Same browser</h3><p class="hint">Open this file in another tab or window. Tabs showing the same file sync automatically, with live cursors.</p></div>
-    <div class="cocol"><h3>Another device</h3><p class="hint">Swap two codes with your collaborator over any chat app.</p>
-      <div class="mbtns left"><button class="tb primary" data-co="host">Invite someone</button><button class="tb" data-co="join">I have a code</button></div>
+    <div class="cocol"><h3>Without a server at all</h3><p class="hint">Swap two codes with your collaborator over any chat app.</p>
+      <div class="mbtns left"><button class="tb" data-co="host">Invite with a code</button><button class="tb" data-co="join">I have a code</button></div>
     </div>
-  </div>
+  </div></details>
   <div id="coFlow"></div>`, 'wide');
+  liveRender();
   $('#coName').addEventListener('change', e => { CO.me.name = e.target.value.trim().slice(0, 24) || CO.me.name; safeLS.set('blueline:name', CO.me.name); updatePeersBadge(); sendPresence(); });
   $('#modalBody').onclick = async e => {
     const b = e.target.closest('[data-co]'); if (!b) return;
     const flow = $('#coFlow');
+    if (b.dataset.co === 'share-edit' || b.dataset.co === 'share-view') {
+      if (!(await liveShare())) { toast(LIVE.error || 'Could not start sharing'); return; }
+      const link = liveLink(b.dataset.co === 'share-edit');
+      const ok = await copyText(link);
+      toast(ok ? (b.dataset.co === 'share-edit' ? 'Edit link copied: people with it can change this design' : 'View-only link copied') : 'Copy the link below');
+      flow.innerHTML = `<p class="hint">${b.dataset.co === 'share-edit' ? 'Edit' : 'View-only'} link:</p><textarea readonly class="code" id="coLink">${esc(link)}</textarea>`;
+      liveRender(); return;
+    }
+    if (b.dataset.co === 'share-stop') { liveStop(); closeModal(); toast('Stopped sharing. Links stop working until you share again.'); return; }
     const fail = () => { flow.innerHTML = `<div class="warn">This page can't open peer-to-peer connections. Save Blueline as a standalone HTML file (or host it on any static site) to collaborate across devices. Same-browser tabs still sync.</div>`; };
     try {
       if (b.dataset.co === 'host') {
@@ -697,7 +715,7 @@ function init() {
 async function boot() {
   const params = new URLSearchParams(location.search);
   const requested = params.get('id');
-  const fresh = params.get('new') === '1';
+  const fresh = params.get('new') === '1' || !!params.get('live');
   const last = requested || safeLS.get('blueline:last', null);
   let rec = !fresh && last ? await IDB.get(last) : null;
   if (!rec && !fresh && !requested) { const all = (await IDB.all()) || []; all.sort((a, b) => b.updated - a.updated); rec = all[0] || null; }
@@ -711,6 +729,7 @@ async function boot() {
   setTool('move');
   collabJoinChannel();
   updatePeersBadge();
+  liveBoot();
   const fileIdWatch = { id: D.fileId };
   listeners.change.push(() => { if (fileIdWatch.id !== D.fileId) { fileIdWatch.id = D.fileId; collabJoinChannel(); } });
   setInterval(() => { if (fileIdWatch.id !== D.fileId) { fileIdWatch.id = D.fileId; collabJoinChannel(); } }, 1000);

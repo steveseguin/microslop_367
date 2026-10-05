@@ -32,6 +32,9 @@ import {
   X,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { LiveAvatars, SharePanel } from '../components/LiveShare';
+import { LiveSession, newLiveInfo, parseLive } from '../utils/live/session';
+import type { LiveInfo } from '../utils/live/session';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { StatusBar } from '../components/StatusBar';
 import { Toolbar, ToolbarButton, ToolbarGroup } from '../components/Toolbar';
@@ -846,6 +849,17 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
   const [generatedDocId] = useState(() => createId('powerpoint'));
   const docId = searchParams.get('id') || generatedDocId;
   const [fileName, setFileName] = useState(defaultFileName);
+  // Live editing: guests arrive with ?live=room~pass[~editKey]. Changed slides are sent
+  // to everyone; the person sharing sends the whole deck to each newcomer.
+  const [liveParam] = useState(() => parseLive(searchParams.get('live')));
+  const [live, setLive] = useState<{ session: LiveSession; guest: boolean; info: LiveInfo } | null>(null);
+  const liveRef = useRef(live);
+  liveRef.current = live;
+  const [liveSynced, setLiveSynced] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const liveNoSaveRef = useRef(!!liveParam);
+  const [guestSaved, setGuestSaved] = useState(false);
+  const liveSendRef = useRef<(() => void) | null>(null);
   const [documentRevision, setDocumentRevision] = useState(0);
   const [fabricCanvas, setFabricCanvas] = useState<fabric.Canvas | null>(null);
   const [hasSelection, setHasSelection] = useState(false);
@@ -978,9 +992,12 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
   useEffect(() => {
     if (!searchParams.get('id')) {
-      setSearchParams({ id: docId }, { replace: true });
+      setSearchParams(
+        liveParam ? { id: docId, live: searchParams.get('live') ?? '' } : { id: docId },
+        { replace: true },
+      );
     }
-  }, [docId, searchParams, setSearchParams]);
+  }, [docId, liveParam, searchParams, setSearchParams]);
 
   // Switching documents in place (hash navigation) tears the editor back down to a clean
   // state. The outgoing deck is flushed FIRST, while docIdRef still names it.
@@ -1183,6 +1200,11 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
       return;
     }
 
+    if (liveNoSaveRef.current) {
+      setSaveStatus('Live: not saved to your files');
+      return;
+    }
+
     if (saveTimeoutRef.current) {
       window.clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = null;
@@ -1354,6 +1376,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
 
   const scheduleSave = useCallback(() => {
     deckDirtyRef.current = true;
+    liveSendRef.current?.();
     if (!isLoadedRef.current) {
       return;
     }
@@ -1796,6 +1819,151 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
     currentSlideIdRef.current = currentSlideId;
     renderCurrentSlide();
   }, [currentSlideId, fabricCanvas, isLoaded, renderCurrentSlide]);
+
+  /* ---------------- live editing ---------------- */
+
+  // What each slide looked like when last sent or received, so only real changes travel.
+  const liveSeenRef = useRef(new Map<string, string>());
+  const liveTimerRef = useRef<number | null>(null);
+  const liveOrderRef = useRef('');
+  const slideKey = (slide: Slide) => JSON.stringify([slide.data, slide.notes ?? '']);
+
+  const sendDeck = useCallback((all: boolean, to?: string) => {
+    const session = liveRef.current?.session;
+    if (!session || session.status !== 'live') return;
+    flushActiveSlide(true);
+    const seen = liveSeenRef.current;
+    const changed = slidesRef.current.filter((slide) => all || seen.get(slide.id) !== slideKey(slide));
+    const order = slidesRef.current.map((slide) => slide.id);
+    if (!all && !changed.length && order.join(',') === liveOrderRef.current) return;
+    if (!to) {
+      changed.forEach((slide) => seen.set(slide.id, slideKey(slide)));
+      liveOrderRef.current = order.join(',');
+    }
+    void session.send('deck', { order, slides: changed, title: fileNameRef.current }, to);
+  }, [flushActiveSlide]);
+
+  useEffect(() => {
+    liveSendRef.current = () => {
+      if (!liveRef.current || liveRef.current.session.mode === 'view') return;
+      if (liveTimerRef.current) window.clearTimeout(liveTimerRef.current);
+      liveTimerRef.current = window.setTimeout(() => {
+        liveTimerRef.current = null;
+        sendDeck(false);
+      }, 300);
+    };
+    return () => {
+      liveSendRef.current = null;
+    };
+  }, [sendDeck]);
+
+  useEffect(() => {
+    if (!live) return;
+    const onMessage = (e: Event) => {
+      const { type, payload } = (e as CustomEvent<{ type: string; payload: unknown }>).detail;
+      if (type !== 'deck') return;
+      const data = payload as { order?: string[]; slides?: Slide[]; title?: string };
+      if (!Array.isArray(data?.order) || !Array.isArray(data.slides)) return;
+      const incoming = new Map(data.slides.filter((slide) => slide && typeof slide.id === 'string').map((slide) => [slide.id, slide]));
+      const current = new Map(slidesRef.current.map((slide) => [slide.id, slide]));
+      const next = data.order
+        .map((id) => incoming.get(id) ?? current.get(id))
+        .filter((slide): slide is Slide => !!slide);
+      if (!next.length) return;
+      incoming.forEach((slide) => liveSeenRef.current.set(slide.id, slideKey(slide)));
+      liveOrderRef.current = next.map((slide) => slide.id).join(',');
+      if (typeof data.title === 'string' && data.title !== fileNameRef.current) {
+        setFileName(data.title.slice(0, 200));
+        fileNameRef.current = data.title.slice(0, 200);
+      }
+      commitSlides(() => next);
+      const showing = currentSlideIdRef.current;
+      if (!next.some((slide) => slide.id === showing)) {
+        setCurrentSlideId(next[0].id);
+      } else if (incoming.has(showing)) {
+        // Someone changed the slide on screen: show their version.
+        canvasDirtyRef.current = false;
+        renderedSlideIdRef.current = null;
+        renderCurrentSlide(true);
+      }
+      setLiveSynced(true);
+      deckDirtyRef.current = true;
+      if (!liveNoSaveRef.current && saveTimeoutRef.current === null) {
+        saveTimeoutRef.current = window.setTimeout(() => {
+          saveTimeoutRef.current = null;
+          void performSaveRef.current?.().catch((error) => console.error('Save flush failed', error));
+        }, SAVE_DEBOUNCE_MS);
+      }
+    };
+    const onPeer = (e: Event) => {
+      if (!live.guest) sendDeck(true, (e as CustomEvent<string>).detail);
+    };
+    live.session.addEventListener('message', onMessage);
+    live.session.addEventListener('peer-open', onPeer);
+    return () => {
+      live.session.removeEventListener('message', onMessage);
+      live.session.removeEventListener('peer-open', onPeer);
+    };
+  }, [commitSlides, live, renderCurrentSlide, sendDeck]);
+
+  const liveName = () => {
+    try {
+      return localStorage.getItem('officeninja_meet_name') || '';
+    } catch {
+      return '';
+    }
+  };
+
+  useEffect(() => {
+    if (!liveParam) return;
+    const session = new LiveSession(liveParam, liveName(), ['deck']);
+    setLive({ session, guest: true, info: liveParam });
+    void session.connect();
+    return () => session.close();
+  }, [liveParam]);
+
+  const [, bumpLive] = useState(0);
+  useEffect(() => {
+    if (!live) return;
+    const bump = () => bumpLive((n) => n + 1);
+    live.session.addEventListener('status', bump);
+    return () => live.session.removeEventListener('status', bump);
+  }, [live]);
+
+  const startSharing = useCallback(async () => {
+    if (live) return live.session.status === 'live' ? live.info : null;
+    const key = `officeninja_live:${docId}`;
+    let info: LiveInfo | null = null;
+    try {
+      info = JSON.parse(localStorage.getItem(key) || 'null');
+    } catch {
+      info = null;
+    }
+    if (!info?.room) {
+      info = newLiveInfo('pp');
+      try {
+        localStorage.setItem(key, JSON.stringify(info));
+      } catch {
+        /* links just change next time */
+      }
+    }
+    flushActiveSlide(true);
+    liveSeenRef.current = new Map(slidesRef.current.map((slide) => [slide.id, slideKey(slide)]));
+    liveOrderRef.current = slidesRef.current.map((slide) => slide.id).join(',');
+    const session = new LiveSession(info, liveName(), ['deck'], { relay: true });
+    setLive({ session, guest: false, info });
+    await session.connect();
+    return session.status === 'live' ? info : null;
+  }, [live, docId, flushActiveSlide]);
+
+  const stopSharing = useCallback(() => {
+    live?.session.close();
+    setLive(null);
+    setShareOpen(false);
+  }, [live]);
+
+  // Viewers, and guests still waiting for the deck, cannot change the slides.
+  const liveReadOnly = !!live?.guest && (live.session.mode === 'view' || !liveSynced);
 
   useEffect(() => {
     if (!fabricCanvas || !isLoaded) {
@@ -3338,6 +3506,18 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         saveStatus={saveStatus}
         actions={
           <>
+            <LiveAvatars session={live?.session ?? null} onClick={() => setShareOpen(true)} />
+            {!live?.guest && (
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => setShareOpen((v) => !v)}
+                disabled={isDeckUnopenable}
+                title="Edit together live, or let people watch"
+              >
+                Share
+              </button>
+            )}
             <input
               ref={pptImportRef}
               type="file"
@@ -3465,6 +3645,44 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
         </ToolbarGroup>
       </Toolbar>
 
+      {shareOpen && (
+        <SharePanel
+          session={live?.session ?? null}
+          route="/powerpoint"
+          start={startSharing}
+          stop={stopSharing}
+          onClose={() => setShareOpen(false)}
+          guest={!!live?.guest}
+        />
+      )}
+      {live?.guest && (
+        <div className="live-banner" role="status">
+          <strong>{live.session.mode === 'view' ? 'Viewing live' : 'Editing live'}</strong>
+          <span>
+            {live.session.status === 'error'
+              ? live.session.error
+              : liveSynced
+                ? `${fileName} · changes appear for everyone instantly.`
+                : 'Connecting to the shared presentation… the person who shared it needs to have it open.'}
+          </span>
+          {!guestSaved ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={!liveSynced}
+              onClick={() => {
+                liveNoSaveRef.current = false;
+                setGuestSaved(true);
+                void performSave({ force: true });
+              }}
+            >
+              Save a copy to my files
+            </button>
+          ) : (
+            <span>Saved to your files; it keeps updating while you are here.</span>
+          )}
+        </div>
+      )}
       {banner && (
         <div
           className={`editor-banner editor-banner--${banner.tone}`}
@@ -3660,6 +3878,7 @@ export default function PowerPoint({ toggleTheme, isDarkMode }: PowerPointProps)
             <div style={{ display: 'flex', justifyContent: 'center', lineHeight: 0 }}>
               <canvas ref={canvasRef} />
             </div>
+            {liveReadOnly && <div className="live-readonly-cover" aria-hidden="true" />}
             {isDropTargetActive && <div className="canvas-drop-target-hint">Drop an image to add it to this slide.</div>}
             {/*
               The stored deck could not be read, so no slide was loaded and the canvas is

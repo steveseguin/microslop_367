@@ -34,6 +34,141 @@ import {
   useToolStorage,
 } from '../utils/toolStorage';
 import '../styles/notes.css';
+import { useSearchParams } from 'react-router-dom';
+import * as Y from 'yjs';
+import { Radio } from 'lucide-react';
+import { LiveAvatars, SharePanel } from '../components/LiveShare';
+import { LiveSession, newLiveInfo, parseLive } from '../utils/live/session';
+import type { LiveInfo } from '../utils/live/session';
+import { LiveYProvider, Y_SIGNED } from '../utils/live/yjs';
+import { useYText } from '../utils/live/useYText';
+
+function liveName() {
+  try {
+    return localStorage.getItem('officeninja_meet_name') || '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Someone opened a shared note link: show just that note, typed into together.
+ * Nothing is written to this person's notes unless they save a copy.
+ */
+function LiveNoteGuest({ info, props }: { info: LiveInfo; props: ToolProps }) {
+  const store = useToolStorage('notes', EMPTY);
+  const [live, setLive] = useState<{ session: LiveSession; provider: LiveYProvider } | null>(null);
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [synced, setSynced] = useState(false);
+  const [, bump] = useState(0);
+  const [savedId, setSavedId] = useState<string | null>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const session = new LiveSession(info, liveName(), Y_SIGNED);
+    const provider = new LiveYProvider(session, new Y.Doc(), false);
+    const onSync = () => setSynced(true);
+    const onStatus = () => bump((n) => n + 1);
+    session.addEventListener('synced', onSync);
+    session.addEventListener('status', onStatus);
+    // The session is an outside system created here; the page renders from it.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLive({ session, provider });
+    void session.connect();
+    return () => {
+      session.removeEventListener('synced', onSync);
+      session.removeEventListener('status', onStatus);
+      provider.destroy();
+      session.close();
+    };
+  }, [info]);
+
+  const doc = live?.provider.doc;
+  const typedTitle = useYText(doc ? doc.getText('title') : null, title, setTitle, titleRef);
+  const typedBody = useYText(doc ? doc.getText('body') : null, body, setBody, bodyRef);
+  const viewOnly = live?.session.mode === 'view';
+
+  const saveCopy = async () => {
+    const now = Date.now();
+    const id = savedId ?? crypto.randomUUID();
+    const ok = await store.update((s) => {
+      const existing = s.notes.find((n) => n.id === id);
+      const next: Note = existing
+        ? { ...existing, title, body, updated: now }
+        : { id, title, body, tags: 'shared', context: '', created: now, updated: now, pinned: false };
+      return { ...s, notes: existing ? s.notes.map((n) => (n.id === id ? next : n)) : [next, ...s.notes] };
+    });
+    if (ok) setSavedId(id);
+  };
+
+  return (
+    <ToolShell
+      {...props}
+      name="NinjaNotes"
+      subtitle="A note shared with you, live."
+      status={store.status}
+      error={store.error}
+    >
+      <div className="live-banner" role="status">
+        <strong>{viewOnly ? 'Viewing live' : 'Editing live'}</strong>
+        <span>
+          {live?.session.status === 'error'
+            ? live.session.error
+            : synced
+              ? 'Changes appear for everyone as you type.'
+              : 'Connecting to the shared note… the person who shared it needs to have it open.'}
+        </span>
+        <LiveAvatars session={live?.session ?? null} />
+        <button type="button" className="btn btn-secondary" disabled={!synced || !store.ready} onClick={() => void saveCopy()}>
+          {savedId ? 'Update my copy' : 'Save a copy to my notes'}
+        </button>
+      </div>
+      <section className="tool-panel tool-note-editor notes-editor">
+        <div className="tool-note-head notes-head">
+          <label>
+            <span className="sr-only">Note title</span>
+            <input
+              className="tool-note-title"
+              ref={titleRef}
+              aria-label="Note title"
+              placeholder="Untitled note"
+              readOnly={viewOnly}
+              disabled={!synced}
+              value={title}
+              onChange={(e) => {
+                typedTitle(e.target.value);
+                setTitle(e.target.value);
+              }}
+            />
+          </label>
+        </div>
+        <label>
+          <span className="sr-only">Note text</span>
+          <textarea
+            ref={bodyRef}
+            className="tool-note-body"
+            aria-label="Note text"
+            readOnly={viewOnly}
+            disabled={!synced}
+            value={body}
+            onChange={(e) => {
+              typedBody(e.target.value);
+              setBody(e.target.value);
+            }}
+          />
+        </label>
+      </section>
+    </ToolShell>
+  );
+}
+
+export default function Notes(props: ToolProps) {
+  const [searchParams] = useSearchParams();
+  const [info] = useState(() => parseLive(searchParams.get('live')));
+  return info ? <LiveNoteGuest info={info} props={props} /> : <NotesWorkspaceView {...props} />;
+}
 
 interface Note {
   id: string;
@@ -440,7 +575,7 @@ function NotePreview({
   );
 }
 
-export default function Notes(props: ToolProps) {
+function NotesWorkspaceView(props: ToolProps) {
   const store = useToolStorage('notes', EMPTY);
   const { data, update } = store;
   const [selected, setSelected] = useState<string | null>(null);
@@ -503,6 +638,62 @@ export default function Notes(props: ToolProps) {
         ),
       }));
   };
+
+  // Live: share the open note so others can type in it with you.
+  const [live, setLive] = useState<{
+    session: LiveSession;
+    provider: LiveYProvider;
+    noteId: string;
+    info: LiveInfo;
+  } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const sharedHere = live && note?.id === live.noteId ? live.provider.doc : null;
+  const typedTitle = useYText(sharedHere ? sharedHere.getText('title') : null, note?.title ?? '', (title) => patchNote({ title }), titleRef);
+  const typedBody = useYText(sharedHere ? sharedHere.getText('body') : null, note?.body ?? '', (body) => patchNote({ body }), bodyRef);
+  const startSharing = async () => {
+    if (live) return live.session.status === 'live' ? live.info : null;
+    if (!note) return null;
+    const key = `officeninja_live:note:${note.id}`;
+    let info: LiveInfo | null = null;
+    try {
+      info = JSON.parse(localStorage.getItem(key) || 'null');
+    } catch {
+      info = null;
+    }
+    if (!info?.room) {
+      info = newLiveInfo('nt');
+      try {
+        localStorage.setItem(key, JSON.stringify(info));
+      } catch {
+        /* links just change next time */
+      }
+    }
+    const doc = new Y.Doc();
+    doc.getText('title').insert(0, note.title);
+    doc.getText('body').insert(0, note.body);
+    const session = new LiveSession(info, liveName(), Y_SIGNED, { relay: true });
+    const provider = new LiveYProvider(session, doc, true);
+    setLive({ session, provider, noteId: note.id, info });
+    await session.connect();
+    return session.status === 'live' ? info : null;
+  };
+  const stopSharing = () => {
+    live?.provider.destroy();
+    live?.session.close();
+    setLive(null);
+    setShareOpen(false);
+  };
+  const liveRef = useRef(live);
+  useEffect(() => {
+    liveRef.current = live;
+  }, [live]);
+  useEffect(
+    () => () => {
+      liveRef.current?.provider.destroy();
+      liveRef.current?.session.close();
+    },
+    [],
+  );
   const tagIndex = useMemo(() => {
     const counts = new Map<string, { label: string; count: number }>();
     for (const n of data.notes)
@@ -1131,6 +1322,16 @@ export default function Notes(props: ToolProps) {
           </p>
         </aside>
         <section className="tool-panel tool-note-editor notes-editor">
+          {shareOpen && note && (
+            <SharePanel
+              session={live?.session ?? null}
+              route="/notes"
+              start={startSharing}
+              stop={stopSharing}
+              onClose={() => setShareOpen(false)}
+              guest={false}
+            />
+          )}
           {!note ? (
             <div className="tool-empty">
               <AppMark app="notes" size="lg" />
@@ -1167,11 +1368,28 @@ export default function Notes(props: ToolProps) {
                       placeholder="Untitled note"
                       disabled={!store.ready}
                       value={note.title}
-                      onChange={(e) => patchNote({ title: e.target.value })}
+                      onChange={(e) => {
+                        typedTitle(e.target.value);
+                        patchNote({ title: e.target.value });
+                      }}
                     />
                   </DictateField>
                 </label>
                 <div className="tool-row tool-note-tools">
+                  {live && <LiveAvatars session={live.session} onClick={() => setShareOpen(true)} />}
+                  <button
+                    className="btn btn-secondary"
+                    disabled={!store.ready || (!!live && live.noteId !== note.id)}
+                    title={
+                      live && live.noteId !== note.id
+                        ? 'Another note is being shared. Stop sharing it first.'
+                        : 'Type in this note together live, or let people watch'
+                    }
+                    onClick={() => setShareOpen((v) => !v)}
+                  >
+                    <Radio size={15} />
+                    Share
+                  </button>
                   <button
                     className="btn btn-secondary btn-icon"
                     disabled={!store.ready}
@@ -1448,7 +1666,10 @@ ${note.body}
                     placeholder="Write freely. Dictated passages are timestamped here."
                     value={note.body}
                     disabled={!store.ready}
-                    onChange={(e) => patchNote({ body: e.target.value })}
+                    onChange={(e) => {
+                      typedBody(e.target.value);
+                      patchNote({ body: e.target.value });
+                    }}
                     onKeyDown={onBodyKeyDown}
                   />
                 </label>

@@ -88,6 +88,21 @@ import type { StlModel, StlOptions } from '../utils/svgStl';
 import '../styles/tools.css';
 import '../styles/image.css';
 import '../styles/svg.css';
+import { useSearchParams } from 'react-router-dom';
+import * as Y from 'yjs';
+import { LiveAvatars, SharePanel } from '../components/LiveShare';
+import { LiveSession, newLiveInfo, parseLive } from '../utils/live/session';
+import type { LiveInfo } from '../utils/live/session';
+import { LiveYProvider, Y_SIGNED } from '../utils/live/yjs';
+import { useYText } from '../utils/live/useYText';
+
+function liveName() {
+  try {
+    return localStorage.getItem('officeninja_meet_name') || '';
+  } catch {
+    return '';
+  }
+}
 
 interface SvgWorkspace {
   name: string;
@@ -158,6 +173,19 @@ export default function SvgEditor(props: ToolProps) {
 
   const [code, setCodeState] = useState('');
   const [name, setName] = useState('drawing');
+  // Live: guests arrive with ?live=room~pass[~editKey] and draw in the same file.
+  const [searchParams] = useSearchParams();
+  const [liveParam] = useState(() => parseLive(searchParams.get('live')));
+  const [liveSession, setLiveSession] = useState<{
+    session: LiveSession;
+    provider: LiveYProvider;
+    guest: boolean;
+    info: LiveInfo;
+  } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [guestSaved, setGuestSaved] = useState(false);
+  const [liveSynced, setLiveSynced] = useState(false);
+  const [, bumpLive] = useState(0);
   const [loaded, setLoaded] = useState(false);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -228,12 +256,12 @@ export default function SvgEditor(props: ToolProps) {
 
   const persistTimer = useRef<number | undefined>(undefined);
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || (liveParam && !guestSaved)) return;
     window.clearTimeout(persistTimer.current);
     persistTimer.current = window.setTimeout(() => {
       void update(() => ({ name, code }));
     }, 500);
-  }, [code, name, loaded, update]);
+  }, [code, name, loaded, update, liveParam, guestSaved]);
 
   /** Change the code. `coalesce` merges rapid edits (typing, nudges) into one undo step. */
   const setCode = useCallback((next: string, opts: { coalesce?: boolean } = {}) => {
@@ -331,12 +359,94 @@ export default function SvgEditor(props: ToolProps) {
   useEffect(() => {
     if (!store.ready || restored.current) return;
     restored.current = true;
+    setLoaded(true);
+    // Guests start empty and receive the shared drawing.
+    if (liveParam) return;
     setCodeState(data.code || DEFAULT_SVG);
     setName(data.name || 'drawing');
-    setLoaded(true);
     const handed = takeHandoff('svg');
     if (handed) void importFile(handed);
-  }, [store.ready, data, importFile]);
+  }, [store.ready, data, importFile, liveParam]);
+
+  /* ---------------- live sharing ---------------- */
+
+  useEffect(() => {
+    if (!liveParam || !loaded) return;
+    const session = new LiveSession(liveParam, liveName(), Y_SIGNED);
+    const provider = new LiveYProvider(session, new Y.Doc(), false);
+    const onSync = () => {
+      setLiveSynced(true);
+      const shared = provider.doc.getText('name').toString();
+      if (shared) setName(shared);
+    };
+    const onStatus = () => bumpLive((n) => n + 1);
+    session.addEventListener('synced', onSync);
+    session.addEventListener('status', onStatus);
+    setLiveSession({ session, provider, guest: true, info: liveParam });
+    void session.connect();
+    return () => {
+      session.removeEventListener('synced', onSync);
+      session.removeEventListener('status', onStatus);
+      provider.destroy();
+      session.close();
+    };
+  }, [liveParam, loaded]);
+
+  const typedCode = useYText(
+    liveSession ? liveSession.provider.doc.getText('code') : null,
+    code,
+    setCodeState,
+    codeRef,
+  );
+
+  const startSharing = async () => {
+    if (liveSession) return liveSession.session.status === 'live' ? liveSession.info : null;
+    const key = 'officeninja_live:svg';
+    let info: LiveInfo | null = null;
+    try {
+      info = JSON.parse(localStorage.getItem(key) || 'null');
+    } catch {
+      info = null;
+    }
+    if (!info?.room) {
+      info = newLiveInfo('sv');
+      try {
+        localStorage.setItem(key, JSON.stringify(info));
+      } catch {
+        /* links just change next time */
+      }
+    }
+    const doc = new Y.Doc();
+    doc.getText('code').insert(0, code);
+    doc.getText('name').insert(0, name);
+    const session = new LiveSession(info, liveName(), Y_SIGNED, { relay: true });
+    const provider = new LiveYProvider(session, doc, true);
+    setLiveSession({ session, provider, guest: false, info });
+    await session.connect();
+    return session.status === 'live' ? info : null;
+  };
+  const stopSharing = () => {
+    liveSession?.provider.destroy();
+    liveSession?.session.close();
+    setLiveSession(null);
+    setShareOpen(false);
+  };
+  // The host's session ends with the page.
+  const liveSessionRef = useRef(liveSession);
+  useEffect(() => {
+    liveSessionRef.current = liveSession;
+  }, [liveSession]);
+  useEffect(
+    () => () => {
+      const current = liveSessionRef.current;
+      if (current && !current.guest) {
+        current.provider.destroy();
+        current.session.close();
+      }
+    },
+    [],
+  );
+  const viewOnly = !!liveSession?.guest && (liveSession.session.mode === 'view' || !liveSynced);
 
   /* ---------------- live preview ---------------- */
 
@@ -984,7 +1094,11 @@ export default function SvgEditor(props: ToolProps) {
         autoCapitalize="off"
         autoCorrect="off"
         value={code}
-        onChange={(e) => setCode(e.target.value, { coalesce: true })}
+        readOnly={viewOnly}
+        onChange={(e) => {
+          typedCode(e.target.value);
+          setCode(e.target.value, { coalesce: true });
+        }}
       />
       <p className={parsed.error ? 'svg-codeinfo svg-codeinfo--error' : 'svg-codeinfo'} role="status">
         {parsed.error ? `Error: ${parsed.error}` : `${formatBytes(svgBytes(code))} · valid SVG`}
@@ -1417,8 +1531,39 @@ export default function SvgEditor(props: ToolProps) {
           if (file) void importFile(file);
         }}
       />
+      {shareOpen && (
+        <SharePanel
+          session={liveSession?.session ?? null}
+          route="/svg"
+          start={startSharing}
+          stop={stopSharing}
+          onClose={() => setShareOpen(false)}
+          guest={!!liveSession?.guest}
+        />
+      )}
+      {liveSession?.guest && (
+        <div className="live-banner" role="status">
+          <strong>{liveSession.session.mode === 'view' ? 'Viewing live' : 'Editing live'}</strong>
+          <span>
+            {liveSession.session.status === 'error'
+              ? liveSession.session.error
+              : liveSynced
+                ? `${name}.svg · changes appear for everyone instantly.`
+                : 'Connecting to the shared drawing… the person who shared it needs to have it open.'}
+          </span>
+          <LiveAvatars session={liveSession.session} />
+          {!guestSaved ? (
+            <button type="button" className="btn btn-secondary" disabled={!liveSynced} onClick={() => setGuestSaved(true)}>
+              Save a copy to my files
+            </button>
+          ) : (
+            <span>Saved; it keeps updating while you are here.</span>
+          )}
+        </div>
+      )}
       <div
         className="img-drop"
+        inert={viewOnly || undefined}
         data-dropping={dropping || undefined}
         onDragOver={(e) => {
           if (!e.dataTransfer.types.includes('Files')) return;
@@ -1470,6 +1615,18 @@ export default function SvgEditor(props: ToolProps) {
             <button className="btn btn-secondary btn-icon" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled={!hist.redo} onClick={redo}>
               <Redo2 size={16} />
             </button>
+            {!liveSession?.guest && (
+              <>
+                {liveSession && <LiveAvatars session={liveSession.session} onClick={() => setShareOpen(true)} />}
+                <button
+                  className="btn btn-secondary"
+                  title="Draw together live, or let people watch"
+                  onClick={() => setShareOpen((v) => !v)}
+                >
+                  Share
+                </button>
+              </>
+            )}
             <button className="btn btn-primary" onClick={() => switchTab('export')}>
               <Download size={16} /> Export
             </button>

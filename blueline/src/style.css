@@ -434,3 +434,12 @@ textarea.code { width: 100%; height: 72px; font: 11px var(--mono); border: 1px s
   #zoomLabel { min-width: 42px; padding: 4px; }
   .tright { gap: 2px; }
 }
+
+/* Live share (15-live.js) */
+.coshare { margin-bottom: 12px; }
+.coadvanced { margin: 6px 0 4px; }
+.coadvanced summary { cursor: pointer; color: var(--fg2); font-weight: 600; padding: 6px 0; }
+.livebanner { position: fixed; left: 50%; top: 92px; transform: translateX(-50%); z-index: 40; max-width: min(92vw, 640px); padding: 8px 14px; border: 1px solid var(--line2); border-radius: 10px; background: var(--bg); color: var(--fg); box-shadow: 0 6px 24px rgba(0,0,0,.12); font-size: 12.5px; line-height: 1.4; }
+body.bl-viewonly #toolbar, body.bl-viewonly #addPage, body.bl-viewonly .phead .ib { display: none !important; }
+body.bl-viewonly #right input, body.bl-viewonly #right button, body.bl-viewonly #right select { pointer-events: none; opacity: .55; }
+@media (max-width: 600px) { .livebanner { top: 90px; font-size: 12px; } }

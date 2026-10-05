@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { Suspense, lazy, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ClipboardCopy, ExternalLink, LogOut, MonitorUp, Video } from 'lucide-react';
+import { MonitorUp, Video } from 'lucide-react';
 import { ToolShell, type ToolProps } from '../components/ToolShell';
 import { AppMark } from '../components/AppMark';
 import { DictateField } from '../components/Dictate';
@@ -8,11 +8,13 @@ import { appendSpoken } from '../utils/speech';
 import '../styles/tools.css';
 import '../styles/sync.css';
 
+const MeetRoom = lazy(() => import('../components/MeetRoom'));
+
 /**
- * Group video meetings on VDO.Ninja, embedded. VDO.Ninja runs the call (peer to
- * peer, no accounts); this page only creates a private room, keeps your name,
- * and makes the invite link. The room password keeps strangers out of a room
- * whose name they might guess.
+ * Group video meetings, peer to peer over the VDO.Ninja SDK (no accounts). This
+ * page creates a private room and its invite link; the room password keeps
+ * strangers out of a room whose name they might guess. The same room also opens
+ * in VDO.Ninja itself for its full studio controls.
  */
 const NAME_KEY = 'officeninja_meet_name';
 const randomCode = (n: number) =>
@@ -59,18 +61,8 @@ export default function MeetPage(props: ToolProps) {
       password: inCall.key,
       label: name.trim() || 'Guest',
     });
-    // Keep VDO.Ninja's own call controls; force the screen-share button on.
     return `https://vdo.ninja/?${q.toString()}&screensharebutton&hidehome`;
   }, [inCall, name]);
-
-  const copy = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setMessage('Invite link copied. Anyone with it can join this meeting.');
-    } catch {
-      setMessage(`Invite link: ${text}`);
-    }
-  };
 
   return (
     <ToolShell
@@ -122,46 +114,26 @@ export default function MeetPage(props: ToolProps) {
             </button>
           </div>
           <p className="tool-hint">
-            <MonitorUp size={13} aria-hidden="true" /> Screen sharing is in the call's control bar.
-            Calls are peer to peer and work best with up to about 8 people.
+            <MonitorUp size={13} aria-hidden="true" /> Share your screen from the call's control bar.
+            Calls are peer to peer: up to 4 people are on video at once, everyone else is heard.
           </p>
         </section>
       ) : (
-        <>
-          <div className="meet-bar">
-            <strong>Meeting room · {inCall.room.replace(/^meet_/, '')}</strong>
-            <div className="tool-row">
-              <button className="btn btn-primary" onClick={() => void copy(invite(inCall.room, inCall.key))}>
-                <ClipboardCopy size={15} /> Copy invite link
-              </button>
-              <a
-                className="btn btn-secondary"
-                href={src}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Open the call in its own tab"
-              >
-                <ExternalLink size={15} /> Pop out
-              </a>
-              <button
-                className="btn btn-secondary"
-                onClick={() => {
-                  setInCall(null);
-                  navigate('/meet', { replace: true });
-                }}
-              >
-                <LogOut size={15} /> Leave
-              </button>
-            </div>
-          </div>
-          <iframe
-            className="meet-frame"
-            title="Video meeting"
-            src={src}
-            allow="camera; microphone; display-capture; autoplay; fullscreen; clipboard-write; picture-in-picture; speaker-selection"
-            allowFullScreen
+        <Suspense fallback={<p className="tool-muted">Starting the call…</p>}>
+          <MeetRoom
+            room={inCall.room}
+            meetingKey={inCall.key}
+            name={name.trim() || 'Guest'}
+            invite={invite(inCall.room, inCall.key)}
+            popOut={src}
+            onMessage={setMessage}
+            onLeave={() => {
+              setInCall(null);
+              setMessage('');
+              navigate('/meet', { replace: true });
+            }}
           />
-        </>
+        </Suspense>
       )}
     </ToolShell>
   );

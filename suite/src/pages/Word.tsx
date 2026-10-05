@@ -12,6 +12,14 @@ import { NodeSelection, Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
+import Collaboration from '@tiptap/extension-collaboration';
+import CollaborationCaret from '@tiptap/extension-collaboration-caret';
+import * as Y from 'yjs';
+import { prosemirrorJSONToYDoc } from '@tiptap/y-tiptap';
+import { LiveSession, newLiveInfo, parseLive } from '../utils/live/session';
+import type { LiveInfo } from '../utils/live/session';
+import { LiveYProvider, Y_SIGNED } from '../utils/live/yjs';
+import { LiveAvatars, SharePanel } from '../components/LiveShare';
 import { Table as TableExtension } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableCell } from '@tiptap/extension-table-cell';
@@ -827,6 +835,17 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const defaultFileName = DEFAULT_FILE_NAME;
   const [docId] = useState(() => searchParams.get('id') || `word-${Date.now()}`);
+  // Live editing: guests arrive with ?live=room~pass[~editKey].
+  const [liveParam] = useState(() => parseLive(searchParams.get('live')));
+  const [live, setLive] = useState<{
+    session: LiveSession;
+    provider: LiveYProvider;
+    guest: boolean;
+    info: LiveInfo;
+  } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [guestSaved, setGuestSaved] = useState(false);
+  const restoreAfterLiveRef = useRef<JSONContent | null>(null);
   const [fileName, setFileName] = useState(defaultFileName);
   const [documentRevision, setDocumentRevision] = useState(0);
   const [isDictating, setIsDictating] = useState(false);
@@ -900,13 +919,26 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
 
   useEffect(() => {
     if (!searchParams.get('id')) {
-      setSearchParams({ id: docId }, { replace: true });
+      setSearchParams(
+        liveParam ? { id: docId, live: searchParams.get('live') ?? '' } : { id: docId },
+        { replace: true },
+      );
     }
-  }, [docId, searchParams, setSearchParams]);
+  }, [docId, liveParam, searchParams, setSearchParams]);
 
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      // In a live session Yjs owns undo/redo (per person), so the local history is off.
+      live ? StarterKit.configure({ undoRedo: false }) : StarterKit,
+      ...(live
+        ? [
+            Collaboration.configure({ document: live.provider.doc }),
+            CollaborationCaret.configure({
+              provider: live.provider,
+              user: { name: live.session.me.name, color: live.session.me.color },
+            }),
+          ]
+        : []),
       TableExtension.configure({ resizable: true }),
       TableRow,
       TableHeader,
@@ -934,9 +966,113 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
     // content: it counted towards the word count, exported into their .docx, and had to
     // be selected and deleted before they could start writing.
     content: '',
-  });
+  }, [live]);
 
   editorRef.current = editor;
+
+  /* ---------------- live editing ---------------- */
+
+  const liveName = () => {
+    try {
+      return localStorage.getItem('officeninja_meet_name') || '';
+    } catch {
+      return '';
+    }
+  };
+
+  // Guests: join the shared document straight away. Nothing they do is written to
+  // their own files unless they choose "Save a copy".
+  useEffect(() => {
+    if (!liveParam) return;
+    autosaveBlockedRef.current = true;
+    const session = new LiveSession(liveParam, liveName(), Y_SIGNED);
+    const provider = new LiveYProvider(session, new Y.Doc(), false);
+    const onMeta = (e: Event) => {
+      const { type, payload } = (e as CustomEvent<{ type: string; payload: { title?: string } }>).detail;
+      if (type === 'meta' && typeof payload?.title === 'string') {
+        setFileName(payload.title.slice(0, 200));
+        fileNameRef.current = payload.title.slice(0, 200);
+      }
+    };
+    session.addEventListener('message', onMeta);
+    setLive({ session, provider, guest: true, info: liveParam });
+    void session.connect();
+    return () => {
+      session.removeEventListener('message', onMeta);
+      provider.destroy();
+      session.close();
+    };
+  }, [liveParam]);
+
+  // The person sharing tells newcomers the document's name.
+  useEffect(() => {
+    if (!live || live.guest) return;
+    const sendMeta = () => void live.session.send('meta', { title: fileName });
+    sendMeta();
+    live.session.addEventListener('peer-open', sendMeta);
+    return () => live.session.removeEventListener('peer-open', sendMeta);
+  }, [live, fileName]);
+
+  // Re-render the guest banner when the connection or first sync changes.
+  const [, bumpLive] = useState(0);
+  useEffect(() => {
+    if (!live) return;
+    const bump = () => bumpLive((n) => n + 1);
+    live.session.addEventListener('status', bump);
+    live.session.addEventListener('synced', bump);
+    return () => {
+      live.session.removeEventListener('status', bump);
+      live.session.removeEventListener('synced', bump);
+    };
+  }, [live]);
+
+  // View-only guests get a read-only editor.
+  useEffect(() => {
+    if (editor && live?.session.mode === 'view') editor.setEditable(false);
+  }, [editor, live]);
+
+  // After leaving a session, the plain editor picks up where the shared one was.
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || live || !restoreAfterLiveRef.current) return;
+    editor.commands.setContent(restoreAfterLiveRef.current, { emitUpdate: false });
+    restoreAfterLiveRef.current = null;
+  }, [editor, live]);
+
+  const startSharing = useCallback(async () => {
+    const active = editorRef.current;
+    if (!active) return null;
+    if (live) return live.session.status === 'live' ? live.info : null;
+    const key = `officeninja_live:${docId}`;
+    let info: LiveInfo | null = null;
+    try {
+      info = JSON.parse(localStorage.getItem(key) || 'null');
+    } catch {
+      info = null;
+    }
+    if (!info?.room) {
+      info = newLiveInfo('wd');
+      try {
+        localStorage.setItem(key, JSON.stringify(info));
+      } catch {
+        /* links just change next time */
+      }
+    }
+    const doc = prosemirrorJSONToYDoc(active.schema, active.getJSON(), 'default');
+    const session = new LiveSession(info, liveName(), Y_SIGNED, { relay: true });
+    const provider = new LiveYProvider(session, doc, true);
+    setLive({ session, provider, guest: false, info });
+    await session.connect();
+    return session.status === 'live' ? info : null;
+  }, [live, docId]);
+
+  const stopSharing = useCallback(() => {
+    if (!live) return;
+    restoreAfterLiveRef.current = editorRef.current?.getJSON() ?? null;
+    live.provider.destroy();
+    live.session.close();
+    setLive(null);
+    setShareOpen(false);
+  }, [live]);
 
   /* ---------------- persistence ---------------- */
 
@@ -2395,6 +2531,18 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
         saveStatus={saveStatus}
         actions={
           <>
+            <LiveAvatars session={live?.session ?? null} onClick={() => setShareOpen(true)} />
+            {!live?.guest && (
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => setShareOpen((v) => !v)}
+                disabled={isContentUnreadable}
+                title="Edit together live, or let people watch"
+              >
+                Share
+              </button>
+            )}
             <button
               className="btn btn-secondary"
               onClick={saveNow}
@@ -2705,6 +2853,43 @@ export default function Word({ toggleTheme, isDarkMode }: WordProps) {
         </ToolbarGroup>
       </Toolbar>
 
+      {shareOpen && (
+        <SharePanel
+          session={live?.session ?? null}
+          route="/word"
+          start={startSharing}
+          stop={stopSharing}
+          onClose={() => setShareOpen(false)}
+          guest={!!live?.guest}
+        />
+      )}
+      {live?.guest && (
+        <div className="live-banner" role="status">
+          <strong>{live.session.mode === 'view' ? 'Viewing live' : 'Editing live'}</strong>
+          <span>
+            {live.session.status === 'error'
+              ? live.session.error
+              : live.provider.synced
+                ? `${fileName} · changes appear for everyone instantly.`
+                : 'Connecting to the shared document… the person who shared it needs to have it open.'}
+          </span>
+          {!guestSaved ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                autosaveBlockedRef.current = false;
+                setGuestSaved(true);
+                void commitSave();
+              }}
+            >
+              Save a copy to my files
+            </button>
+          ) : (
+            <span>Saved to your files; it keeps updating while you are here.</span>
+          )}
+        </div>
+      )}
       {banner && (
         <div
           className={`editor-banner editor-banner--${banner.tone}`}

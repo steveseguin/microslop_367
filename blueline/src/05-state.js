@@ -14,6 +14,7 @@ function diffNodes() {
   return any ? changes : null;
 }
 function commit(label = 'Edit', opts = {}) {
+  if (typeof liveViewOnly === 'function' && liveViewOnly()) return liveRevertLocal();
   if (HIST.hold > 0 && !opts.force) { layoutAll(); renderAll(); return null; }   // inside an AI batch: one undo step at the end
   layoutAll();
   D.sel = D.sel.filter(id => N(id));

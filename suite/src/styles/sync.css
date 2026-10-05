@@ -140,18 +140,176 @@
 .meet-bar strong {
   font-size: var(--text-sm);
 }
-.meet-frame {
-  display: block;
-  width: 100%;
-  height: clamp(420px, calc(100dvh - 12rem), 1400px);
+/* The call */
+.meet-room {
+  display: grid;
+  gap: var(--space-3);
+}
+.meet-stage {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  align-content: start;
+}
+.meet-stage--1 {
+  grid-template-columns: minmax(0, 860px);
+  justify-content: center;
+}
+.meet-stage--2 {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+}
+.meet-tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: #0b1119;
 }
+/* Who is talking: a ring around their tile (a live state, not decoration). */
+.meet-tile--speaking {
+  outline: 3px solid #30a46c;
+  outline-offset: -3px;
+}
+.meet-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #0b1119;
+}
+.meet-video--mirror {
+  transform: scaleX(-1);
+}
+.meet-tile__avatar,
+.meet-chip__avatar {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #334155;
+  color: #fff;
+  font-weight: 650;
+}
+.meet-tile__avatar {
+  width: clamp(3.5rem, 18%, 6rem);
+  aspect-ratio: 1;
+  font-size: clamp(1.4rem, 4vw, 2.4rem);
+}
+.meet-tile figcaption {
+  position: absolute;
+  left: var(--space-2);
+  bottom: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% - 4rem);
+  padding: 2px 8px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.meet-tile__pin {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.meet-tile:hover .meet-tile__pin,
+.meet-tile__pin:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .meet-tile__pin {
+    opacity: 1;
+  }
+}
+.meet-audio {
+  display: grid;
+  gap: var(--space-2);
+}
+.meet-audio__label {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.meet-audio ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.meet-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 4px 4px 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+}
+.meet-chip--speaking {
+  outline: 2px solid #30a46c;
+}
+.meet-chip__avatar {
+  width: 1.9rem;
+  height: 1.9rem;
+  font-size: 0.85rem;
+}
+.meet-chip__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--text-sm);
+}
+.meet-chip .btn {
+  min-height: 1.9rem;
+  padding: 0 var(--space-3);
+  border-radius: 999px;
+  font-size: 13px;
+}
+.meet-controls {
+  position: sticky;
+  bottom: calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-md, 0 4px 16px rgba(0, 0, 0, 0.12));
+}
 @media (max-width: 640px) {
-  .meet-frame {
-    height: calc(100dvh - 11rem);
-    border-radius: var(--radius-md);
+  .meet-stage--3,
+  .meet-stage--4,
+  .meet-stage--5 {
+    grid-template-columns: 1fr 1fr;
+  }
+  .meet-stage--3 .meet-tile,
+  .meet-stage--4 .meet-tile,
+  .meet-stage--5 .meet-tile {
+    aspect-ratio: 3 / 4;
+  }
+  .meet-controls .btn {
+    flex: 1 1 calc(50% - var(--space-2));
   }
 }
 

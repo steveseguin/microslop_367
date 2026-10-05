@@ -31,6 +31,9 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { StatusBar } from '../components/StatusBar';
 import { Toolbar, ToolbarButton, ToolbarGroup } from '../components/Toolbar';
 import type { WorkbookInstance } from '../components/ExcelWorkbook';
+import { LiveSession, newLiveInfo, parseLive } from '../utils/live/session';
+import type { LiveInfo } from '../utils/live/session';
+import { LiveAvatars, SharePanel } from '../components/LiveShare';
 import {
   DocumentReadError,
   getCurrentClientId,
@@ -1290,6 +1293,18 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
   const [loadAttempt, setLoadAttempt] = useState(0);
   const isNarrowStatusBar = useIsNarrowStatusBar();
 
+  // Live editing: guests arrive with ?live=room~pass[~editKey]. Every grid change is
+  // sent as a fortune-sheet op; the person sharing sends the whole workbook to newcomers.
+  const [liveParam] = useState(() => parseLive(searchParams.get('live')));
+  const [live, setLive] = useState<{ session: LiveSession; guest: boolean; info: LiveInfo } | null>(null);
+  const liveRef = useRef(live);
+  liveRef.current = live;
+  const [liveSynced, setLiveSynced] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  // Guests never write the shared workbook into their own files unless they ask to.
+  const liveNoSaveRef = useRef(!!liveParam);
+  const [guestSaved, setGuestSaved] = useState(false);
+
   useEffect(() => {
     documentRevisionRef.current = documentRevision;
   }, [documentRevision]);
@@ -1312,9 +1327,12 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
 
   useEffect(() => {
     if (!searchParams.get('id')) {
-      setSearchParams({ id: docId }, { replace: true });
+      setSearchParams(
+        liveParam ? { id: docId, live: searchParams.get('live') ?? '' } : { id: docId },
+        { replace: true },
+      );
     }
-  }, [docId, searchParams, setSearchParams]);
+  }, [docId, liveParam, searchParams, setSearchParams]);
 
   const loadedDocIdRef = useRef<string | null>(null);
 
@@ -1617,6 +1635,11 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
       if (isWorkbookUnopenableRef.current) {
         setSaveStatus('Read-only: could not open');
         setBanner(unopenableBanner(openFailureDetail));
+        return;
+      }
+
+      if (liveNoSaveRef.current) {
+        setSaveStatus('Live: not saved to your files');
         return;
       }
 
@@ -2064,10 +2087,13 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
     [getRuntimeActiveSheetName, refreshSelectionState],
   );
 
-  const handleWorkbookOperation = useCallback(() => {
+  const handleWorkbookOperation = useCallback((operation?: unknown) => {
     if (skipNextWorkbookChangeRef.current) {
       return;
     }
+
+    const session = liveRef.current?.session;
+    if (session && Array.isArray(operation) && operation.length) void session.send('op', operation);
 
     userOperationCountRef.current += 1;
 
@@ -2079,6 +2105,107 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
       refreshSelectionState();
     });
   }, [getRuntimeActiveSheetName, markWorkbookDirty, refreshSelectionState]);
+
+  /* ---------------- live editing ---------------- */
+
+  const liveName = () => {
+    try {
+      return localStorage.getItem('officeninja_meet_name') || '';
+    } catch {
+      return '';
+    }
+  };
+
+  // Messages from the others: their changes, and (for guests) the whole workbook.
+  useEffect(() => {
+    if (!live) return;
+    const onMessage = (e: Event) => {
+      const { type, payload } = (e as CustomEvent<{ type: string; payload: unknown }>).detail;
+      if (type === 'op' && Array.isArray(payload)) {
+        try {
+          workbookRef.current?.applyOp(payload as never);
+        } catch (error) {
+          console.warn('Could not apply a live change', error);
+        }
+        // applyOp skips onOp, so mark the change here: the person sharing autosaves it.
+        window.requestAnimationFrame(() => {
+          markWorkbookDirty();
+          refreshSelectionState();
+        });
+      } else if (type === 'full' && live.guest) {
+        const data = payload as { sheets?: WorkbookData; title?: string };
+        if (!Array.isArray(data?.sheets) || !data.sheets.length) return;
+        if (typeof data.title === 'string') setFileName(data.title.slice(0, 200));
+        skipNextWorkbookChangeRef.current = true;
+        setWorkbookSeed(data.sheets);
+        setSheetCount(data.sheets.length);
+        setWorkbookKey((current) => current + 1);
+        setLiveSynced(true);
+      }
+    };
+    const sendFull = (to: string) => {
+      const sheets = buildPersistablePayload();
+      if (sheets) void live.session.send('full', { sheets, title: fileNameRef.current }, to);
+    };
+    const onPeer = (e: Event) => {
+      if (!live.guest) sendFull((e as CustomEvent<string>).detail);
+    };
+    live.session.addEventListener('message', onMessage);
+    live.session.addEventListener('peer-open', onPeer);
+    return () => {
+      live.session.removeEventListener('message', onMessage);
+      live.session.removeEventListener('peer-open', onPeer);
+    };
+  }, [buildPersistablePayload, live, markWorkbookDirty, refreshSelectionState]);
+
+  // Guests join straight away.
+  useEffect(() => {
+    if (!liveParam) return;
+    const session = new LiveSession(liveParam, liveName(), ['op', 'full']);
+    setLive({ session, guest: true, info: liveParam });
+    void session.connect();
+    return () => session.close();
+  }, [liveParam]);
+
+  const [, bumpLive] = useState(0);
+  useEffect(() => {
+    if (!live) return;
+    const bump = () => bumpLive((n) => n + 1);
+    live.session.addEventListener('status', bump);
+    return () => live.session.removeEventListener('status', bump);
+  }, [live]);
+
+  const startSharing = useCallback(async () => {
+    if (live) return live.session.status === 'live' ? live.info : null;
+    const key = `officeninja_live:${docId}`;
+    let info: LiveInfo | null = null;
+    try {
+      info = JSON.parse(localStorage.getItem(key) || 'null');
+    } catch {
+      info = null;
+    }
+    if (!info?.room) {
+      info = newLiveInfo('xl');
+      try {
+        localStorage.setItem(key, JSON.stringify(info));
+      } catch {
+        /* links just change next time */
+      }
+    }
+    const session = new LiveSession(info, liveName(), ['op', 'full'], { relay: true });
+    setLive({ session, guest: false, info });
+    await session.connect();
+    return session.status === 'live' ? info : null;
+  }, [live, docId]);
+
+  const stopSharing = useCallback(() => {
+    live?.session.close();
+    setLive(null);
+    setShareOpen(false);
+  }, [live]);
+
+  // Viewers, and guests still waiting for the workbook, cannot change the grid.
+  const liveReadOnly = !!live?.guest && (live.session.mode === 'view' || !liveSynced);
 
   const applyPendingCurrencyFormat = useCallback(() => {
     const pending = pendingCurrencyRef.current;
@@ -3019,6 +3146,18 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
         saveStatus={saveStatus}
         actions={
           <>
+            <LiveAvatars session={live?.session ?? null} onClick={() => setShareOpen(true)} />
+            {!live?.guest && (
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => setShareOpen((v) => !v)}
+                disabled={isWorkbookUnopenable}
+                title="Edit together live, or let people watch"
+              >
+                Share
+              </button>
+            )}
             <input
               ref={importInputRef}
               type="file"
@@ -3112,6 +3251,44 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
         </ToolbarGroup>
       </Toolbar>
 
+      {shareOpen && (
+        <SharePanel
+          session={live?.session ?? null}
+          route="/excel"
+          start={startSharing}
+          stop={stopSharing}
+          onClose={() => setShareOpen(false)}
+          guest={!!live?.guest}
+        />
+      )}
+      {live?.guest && (
+        <div className="live-banner" role="status">
+          <strong>{live.session.mode === 'view' ? 'Viewing live' : 'Editing live'}</strong>
+          <span>
+            {live.session.status === 'error'
+              ? live.session.error
+              : liveSynced
+                ? `${fileName} · changes appear for everyone instantly.`
+                : 'Connecting to the shared workbook… the person who shared it needs to have it open.'}
+          </span>
+          {!guestSaved ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={!liveSynced}
+              onClick={() => {
+                liveNoSaveRef.current = false;
+                setGuestSaved(true);
+                void performSave({ force: true });
+              }}
+            >
+              Save a copy to my files
+            </button>
+          ) : (
+            <span>Saved to your files; it keeps updating while you are here.</span>
+          )}
+        </div>
+      )}
       {banner && (
         <div
           className={`editor-banner editor-banner--${banner.tone}`}
@@ -3362,6 +3539,7 @@ export default function Excel({ toggleTheme, isDarkMode }: ExcelProps) {
                   data={workbookSeed}
                   onReady={handleWorkbookReady}
                   onOp={handleWorkbookOperation}
+                  readOnly={liveReadOnly}
                   hooks={workbookHooks as unknown as Record<string, (...args: unknown[]) => void>}
                 />
               </Suspense>

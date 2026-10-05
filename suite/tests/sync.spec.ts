@@ -80,26 +80,28 @@ test('NinjaMeet creates a private room with a working invite link', async ({ pag
   await page.goto('/#/meet');
   await page.getByLabel('Your name', { exact: true }).fill('Ada');
   await page.getByRole('button', { name: 'Start meeting' }).click();
-  const frame = page.getByTitle('Video meeting');
-  await expect(frame).toBeVisible();
-  const src = (await frame.getAttribute('src'))!;
+  await expect(page.getByRole('region', { name: 'Meeting' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Call controls' })).toBeVisible();
+  await expect(page.getByText('Ada (you)')).toBeVisible();
+  // The same room opens in VDO.Ninja itself, with the room password and name.
+  const src = (await page.getByRole('link', { name: /Open in VDO.Ninja/ }).getAttribute('href'))!;
   const url = new URL(src);
   expect(url.origin).toBe('https://vdo.ninja');
   expect(url.searchParams.get('room')).toMatch(/^meet_[a-z0-9]{14}$/);
   expect(url.searchParams.get('password')).toMatch(/^[a-z0-9]{16}$/);
   expect(url.searchParams.get('label')).toBe('Ada');
-  expect(src).toContain('&screensharebutton');
-  expect(await frame.getAttribute('allow')).toContain('display-capture');
   // The page URL is the invite: a second person lands on the join screen for the same room.
   const invite = page.url();
+  expect(invite).toContain(`room=${url.searchParams.get('room')}`);
+  expect(invite).toContain(`key=${url.searchParams.get('password')}`);
   const guest = await page.context().newPage();
   await guest.goto(invite);
   await expect(guest.getByRole('heading', { name: 'You are invited to a meeting' })).toBeVisible();
   await guest.getByLabel('Your name', { exact: true }).fill('Grace');
   await guest.getByRole('button', { name: 'Join meeting' }).click();
-  const guestSrc = new URL((await guest.getByTitle('Video meeting').getAttribute('src'))!);
-  expect(guestSrc.searchParams.get('room')).toBe(url.searchParams.get('room'));
-  expect(guestSrc.searchParams.get('password')).toBe(url.searchParams.get('password'));
+  await expect(guest.getByText('Grace (you)')).toBeVisible();
+  await guest.getByRole('button', { name: 'Leave' }).click();
+  await expect(guest.getByRole('button', { name: 'Start meeting' })).toBeVisible();
 });
 
 // Uses the public VDO.Ninja signaling server, so it only runs when asked:
