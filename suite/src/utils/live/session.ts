@@ -8,8 +8,8 @@
  * data channel.
  */
 import { decodeJson, encodeJson } from '../sync/snapshot';
+import { ninjaClient } from '../ninja';
 
-const SDK_URL = 'https://cdn.jsdelivr.net/npm/@vdoninja/sdk@1.6.1/vdoninja-sdk.min.js';
 const CHUNK = 48_000;
 
 type Sdk = {
@@ -64,29 +64,6 @@ export function liveLink(route: string, info: LiveInfo, edit: boolean) {
   return `${location.origin}${location.pathname}#${route}?live=${code}`;
 }
 
-const scripts = new Map<string, Promise<void>>();
-function loadScript(src: string) {
-  // One load per page, even when two sessions start at once.
-  let p = scripts.get(src);
-  if (!p) {
-    p = loadScriptOnce(src);
-    p.catch(() => scripts.delete(src));
-    scripts.set(src, p);
-  }
-  return p;
-}
-
-function loadScriptOnce(src: string) {
-  return new Promise<void>((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error('Could not load the VDO.Ninja SDK. Check your connection.'));
-    document.head.appendChild(s);
-  });
-}
-
 const hex = (buf: ArrayBuffer) =>
   [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 
@@ -135,9 +112,7 @@ export class LiveSession extends EventTarget {
           false,
           ['sign', 'verify'],
         );
-      if (!(window as unknown as { VDONinjaSDK?: unknown }).VDONinjaSDK) await loadScript(SDK_URL);
-      const Ctor = (window as unknown as { VDONinjaSDK: new (o: object) => Sdk }).VDONinjaSDK;
-      const sdk = new Ctor({ host: 'wss://wss.vdo.ninja', salt: 'vdo.ninja', debug: false });
+      const sdk = await ninjaClient<Sdk>();
       this.sdk = sdk;
       const streamID = `lv${this.me.id}`;
       sdk.addEventListener('dataChannelOpen', (e) => {

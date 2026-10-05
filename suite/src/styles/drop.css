@@ -1,0 +1,212 @@
+/* NinjaDrop */
+.drop-panel {
+  display: grid;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.drop-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-self: start;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.drop-status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+.drop-status[data-online] {
+  color: var(--text);
+}
+.drop-status[data-online] .drop-status__dot {
+  background: #22a06b;
+}
+.drop-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+.drop-name label {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 16rem;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.drop-name input,
+.drop-link input,
+.drop-library input[type='search'] {
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+}
+.drop-name .tool-hint {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.drop-zone {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-4);
+  border: 2px dashed var(--border-strong, var(--border));
+  border-radius: var(--radius-lg);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  text-align: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+.drop-zone p {
+  max-width: 34rem;
+  margin: 0;
+  line-height: 1.5;
+}
+.drop-zone strong {
+  color: var(--text);
+}
+.drop-zone[data-dragging] {
+  border-color: var(--brand-drop);
+  background: var(--accent-soft);
+}
+.drop-link {
+  display: grid;
+  gap: var(--space-2);
+}
+.drop-link label {
+  display: grid;
+  gap: 4px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.drop-qr {
+  width: 11rem;
+  height: 11rem;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+.drop-qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.drop-list-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.drop-list-head h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+.drop-files {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.drop-file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3);
+}
+.drop-file + .drop-file {
+  border-top: 1px solid var(--border);
+}
+.drop-file__info {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+.drop-file__name {
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.drop-file__detail {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.drop-file progress {
+  width: 100%;
+  height: 6px;
+  accent-color: var(--brand-drop);
+}
+.drop-done {
+  color: #22a06b;
+}
+.drop-library {
+  display: grid;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.drop-library__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.drop-library__head h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+.drop-library__list {
+  max-height: 22rem;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.drop-library__list li + li {
+  border-top: 1px solid var(--border);
+}
+.drop-library__list label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+.drop-library__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.drop-library__when {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.drop-switch {
+  margin-top: var(--space-2);
+}

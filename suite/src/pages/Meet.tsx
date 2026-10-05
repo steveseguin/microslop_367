@@ -5,6 +5,7 @@ import { ToolShell, type ToolProps } from '../components/ToolShell';
 import { AppMark } from '../components/AppMark';
 import { DictateField } from '../components/Dictate';
 import { appendSpoken } from '../utils/speech';
+import { NINJA_SALT } from '../utils/ninja';
 import '../styles/tools.css';
 import '../styles/sync.css';
 
@@ -61,6 +62,8 @@ export default function MeetPage(props: ToolProps) {
       password: inCall.key,
       label: name.trim() || 'Guest',
     });
+    // Same room in VDO.Ninja itself: it needs NinjaOffice's salt to find it.
+    q.set('salt', NINJA_SALT);
     return `https://vdo.ninja/?${q.toString()}&screensharebutton&hidehome`;
   }, [inCall, name]);
 

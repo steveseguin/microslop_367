@@ -13,7 +13,9 @@ type ToolName =
   | 'NinjaImage'
   | 'NinjaSVG'
   | 'NinjaMeet'
-  | 'NinjaSync';
+  | 'NinjaSync'
+  | 'NinjaDrop'
+  | 'NinjaChat';
 
 const APP_KIND = {
   NinjaTime: 'time',
@@ -23,6 +25,8 @@ const APP_KIND = {
   NinjaSVG: 'svg',
   NinjaMeet: 'meet',
   NinjaSync: 'sync',
+  NinjaDrop: 'drop',
+  NinjaChat: 'chat',
 } as const;
 
 const HEADLINE = {
@@ -33,6 +37,8 @@ const HEADLINE = {
   NinjaSVG: 'Vector graphics, tweaked and converted.',
   NinjaMeet: 'Meet face to face, from any browser.',
   NinjaSync: 'Your work, on every device.',
+  NinjaDrop: 'Send files straight to anyone.',
+  NinjaChat: 'Talk in open channels, peer to peer.',
 } as const;
 
 function statusTone(status: string, error?: string) {

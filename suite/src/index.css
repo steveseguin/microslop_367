@@ -72,6 +72,8 @@
   --brand-svg: #4d7c0f;
   --brand-meet: #0369a1;
   --brand-sync: #334155;
+  --brand-drop: #c2410c;
+  --brand-chat: #7e22ce;
   /* Blueline's own palette (blueline/src/style.css --sel / --fg / --bg). */
   --brand-blueline: #0a8bd6;
   --brand-blueline-ink: #15181c;
@@ -134,6 +136,8 @@
   --brand-svg: #a7d566;
   --brand-meet: #7cc4f2;
   --brand-sync: #b6c2d3;
+  --brand-drop: #fb9a5b;
+  --brand-chat: #d3a4f5;
   --brand-blueline: #2ea8ee;
   --brand-blueline-ink: #e9ebee;
   --brand-blueline-bar: #1a1c20;
@@ -1470,7 +1474,7 @@ input[type="color"]::-moz-color-swatch {
 }
 
 .dashboard-shell {
-  width: min(1400px, calc(100% - var(--space-5)));
+  width: min(1200px, calc(100% - var(--space-5)));
   margin: 0 auto;
 }
 
@@ -1710,6 +1714,8 @@ input[type="color"]::-moz-color-swatch {
 .app-mark--svg { --app-brand: var(--brand-svg); }
 .app-mark--meet { --app-brand: var(--brand-meet); }
 .app-mark--sync { --app-brand: var(--brand-sync); }
+.app-mark--drop { --app-brand: var(--brand-drop); }
+.app-mark--chat { --app-brand: var(--brand-chat); }
 
 /* Blueline's mark IS the tile, exactly as the editor draws it. */
 .app-mark--blueline {

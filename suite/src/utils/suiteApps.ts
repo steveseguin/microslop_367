@@ -9,5 +9,7 @@ export const SUITE_APPS = [
   ['NinjaImage', '/image'],
   ['NinjaSVG', '/svg'],
   ['NinjaMeet', '/meet'],
+  ['NinjaChat', '/chat'],
+  ['NinjaDrop', '/drop'],
   ['NinjaSync', '/sync'],
 ] as const;

@@ -4,6 +4,7 @@ import {
   ArrowRight,
   FolderOpen,
   Plus,
+  RefreshCw,
   Upload,
   Moon,
   Pencil,
@@ -138,24 +139,39 @@ type AppTile = {
     | 'time'
     | 'notes'
     | 'pdf'
-    | 'meet';
+    | 'meet'
+    | 'chat'
+    | 'drop';
+  group: 'create' | 'tools' | 'connect';
   name: string;
   line: string;
   /** Accessible name for the create tiles ("New document", ...). */
   create?: string;
 };
 const APP_TILES: AppTile[] = [
-  { app: 'word', name: 'NinjaWord', line: 'New document', create: 'New document' },
-  { app: 'excel', name: 'NinjaCalc', line: 'New spreadsheet', create: 'New spreadsheet' },
-  { app: 'powerpoint', name: 'NinjaSlides', line: 'New presentation', create: 'New presentation' },
-  { app: 'blueline', name: 'Blueline', line: 'New design', create: 'New design' },
-  { app: 'svg', name: 'NinjaSVG', line: 'Edit & convert SVG' },
-  { app: 'image', name: 'NinjaImage', line: 'Photo editor' },
-  { app: 'pdf', name: 'NinjaPDF', line: 'Edit, sign & fill PDFs' },
-  { app: 'time', name: 'NinjaTime', line: 'Time & invoices' },
-  { app: 'notes', name: 'NinjaNotes', line: 'Notes & dictation' },
-  { app: 'meet', name: 'NinjaMeet', line: 'Video calls' },
+  { app: 'word', group: 'create', name: 'NinjaWord', line: 'Documents and letters', create: 'New document' },
+  { app: 'excel', group: 'create', name: 'NinjaCalc', line: 'Spreadsheets and budgets', create: 'New spreadsheet' },
+  { app: 'powerpoint', group: 'create', name: 'NinjaSlides', line: 'Presentations', create: 'New presentation' },
+  { app: 'blueline', group: 'create', name: 'Blueline', line: 'Interface and graphic design', create: 'New design' },
+  { app: 'pdf', group: 'tools', name: 'NinjaPDF', line: 'Edit, sign & fill PDFs' },
+  { app: 'image', group: 'tools', name: 'NinjaImage', line: 'Photo editor' },
+  { app: 'svg', group: 'tools', name: 'NinjaSVG', line: 'Edit & convert SVG' },
+  { app: 'notes', group: 'tools', name: 'NinjaNotes', line: 'Notes & dictation' },
+  { app: 'time', group: 'tools', name: 'NinjaTime', line: 'Time & invoices' },
+  { app: 'meet', group: 'connect', name: 'NinjaMeet', line: 'Video calls' },
+  { app: 'chat', group: 'connect', name: 'NinjaChat', line: 'Open team channels' },
+  { app: 'drop', group: 'connect', name: 'NinjaDrop', line: 'Send files directly' },
 ];
+const APP_GROUPS = [
+  { id: 'create', title: 'Create' },
+  { id: 'tools', title: 'Tools' },
+  { id: 'connect', title: 'Connect' },
+] as const;
+
+function greeting() {
+  const h = new Date().getHours();
+  return h < 5 ? 'Working late' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+}
 const TYPE_LABEL = { word: 'Document', excel: 'Spreadsheet', powerpoint: 'Presentation', blueline: 'Design' } as const;
 
 async function listWorkspaceFiles(): Promise<DocMeta[]> {
@@ -260,6 +276,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
     navigate(`/${kind}`);
   };
   const [recentDocs, setRecentDocs] = useState<DocMeta[]>([]);
+  const [hello] = useState(greeting);
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('recent');
   const [showAll, setShowAll] = useState(false);
@@ -509,8 +526,9 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
             className="btn btn-secondary dashboard-sync"
             title="Back up your work and sync it between your devices"
           >
+            <RefreshCw size={15} aria-hidden="true" />
             <span className={`sync-dot sync-dot--${syncDot}`} aria-hidden="true" />
-            Backup &amp; sync
+            <span className="dashboard-btn-label">Backup &amp; sync</span>
           </Link>
           <button
             type="button"
@@ -519,7 +537,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
             title="Open a .docx, .xlsx, .csv, .pptx or .pdf file. You can also drop files anywhere on this page."
           >
             <Upload size={15} aria-hidden="true" />
-            Open file
+            <span className="dashboard-btn-label">Open file</span>
           </button>
           <input
             ref={openInput}
@@ -547,37 +565,56 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
 
       <section className="dashboard-section" aria-labelledby="dashboard-recent-title">
         <div className="dashboard-shell">
-          <nav className="app-grid" aria-label="Apps">
-            {APP_TILES.map(({ app, name, line, create }) => {
-              const href =
-                app === 'blueline' ? designUrl() : `#/${app}`;
-              const status =
-                app === 'time' || app === 'notes' || app === 'pdf'
-                  ? summaries[app]
-                  : undefined;
-              const href2 = app === 'meet' ? '#/meet' : href;
-              return (
-                <a
-                  key={app}
-                  className={`app-tile${create ? ' dashboard-create__btn' : ''}`}
-                  href={href2}
-                  aria-label={create}
-                >
-                  <AppMark app={app} />
-                  <span className="app-tile__text">
-                    <strong>{name}</strong>
-                    <small data-live={status ? '' : undefined}>
-                      {status ?? line}
-                    </small>
-                  </span>
-                  {create ? (
-                    <Plus size={16} className="app-tile__go" aria-hidden="true" />
-                  ) : (
-                    <ArrowRight size={16} className="app-tile__go" aria-hidden="true" />
-                  )}
-                </a>
-              );
-            })}
+          <div className="dashboard-hero">
+            <div>
+              <p className="dashboard-hero__hello">{hello}</p>
+              <p className="dashboard-hero__line">
+                Your private office in the browser. Files stay on this device until you choose to
+                share them.
+              </p>
+            </div>
+            <ul className="dashboard-hero__facts" aria-label="How it works">
+              <li>No account</li>
+              <li>Works offline</li>
+              <li>Peer-to-peer sharing</li>
+            </ul>
+          </div>
+          <nav className="app-groups" aria-label="Apps">
+            {APP_GROUPS.map((group) => (
+              <section key={group.id} className={`app-group app-group--${group.id}`} aria-label={group.title}>
+                <h2 className="app-group__title">{group.title}</h2>
+                <div className="app-grid">
+                  {APP_TILES.filter((t) => t.group === group.id).map(({ app, name, line, create }) => {
+                    const href = app === 'blueline' ? designUrl() : `#/${app}`;
+                    const status =
+                      app === 'time' || app === 'notes' || app === 'pdf'
+                        ? summaries[app]
+                        : undefined;
+                    return (
+                      <a
+                        key={app}
+                        className={`app-tile${create ? ' app-tile--create dashboard-create__btn' : ''}`}
+                        href={href}
+                        aria-label={create}
+                      >
+                        <AppMark app={app} size={create ? 'lg' : 'md'} />
+                        <span className="app-tile__text">
+                          <strong>{name}</strong>
+                          <small data-live={status ? '' : undefined}>{status ?? line}</small>
+                        </span>
+                        {create ? (
+                          <span className="app-tile__new" aria-hidden="true">
+                            <Plus size={14} /> New
+                          </span>
+                        ) : (
+                          <ArrowRight size={16} className="app-tile__go" aria-hidden="true" />
+                        )}
+                      </a>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
           </nav>
           <div className="dashboard-section-header">
             {/* One caption, and it earns its line: it is the only place the

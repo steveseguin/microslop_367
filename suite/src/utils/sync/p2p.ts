@@ -23,8 +23,8 @@ import {
 } from './snapshot';
 import type { Manifest, SyncItem } from './snapshot';
 import { subscribeToTools } from '../toolStorage';
+import { ninjaClient } from '../ninja';
 
-const SDK_URL = 'https://cdn.jsdelivr.net/npm/@vdoninja/sdk@1.6.1/vdoninja-sdk.min.js';
 const CONFIG_KEY = 'officeninja_sync_group';
 const CHUNK = 48_000;
 const PROTOCOL = 'officeninja-sync';
@@ -142,17 +142,6 @@ let changeTimer: number | undefined;
 let pollTimer: number | undefined;
 let unsubscribe: (() => void)[] = [];
 
-function loadScript(src: string) {
-  return new Promise<void>((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error('Could not load the VDO.Ninja SDK. Check your connection.'));
-    document.head.appendChild(s);
-  });
-}
-
 function send(obj: Record<string, unknown>, uuid?: string) {
   try {
     return sdk?.sendData({ app: PROTOCOL, v: 1, ...obj }, uuid ? { uuid } : undefined) ?? false;
@@ -247,11 +236,9 @@ async function connect(group: SyncGroup) {
     return;
   }
   setStatus({ state: 'connecting', error: '' });
-  if (!(window as unknown as { VDONinjaSDK?: unknown }).VDONinjaSDK) await loadScript(SDK_URL);
-  const Ctor = (window as unknown as { VDONinjaSDK: new (o: object) => Sdk }).VDONinjaSDK;
   const me = deviceInfo();
   const streamID = `ons${me.id}`.replace(/[^A-Za-z0-9_]/g, '').slice(0, 40);
-  const client = new Ctor({ host: 'wss://wss.vdo.ninja', salt: 'vdo.ninja', debug: false });
+  const client = await ninjaClient<Sdk>();
   sdk = client;
   client.addEventListener('dataChannelOpen', (e) => {
     const uuid = e.detail?.uuid;

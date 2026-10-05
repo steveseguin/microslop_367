@@ -1,6 +1,8 @@
 import { useId } from 'react';
 import {
   RefreshCw,
+  Send,
+  MessagesSquare,
   Video,
   ImageIcon,
   Spline,
@@ -29,7 +31,9 @@ export type AppKind =
   | 'image'
   | 'svg'
   | 'meet'
-  | 'sync';
+  | 'sync'
+  | 'drop'
+  | 'chat';
 
 const ICONS = {
   word: FileText,
@@ -42,6 +46,8 @@ const ICONS = {
   svg: Spline,
   meet: Video,
   sync: RefreshCw,
+  drop: Send,
+  chat: MessagesSquare,
 } as const;
 
 /** Blueline's own mark, drawn the same way as `.mark` in blueline/src/style.css. */

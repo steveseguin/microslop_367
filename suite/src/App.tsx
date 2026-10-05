@@ -12,6 +12,8 @@ const Pdf = lazy(() => import('./pages/Pdf'));
 const ImageEditor = lazy(() => import('./pages/Image'));
 const Svg = lazy(() => import('./pages/Svg'));
 const Meet = lazy(() => import('./pages/Meet'));
+const Drop = lazy(() => import('./pages/Drop'));
+const Chat = lazy(() => import('./pages/Chat'));
 const Sync = lazy(() => import('./pages/Sync'));
 
 const THEME_KEY = 'officeninja_theme';
@@ -65,11 +67,18 @@ function App() {
   useEffect(() => {
     const t = window.setTimeout(() => {
       void import('./utils/sync/background').then((m) => m.startBackgroundSync());
+      // Chat spaces with notifications on stay connected while the app is open.
+      try {
+        if (/"bell":true/.test(localStorage.getItem('officeninja_chat') || ''))
+          void import('./utils/chat/engine').then((m) => m.startChatNotifications());
+      } catch {
+        /* storage blocked: no chat notifications */
+      }
     }, 2500);
     return () => window.clearTimeout(t);
   }, []);
   useEffect(() => {
-    const names: Record<string, string> = { '/word': 'NinjaWord', '/excel': 'NinjaCalc', '/powerpoint': 'NinjaSlides', '/time': 'NinjaTime', '/notes': 'NinjaNotes', '/pdf': 'NinjaPDF' };
+    const names: Record<string, string> = { '/word': 'NinjaWord', '/excel': 'NinjaCalc', '/powerpoint': 'NinjaSlides', '/time': 'NinjaTime', '/notes': 'NinjaNotes', '/pdf': 'NinjaPDF', '/image': 'NinjaImage', '/svg': 'NinjaSVG', '/meet': 'NinjaMeet', '/chat': 'NinjaChat', '/drop': 'NinjaDrop', '/sync': 'NinjaSync' };
     document.title = names[location.pathname] ? `${names[location.pathname]} | OfficeNinja` : 'OfficeNinja | Free Office, Design & Productivity Tools';
   }, [location.pathname]);
   // `null` means "no explicit choice yet", so the OS preference stays in charge.
@@ -140,6 +149,8 @@ function App() {
               <Route path="/image" element={<ImageEditor toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
               <Route path="/svg" element={<Svg toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
               <Route path="/meet" element={<Meet toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+              <Route path="/drop" element={<Drop toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
+              <Route path="/chat" element={<Chat toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
               <Route path="/sync" element={<Sync toggleTheme={toggleDarkMode} isDarkMode={isDarkMode} />} />
             </Routes>
           </Suspense>

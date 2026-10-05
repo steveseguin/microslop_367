@@ -6249,7 +6249,7 @@ async function liveConnect() {
   if (typeof RTCPeerConnection === 'undefined') throw new Error("This browser can't open peer-to-peer connections.");
   if (!window.VDONinjaSDK) await loadScript(SDK_URL);
   LIVE.hmac = await liveKey(LIVE.key);
-  const sdk = new VDONinjaSDK({ host: 'wss://wss.vdo.ninja', salt: 'vdo.ninja', debug: false });
+  const sdk = new VDONinjaSDK({ host: 'wss://wss.vdo.ninja', salt: 'microslop.xyz', debug: false }); // NinjaOffice's own salt: never collides with VDO.Ninja rooms
   LIVE.sdk = sdk; LIVE.status = 'connecting'; liveRender();
   const streamID = ('bl' + CO.me.id).replace(/[^A-Za-z0-9_]/g, '').slice(0, 40);
   sdk.addEventListener('dataChannelOpen', e => {

@@ -7,7 +7,8 @@
  * only. Someone who keeps talking is brought onto the video stage in place of
  * whoever has been quiet longest, and anyone can be pinned to it by hand.
  */
-const SDK_URL = 'https://cdn.jsdelivr.net/npm/@vdoninja/sdk@1.6.1/vdoninja-sdk.min.js';
+import { ninjaClient } from '../ninja';
+
 export const MAX_VIDEO = 4;
 
 type Sdk = {
@@ -50,24 +51,6 @@ const rand = (n: number) =>
   Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) =>
     'abcdefghijkmnpqrstuvwxyz23456789'[b % 32],
   ).join('');
-
-const scripts = new Map<string, Promise<void>>();
-function loadScript(src: string) {
-  let p = scripts.get(src);
-  if (!p) {
-    p = new Promise<void>((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = src;
-      s.async = true;
-      s.onload = () => resolve();
-      s.onerror = () => reject(new Error('Could not load the VDO.Ninja SDK. Check your connection.'));
-      document.head.appendChild(s);
-    });
-    p.catch(() => scripts.delete(src));
-    scripts.set(src, p);
-  }
-  return p;
-}
 
 export class MeetCall extends EventTarget {
   readonly room: string;
@@ -140,10 +123,8 @@ export class MeetCall extends EventTarget {
       this.updatePreview();
       this.mic = !!this.local?.getAudioTracks().length;
       this.changed();
-      if (!(window as unknown as { VDONinjaSDK?: unknown }).VDONinjaSDK) await loadScript(SDK_URL);
+      const sdk = await ninjaClient<Sdk>();
       if (this.ended()) return;
-      const Ctor = (window as unknown as { VDONinjaSDK: new (o: object) => Sdk }).VDONinjaSDK;
-      const sdk = new Ctor({ host: 'wss://wss.vdo.ninja', salt: 'vdo.ninja', debug: false });
       this.sdk = sdk;
 
       const seen = (raw?: string, label?: string, uuid?: string) => {
