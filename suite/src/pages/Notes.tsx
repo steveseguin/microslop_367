@@ -769,10 +769,15 @@ function NotesWorkspaceView(props: ToolProps) {
       updated: created,
       pinned: false,
     };
+    const opener = document.activeElement;
     if (await update((s) => ({ ...s, notes: [n, ...s.notes] }))) {
       setSelected(n.id);
       setView('edit');
-      window.requestAnimationFrame(() => titleRef.current?.focus());
+      // Start in the title, unless the person has already clicked somewhere else.
+      window.requestAnimationFrame(() => {
+        const focused = document.activeElement;
+        if (focused === opener || focused === document.body || !focused) titleRef.current?.focus();
+      });
       setQuery('');
       setMessage('');
     }

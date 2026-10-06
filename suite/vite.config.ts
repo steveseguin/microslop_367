@@ -19,9 +19,9 @@ import react from '@vitejs/plugin-react'
 const RUNTIME_ONLY_PATTERNS = [
   /^blueline\//,
   /^pdf-assets\//,
-  /^assets\/(Time|Notes|Pdf|Image|Svg|svgStl|svgTrace|svgTrace\.worker|pdf-engine|pdf-renderer|pdf.worker)[-.]/,
+  /^assets\/(Board|Chat|Drop|Meet|MeetRoom|Sync|Time|Notes|Pdf|Image|Svg|svgStl|svgTrace|svgTrace\.worker|pdf-engine|pdf-renderer|pdf.worker)[-.]/,
   /^assets\/(Word|Excel|PowerPoint|ExcelWorkbook|SelectionChart)-/,
-  /^assets\/(word-editor|word-io|excel-workbook|excel-io|excel-chart|slides-canvas|slides-io|zip-runtime)[-.]/,
+  /^assets\/(yjs|word-editor|word-io|excel-workbook|excel-io|excel-chart|slides-canvas|slides-io|zip-runtime)[-.]/,
   /^assets\/__vite-browser-external-/,
   /^assets\/inter-(?!latin-wght-)/,
 ]
@@ -159,6 +159,12 @@ export default defineConfig({
 
           if (id.includes('@fortune-sheet')) {
             return 'excel-workbook'
+          }
+
+          // Shared by live co-editing in several apps; its own chunk so a board
+          // or a note does not pull in the whole Word editor.
+          if (/node_modules[/\\](yjs|y-protocols|lib0)[/\\]/.test(id)) {
+            return 'yjs'
           }
 
           if (id.includes('@tiptap') || id.includes('prosemirror')) {

@@ -8,11 +8,12 @@
 import { listDocuments, loadDocument, saveDocument } from '../db';
 import type { OfficeDocumentType } from '../db';
 import { allDesignFiles, designUrl, putDesignIfNewer } from '../blueline';
-import { readToolRecord } from '../toolStorage';
+import { readToolRecord, writeToolWorkspace } from '../toolStorage';
+import type { BoardData, BoardsWorkspace } from '../board/types';
 import { handOff, kindForFile } from '../handoff';
 import type { HandoffKind } from '../handoff';
 
-export type LibraryKind = OfficeDocumentType | 'blueline' | 'pdf' | 'image' | 'svg' | 'note';
+export type LibraryKind = OfficeDocumentType | 'blueline' | 'board' | 'pdf' | 'image' | 'svg' | 'note';
 
 export interface LibraryItem {
   key: string;
@@ -107,6 +108,20 @@ export async function listLibrary(): Promise<LibraryItem[]> {
       make: async () => ({ blob: new Blob([code], { type: 'image/svg+xml' }), name: `${safe(name || 'drawing')}.svg`, type: 'image/svg+xml' }),
     });
   }
+  const boards = await tool<BoardsWorkspace>('boards');
+  for (const board of boards?.data.boards ?? []) {
+    items.push({
+      key: `board:${board.id}`,
+      kind: 'board',
+      title: board.title || 'Untitled board',
+      updated: board.updated,
+      make: async () => ({
+        blob: json({ format: PACKAGE, version: 1, kind: 'board', title: board.title, data: board }),
+        name: `${safe(board.title || 'board')}.board.ninja.json`,
+        type: 'application/json',
+      }),
+    });
+  }
   const notes = await tool<{ notes: { id: string; title: string; body: string; updated: number }[] }>('notes');
   for (const note of notes?.data.notes ?? []) {
     items.push({
@@ -129,6 +144,7 @@ const APP_NAMES: Record<string, string> = {
   excel: 'NinjaCalc',
   powerpoint: 'NinjaSlides',
   blueline: 'Blueline',
+  board: 'NinjaBoard',
   pdf: 'NinjaPDF',
   image: 'NinjaImage',
   svg: 'NinjaSVG',
@@ -137,7 +153,7 @@ const APP_NAMES: Record<string, string> = {
 /** Which app a received file opens in, if any. */
 export function opensIn(file: File): string | null {
   if (/\.ninja\.json$/i.test(file.name)) {
-    const kind = /\.(word|excel|powerpoint|blueline)\.ninja\.json$/i.exec(file.name)?.[1]?.toLowerCase();
+    const kind = /\.(word|excel|powerpoint|blueline|board)\.ninja\.json$/i.exec(file.name)?.[1]?.toLowerCase();
     return kind ? APP_NAMES[kind] : null;
   }
   const kind = kindForFile(file);
@@ -162,6 +178,12 @@ export async function openReceived(file: File): Promise<{ route?: string; href?:
       const design = { ...(pkg.data as Record<string, unknown>), id, updated: Date.now() };
       await putDesignIfNewer(design as Parameters<typeof putDesignIfNewer>[0]);
       return { href: designUrl(id) };
+    }
+    if (pkg.kind === 'board' && pkg.data && typeof pkg.data === 'object') {
+      const board = { ...(pkg.data as BoardData), id: `board-${id}`, updated: Date.now() };
+      const current = (await readToolRecord<BoardsWorkspace>('boards'))?.data ?? { version: 1 as const, boards: [] };
+      await writeToolWorkspace('boards', { ...current, boards: [board, ...current.boards] });
+      return { route: `/board?id=${board.id}` };
     }
     throw new Error('This NinjaOffice file type is not supported here.');
   }

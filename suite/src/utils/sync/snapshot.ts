@@ -10,6 +10,8 @@
  * Nothing here talks to a network. Transports (backup file, folder, peer to
  * peer) only move these items around.
  */
+import { mergeBoards } from '../board/types';
+import type { BoardsWorkspace } from '../board/types';
 import {
   deleteDocument,
   listDocumentTombstones,
@@ -22,9 +24,9 @@ import { allDesignFiles, putDesignIfNewer } from '../blueline';
 import type { DesignFile } from '../blueline';
 import { readToolRecord, writeToolWorkspace } from '../toolStorage';
 
-export const TOOL_KEYS = ['notes', 'time', 'pdf', 'image', 'svg'] as const;
+export const TOOL_KEYS = ['notes', 'time', 'pdf', 'image', 'svg', 'boards'] as const;
 type ToolKey = (typeof TOOL_KEYS)[number];
-const MERGEABLE = new Set<string>(['tool:notes', 'tool:time']);
+const MERGEABLE = new Set<string>(['tool:notes', 'tool:time', 'tool:boards']);
 
 export interface SyncItem {
   /** `doc:<id>`, `tool:<key>` or `design:<id>`. */
@@ -169,6 +171,7 @@ const TOOL_LABEL: Record<ToolKey, string> = {
   pdf: 'NinjaPDF draft',
   image: 'NinjaImage photo',
   svg: 'NinjaSVG drawing',
+  boards: 'NinjaBoard boards',
 };
 
 interface Source {
@@ -403,6 +406,7 @@ async function applyTool(key: ToolKey, item: SyncItem, report: ApplyReport) {
   if (key === 'notes') next = mergeNotes(local?.data as NotesData | null, item.value as NotesData);
   else if (key === 'time')
     next = mergeTime(local?.data as TimeData | null, localT, item.value as TimeData, item.t);
+  else if (key === 'boards') next = mergeBoards(local?.data as BoardsWorkspace | null, item.value as BoardsWorkspace);
   else if (!local || item.t > localT) next = item.value;
   else {
     report.skipped++;
@@ -413,10 +417,10 @@ async function applyTool(key: ToolKey, item: SyncItem, report: ApplyReport) {
     return;
   }
   // A merge is a new version; a plain copy keeps the version time it came with.
-  const merged = key === 'notes' || key === 'time';
+  const merged = key === 'notes' || key === 'time' || key === 'boards';
   await writeToolWorkspace(key, next, merged ? Math.max(Date.now(), item.t) : item.t);
   if (!local) report.added++;
-  else if (key === 'notes' || key === 'time') report.merged++;
+  else if (merged) report.merged++;
   else report.updated++;
 }
 

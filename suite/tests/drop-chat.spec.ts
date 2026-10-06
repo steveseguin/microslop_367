@@ -20,7 +20,7 @@ test('the workspace lists every app, grouped', async ({ page }) => {
   await page.goto('/');
   const apps = page.getByRole('navigation', { name: 'Apps' });
   for (const group of ['Create', 'Tools', 'Connect']) await expect(apps.getByRole('heading', { name: group })).toBeVisible();
-  await expect(apps.getByRole('link')).toHaveCount(12);
+  await expect(apps.getByRole('link')).toHaveCount(13);
   await apps.getByRole('link', { name: /NinjaDrop/ }).click();
   await expect(page).toHaveURL(/#\/drop\?share=[a-z]+-[a-z]+-[a-z]+-[a-z]+$/);
 });

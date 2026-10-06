@@ -3,6 +3,7 @@ export const SUITE_APPS = [
   ['NinjaCalc', '/excel'],
   ['NinjaSlides', '/powerpoint'],
   ['Blueline', 'blueline'],
+  ['NinjaBoard', '/board'],
   ['NinjaTime', '/time'],
   ['NinjaNotes', '/notes'],
   ['NinjaPDF', '/pdf'],

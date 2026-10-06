@@ -13,7 +13,7 @@ test('design creation, rename, export, reopening and deletion use the suite work
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/');
-  await expect(page.locator('.dashboard-create__btn')).toHaveCount(4);
+  await expect(page.locator('.dashboard-create__btn')).toHaveCount(5);
   await page.getByRole('link', { name: 'New design', exact: true }).click();
   await expect(page).toHaveURL(/blueline\/\?id=/);
   await expect(page.locator('#fileName')).toHaveValue('Untitled');

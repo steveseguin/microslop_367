@@ -15,7 +15,8 @@ type ToolName =
   | 'NinjaMeet'
   | 'NinjaSync'
   | 'NinjaDrop'
-  | 'NinjaChat';
+  | 'NinjaChat'
+  | 'NinjaBoard';
 
 const APP_KIND = {
   NinjaTime: 'time',
@@ -27,6 +28,7 @@ const APP_KIND = {
   NinjaSync: 'sync',
   NinjaDrop: 'drop',
   NinjaChat: 'chat',
+  NinjaBoard: 'board',
 } as const;
 
 const HEADLINE = {
@@ -39,6 +41,7 @@ const HEADLINE = {
   NinjaSync: 'Your work, on every device.',
   NinjaDrop: 'Send files straight to anyone.',
   NinjaChat: 'Talk in open channels, peer to peer.',
+  NinjaBoard: 'Plan it, track it, ship it.',
 } as const;
 
 function statusTone(status: string, error?: string) {

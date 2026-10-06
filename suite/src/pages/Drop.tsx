@@ -78,6 +78,7 @@ const LIBRARY_APP: Record<string, AppKind> = {
   image: 'image',
   svg: 'svg',
   note: 'notes',
+  board: 'board',
 };
 
 /* ---------------- sending ---------------- */

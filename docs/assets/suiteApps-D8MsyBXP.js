@@ -1,0 +1,1 @@
+const a=[["NinjaWord","/word"],["NinjaCalc","/excel"],["NinjaSlides","/powerpoint"],["Blueline","blueline"],["NinjaBoard","/board"],["NinjaTime","/time"],["NinjaNotes","/notes"],["NinjaPDF","/pdf"],["NinjaImage","/image"],["NinjaSVG","/svg"],["NinjaMeet","/meet"],["NinjaChat","/chat"],["NinjaDrop","/drop"],["NinjaSync","/sync"]];export{a as S};

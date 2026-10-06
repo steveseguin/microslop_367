@@ -1,1 +1,0 @@
-const e=[["NinjaWord","/word"],["NinjaCalc","/excel"],["NinjaSlides","/powerpoint"],["Blueline","blueline"],["NinjaTime","/time"],["NinjaNotes","/notes"],["NinjaPDF","/pdf"],["NinjaImage","/image"],["NinjaSVG","/svg"],["NinjaMeet","/meet"],["NinjaChat","/chat"],["NinjaDrop","/drop"],["NinjaSync","/sync"]];export{e as S};

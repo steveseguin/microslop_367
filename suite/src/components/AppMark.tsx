@@ -3,6 +3,7 @@ import {
   RefreshCw,
   Send,
   MessagesSquare,
+  SquareKanban,
   Video,
   ImageIcon,
   Spline,
@@ -33,7 +34,8 @@ export type AppKind =
   | 'meet'
   | 'sync'
   | 'drop'
-  | 'chat';
+  | 'chat'
+  | 'board';
 
 const ICONS = {
   word: FileText,
@@ -48,6 +50,7 @@ const ICONS = {
   sync: RefreshCw,
   drop: Send,
   chat: MessagesSquare,
+  board: SquareKanban,
 } as const;
 
 /** Blueline's own mark, drawn the same way as `.mark` in blueline/src/style.css. */

@@ -141,7 +141,8 @@ type AppTile = {
     | 'pdf'
     | 'meet'
     | 'chat'
-    | 'drop';
+    | 'drop'
+    | 'board';
   group: 'create' | 'tools' | 'connect';
   name: string;
   line: string;
@@ -153,6 +154,7 @@ const APP_TILES: AppTile[] = [
   { app: 'excel', group: 'create', name: 'NinjaCalc', line: 'Spreadsheets and budgets', create: 'New spreadsheet' },
   { app: 'powerpoint', group: 'create', name: 'NinjaSlides', line: 'Presentations', create: 'New presentation' },
   { app: 'blueline', group: 'create', name: 'Blueline', line: 'Interface and graphic design', create: 'New design' },
+  { app: 'board', group: 'create', name: 'NinjaBoard', line: 'Kanban, sprints and bug tracking', create: 'New board' },
   { app: 'pdf', group: 'tools', name: 'NinjaPDF', line: 'Edit, sign & fill PDFs' },
   { app: 'image', group: 'tools', name: 'NinjaImage', line: 'Photo editor' },
   { app: 'svg', group: 'tools', name: 'NinjaSVG', line: 'Edit & convert SVG' },
@@ -585,7 +587,7 @@ export default function Dashboard({ toggleTheme, isDarkMode }: DashboardProps) {
                 <h2 className="app-group__title">{group.title}</h2>
                 <div className="app-grid">
                   {APP_TILES.filter((t) => t.group === group.id).map(({ app, name, line, create }) => {
-                    const href = app === 'blueline' ? designUrl() : `#/${app}`;
+                    const href = app === 'blueline' ? designUrl() : app === 'board' ? '#/board?new=1' : `#/${app}`;
                     const status =
                       app === 'time' || app === 'notes' || app === 'pdf'
                         ? summaries[app]
