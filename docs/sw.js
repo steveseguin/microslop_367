@@ -26,7 +26,7 @@
  * new shell cache containing the new index.html, and the old cache is deleted on activate.
  */
 
-const VERSION = "3921ab7cd0bb";
+const VERSION = "3057cca33129";
 const SHELL_CACHE = `officeninja-shell-${VERSION}`;
 const RUNTIME_CACHE = `officeninja-runtime-${VERSION}`;
 
@@ -53,12 +53,12 @@ const LEGACY_CACHE_PATTERN = /^officeninja-v\d+$/;
 const SHELL_ASSETS = [
   "./.nojekyll",
   "./assets/AppMark-BbQKMbw9.js",
-  "./assets/Dashboard-Bq1kct10.js",
+  "./assets/Dashboard-Dp6Stewr.js",
   "./assets/Dictate-B3af17rE.js",
   "./assets/Dictate-D_9UPn2h.css",
   "./assets/LiveShare-6e5ekY-2.js",
   "./assets/LiveShare-DmjISe2K.css",
-  "./assets/ToolShell-DlOqNQbh.js",
+  "./assets/ToolShell-Cmo8iT3h.js",
   "./assets/background-DZqfXkNv.js",
   "./assets/blueline-BERFp9MN.js",
   "./assets/db-DUSNBQ0e.js",
@@ -66,8 +66,8 @@ const SHELL_ASSETS = [
   "./assets/framework-CUtJR0oF.js",
   "./assets/handoff-BcmaBzy2.js",
   "./assets/image-CEA58GUw.css",
-  "./assets/index-BUu2k986.js",
   "./assets/index-DB3lcKBq.css",
+  "./assets/index-YGGUu-0M.js",
   "./assets/index-pO88YmGS.js",
   "./assets/inter-latin-wght-italic-DpCbqKDY.woff2",
   "./assets/inter-latin-wght-normal-Dx4kXJAl.woff2",
@@ -82,7 +82,7 @@ const SHELL_ASSETS = [
   "./assets/suiteApps-D8MsyBXP.js",
   "./assets/sync-CpVFTeXX.css",
   "./assets/toolStorage-DrINF3dH.js",
-  "./assets/tools-B5dIkb_u.css",
+  "./assets/tools-CB0E6Ir8.css",
   "./assets/ui-icons-CHd_xMMu.js",
   "./assets/useYText-C7xSmHpI.js",
   "./assets/words-DAj5n5a1.js",
@@ -97,25 +97,25 @@ const SHELL_ASSETS = [
 /** Cached on first use, or during the idle warm pass. Multiple megabytes. */
 const WARM_ASSETS = [
   "./assets/Board-BO37jweK.css",
-  "./assets/Board-BcObNEko.js",
+  "./assets/Board-fqCd7zAf.js",
+  "./assets/Chat-BV2Vor4z.js",
   "./assets/Chat-BXVN5Dbo.css",
-  "./assets/Chat-rZJVpiXF.js",
-  "./assets/Drop-Cb0DWP5A.js",
+  "./assets/Drop-BY_1j0LP.js",
   "./assets/Drop-DKSNFDfr.css",
   "./assets/Excel-ztwg2DPb.js",
   "./assets/ExcelWorkbook-Dp5JFMQT.js",
-  "./assets/Image-BGl-7IkA.js",
-  "./assets/Meet-DAL6NyHb.js",
+  "./assets/Image-CV3VeanZ.js",
+  "./assets/Meet-2Kos1SN_.js",
   "./assets/MeetRoom-ClIm9ryX.js",
   "./assets/Notes-BCU4ge1F.css",
-  "./assets/Notes-DO8kodl2.js",
-  "./assets/Pdf-B6p19D3-.js",
+  "./assets/Notes-JgElHStK.js",
+  "./assets/Pdf-DcMwmfCl.js",
   "./assets/PowerPoint-Cw5rB8Br.js",
   "./assets/SelectionChart-Dg5dUc3V.js",
-  "./assets/Svg-BWwOkZBQ.js",
+  "./assets/Svg-DbbCbnCT.js",
   "./assets/Svg-HlzpoMkN.css",
-  "./assets/Sync-C0vv_Bf3.js",
-  "./assets/Time-DbPbpU7X.js",
+  "./assets/Sync-B4YXDSt1.js",
+  "./assets/Time-CutIj1sj.js",
   "./assets/Time-ORO_SQcj.css",
   "./assets/Word-BAG0o3_d.js",
   "./assets/__vite-browser-external-BIHI7g3E.js",
